@@ -243,6 +243,19 @@ fn test_3x3_grid_dimensions() {
     let buffer = terminal.backend().buffer();
     assert_eq!(buffer.area.width, 120);
     assert_eq!(buffer.area.height, 30);
+
+    // Verify cards from 3 separate rows are visible (3x3 grid)
+    let full_text: String = (0..30)
+        .map(|y| (0..120).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // First row should have item 1
+    assert!(full_text.contains("Channel 1"), "Row 0 card must be visible");
+    // Second row should have item 4 (since num_cols = 3)
+    assert!(full_text.contains("Channel 4"), "Row 1 card must be visible");
+    // Third row should have item 7 (since num_cols = 3)
+    assert!(full_text.contains("Channel 7"), "Row 2 card must be visible in 3x3 grid");
 }
 
 #[test]

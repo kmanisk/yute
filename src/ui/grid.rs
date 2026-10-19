@@ -32,23 +32,23 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let min_w = app.config.grid.min_card_width.max(26);
         (area.width / min_w).clamp(1, 6) as usize
     };
-    let card_w = area.width / (num_cols as u16);
+    // Calculate rows to fill the grid area:
+    // Always aim for 3 rows when vertical space allows (area.height >= 20) for a true 3x3 layout like YouTube,
+    // evenly dividing the height across all rows so there is zero empty dead space.
+    let num_rows = if area.height >= 48 {
+        4
+    } else if area.height >= 20 {
+        3
+    } else if area.height >= 14 {
+        2
+    } else {
+        1
+    };
 
-    // Proportional 16:9 thumbnail sizing with generous card height
-    let target_thumb_h = ((card_w as f32) * (9.0 / 16.0) * 0.52).round() as u16;
-    let card_h = (target_thumb_h + 5).clamp(11, 18);
-
-    if card_h == 0 {
-        return;
-    }
-
-    let num_rows = (area.height / card_h).max(1) as usize;
-
-    // Scroll calculation to keep selected_index in view
+    let visible_count = num_rows * num_cols;
     let selected = app.selected_index.min(total_items.saturating_sub(1));
     let start_row = (selected / num_cols).saturating_sub(num_rows / 2);
     let start_idx = start_row * num_cols;
-    let visible_count = num_rows * num_cols;
 
     let cards_to_render: Vec<Card> = app
         .filtered_items()
@@ -58,20 +58,33 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         .cloned()
         .collect();
 
-    for (i, card) in cards_to_render.iter().enumerate() {
-        let item_idx = start_idx + i;
-        let r = i / num_cols;
-        let c = i % num_cols;
+    let row_constraints = vec![Constraint::Ratio(1, num_rows as u32); num_rows];
+    let row_rects = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(row_constraints)
+        .split(area);
 
-        let card_rect = Rect {
-            x: area.x + (c as u16) * card_w,
-            y: area.y + (r as u16) * card_h,
-            width: card_w,
-            height: card_h,
-        };
+    let col_constraints = vec![Constraint::Ratio(1, num_cols as u32); num_cols];
 
-        let is_selected = item_idx == selected && app.focus == Focus::Content;
-        render_card(f, app, card, card_rect, is_selected);
+    for r in 0..num_rows {
+        if r >= row_rects.len() {
+            break;
+        }
+        let col_rects = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(&col_constraints)
+            .split(row_rects[r]);
+
+        for c in 0..num_cols {
+            let i = r * num_cols + c;
+            if i >= cards_to_render.len() {
+                break;
+            }
+            let item_idx = start_idx + i;
+            let card_rect = col_rects[c];
+            let is_selected = item_idx == selected && app.focus == Focus::Content;
+            render_card(f, app, &cards_to_render[i], card_rect, is_selected);
+        }
     }
 }
 
@@ -100,7 +113,7 @@ fn render_card(
         return;
     }
 
-    let title_lines = if inner.height >= 7 { 2 } else { 1 };
+    let title_lines = if inner.height >= 6 { 2 } else { 1 };
     let thumb_h = inner.height.saturating_sub(title_lines + 1);
 
     let chunks = Layout::default()
