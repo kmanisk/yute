@@ -84,13 +84,13 @@ fn test_collapsed_sidebar_shows_queue_at_80x24() {
 
     let mut found_queue = false;
     for y in 0..24 {
-        let line: String = (0..12).map(|x| buffer[(x, y)].symbol()).collect();
-        if line.contains("[Q]") {
+        let line: String = (0..16).map(|x| buffer[(x, y)].symbol()).collect();
+        if line.contains("gq") || line.contains("Queue") {
             found_queue = true;
             break;
         }
     }
-    assert!(found_queue, "Queue [Q] must be visible in collapsed sidebar on 80x24 terminal");
+    assert!(found_queue, "Queue [gq] must be visible in collapsed sidebar on 80x24 terminal");
 }
 
 #[test]
@@ -106,14 +106,37 @@ fn test_capital_letter_navigation_keymaps() {
         assert_eq!(res, Some((expected, 1)), "Key '{c}' should map to {expected:?}");
     };
 
-    check_key(&mut keymap, 'H', Action::NavHome);
+    // Shift+H and Shift+L navigate back/forward in browser history
+    check_key(&mut keymap, 'H', Action::NavBackHistory);
+    check_key(&mut keymap, 'L', Action::NavForwardHistory);
     check_key(&mut keymap, 'S', Action::NavSubs);
     check_key(&mut keymap, 'Y', Action::NavHistory);
     check_key(&mut keymap, 'P', Action::NavPlaylists);
     check_key(&mut keymap, 'W', Action::NavWatchLater);
-    check_key(&mut keymap, 'L', Action::NavLiked);
     check_key(&mut keymap, 'V', Action::NavLocal);
     check_key(&mut keymap, 'Q', Action::NavQueue);
+
+    // Test 'g' prefix shortcuts
+    let mut check_g_prefix = |c: char, expected: Action| {
+        let key1 = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+        let res1 = keymap.handle_key(key1, false);
+        assert_eq!(res1, None, "Prefix 'g' should wait for second key");
+
+        let key2 = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let res2 = keymap.handle_key(key2, false);
+        assert_eq!(res2, Some((expected, 1)), "Key 'g{c}' should map to {expected:?}");
+    };
+
+    check_g_prefix('h', Action::NavHome);
+    check_g_prefix('s', Action::NavSubs);
+    check_g_prefix('y', Action::NavHistory);
+    check_g_prefix('p', Action::NavPlaylists);
+    check_g_prefix('w', Action::NavWatchLater);
+    check_g_prefix('l', Action::NavLiked);
+    check_g_prefix('v', Action::NavLocal);
+    check_g_prefix('q', Action::NavQueue);
+    check_g_prefix('o', Action::NavSettings);
+    check_g_prefix('a', Action::NavAccounts);
 }
 
 #[test]
@@ -348,6 +371,98 @@ fn test_confirming_quit_modal() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal.draw(|f| ytui::ui::draw(f, &mut app)).unwrap();
+}
+
+#[test]
+fn test_nav_history_stack_back_and_forward() {
+    use ytui::app::Screen;
+    use ytui::backend::models::{Card, LiveState, VideoCard};
+
+    let mut app = create_mock_app();
+    assert_eq!(app.screen, Screen::Home);
+
+    let make_vid = |id: &str, title: &str| {
+        Card::Video(VideoCard {
+            id: id.to_string(),
+            title: title.to_string(),
+            channel: "Test Channel".to_string(),
+            channel_id: None,
+            verified: false,
+            duration: Some("10:00".to_string()),
+            views: Some("1K views".to_string()),
+            published: None,
+            thumb_url: String::new(),
+            progress_pct: None,
+            live: LiveState::None,
+            badges: Vec::new(),
+        })
+    };
+
+    // 1. Initial Home screen state
+    app.items = vec![make_vid("h1", "Home 1"), make_vid("h2", "Home 2"), make_vid("h3", "Home 3")];
+    app.selected_index = 2;
+
+    // 2. Navigate to Search screen
+    app.set_screen(Screen::Search);
+    app.search_query = "rust ratatui".to_string();
+    app.items = vec![make_vid("s1", "Search 1"), make_vid("s2", "Search 2")];
+    app.selected_index = 1;
+
+    // 3. Navigate to Channel/Playlist view
+    app.set_screen(Screen::PlaylistView);
+    app.items = vec![
+        make_vid("p1", "Playlist 1"),
+        make_vid("p2", "Playlist 2"),
+        make_vid("p3", "Playlist 3"),
+        make_vid("p4", "Playlist 4"),
+    ];
+    app.selected_index = 3;
+
+    // 4. Navigate back: should restore Search screen exactly
+    app.nav_back();
+    assert_eq!(app.screen, Screen::Search);
+    assert_eq!(app.selected_index, 1);
+    assert_eq!(app.search_query, "rust ratatui");
+    assert_eq!(app.items.len(), 2);
+    assert_eq!(app.items[0].title(), "Search 1");
+
+    // 5. Navigate back again: should restore Home screen exactly
+    app.nav_back();
+    assert_eq!(app.screen, Screen::Home);
+    assert_eq!(app.selected_index, 2);
+    assert_eq!(app.items.len(), 3);
+    assert_eq!(app.items[2].title(), "Home 3");
+
+    // 6. Navigate forward: should restore Search screen exactly
+    app.nav_forward();
+    assert_eq!(app.screen, Screen::Search);
+    assert_eq!(app.selected_index, 1);
+    assert_eq!(app.search_query, "rust ratatui");
+    assert_eq!(app.items.len(), 2);
+
+    // 7. Navigate forward again: should restore PlaylistView screen exactly
+    app.nav_forward();
+    assert_eq!(app.screen, Screen::PlaylistView);
+    assert_eq!(app.selected_index, 3);
+    assert_eq!(app.items.len(), 4);
+    assert_eq!(app.items[3].title(), "Playlist 4");
+}
+
+#[test]
+fn test_unique_socket_generation() {
+    use ytui::player::ipc::generate_socket_path;
+
+    let s1 = generate_socket_path();
+    let s2 = generate_socket_path();
+    let s3 = generate_socket_path();
+
+    assert_ne!(s1, s2);
+    assert_ne!(s2, s3);
+    assert_ne!(s1, s3);
+
+    let s1_str = s1.to_string_lossy();
+    assert!(s1_str.contains("ytui-mpv-"));
+    assert!(s1_str.ends_with(".sock"));
 }
 
 

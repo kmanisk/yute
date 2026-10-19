@@ -197,14 +197,27 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
     }
 
     let content_type = v.get("contentType").and_then(|s| s.as_str()).unwrap_or("");
-    if content_type.contains("PLAYLIST") || id.starts_with("PL") || id.starts_with("RD") {
+    let is_mix = id.starts_with("RD") || title.to_lowercase().contains("mix") || content_type.contains("MIX");
+    if content_type.contains("PLAYLIST") || id.starts_with("PL") || id.starts_with("RD") || is_mix {
+        let channel_name = if is_mix && (channel.is_empty() || channel.eq_ignore_ascii_case("playlist")) {
+            "YouTube".to_string()
+        } else if channel.is_empty() {
+            "YouTube".to_string()
+        } else {
+            channel
+        };
+        let video_count = if is_mix {
+            Some("Mix".to_string())
+        } else {
+            stats.first().cloned()
+        };
         Some(Card::Playlist(PlaylistCard {
             id,
             title,
-            channel,
-            video_count: stats.first().cloned(),
+            channel: channel_name,
+            video_count,
             thumb_url,
-            is_mix: false,
+            is_mix,
         }))
     } else {
         Some(Card::Video(VideoCard {

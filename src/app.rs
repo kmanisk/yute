@@ -39,6 +39,19 @@ pub enum Focus {
     CommandLine,
 }
 
+#[derive(Clone, Debug)]
+pub struct NavState {
+    pub screen: Screen,
+    pub selected_index: usize,
+    pub items: Vec<Card>,
+    pub search_query: String,
+    pub chips: Vec<Chip>,
+    pub active_chip_index: usize,
+    pub status_text: String,
+    pub continuation_token: Option<String>,
+    pub filter_text: String,
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AccountProfile {
     pub id: String,
@@ -76,8 +89,8 @@ pub struct App {
     pub filter_text: String,
     pub is_filtering: bool,
     pub selected_ids: HashSet<String>,
-    pub nav_history: Vec<(Screen, usize)>,
-    pub nav_future: Vec<(Screen, usize)>,
+    pub nav_history: Vec<NavState>,
+    pub nav_future: Vec<NavState>,
     pub backend: Arc<BackendChain>,
     pub should_quit: bool,
     pub confirming_quit: bool,
@@ -249,7 +262,17 @@ impl App {
             self.player.stop();
         }
         if self.screen != screen {
-            self.nav_history.push((self.screen, self.selected_index));
+            self.nav_history.push(NavState {
+                screen: self.screen,
+                selected_index: self.selected_index,
+                items: self.items.clone(),
+                search_query: self.search_query.clone(),
+                chips: self.chips.clone(),
+                active_chip_index: self.active_chip_index,
+                status_text: self.status_text.clone(),
+                continuation_token: self.continuation_token.clone(),
+                filter_text: self.filter_text.clone(),
+            });
             self.nav_future.clear();
             self.screen = screen;
             self.selected_index = 0;
@@ -262,10 +285,27 @@ impl App {
         if self.screen == Screen::Watch {
             self.player.stop();
         }
-        if let Some((prev_screen, prev_idx)) = self.nav_history.pop() {
-            self.nav_future.push((self.screen, self.selected_index));
-            self.screen = prev_screen;
-            self.selected_index = prev_idx;
+        if let Some(prev) = self.nav_history.pop() {
+            self.nav_future.push(NavState {
+                screen: self.screen,
+                selected_index: self.selected_index,
+                items: self.items.clone(),
+                search_query: self.search_query.clone(),
+                chips: self.chips.clone(),
+                active_chip_index: self.active_chip_index,
+                status_text: self.status_text.clone(),
+                continuation_token: self.continuation_token.clone(),
+                filter_text: self.filter_text.clone(),
+            });
+            self.screen = prev.screen;
+            self.selected_index = prev.selected_index;
+            self.items = prev.items;
+            self.search_query = prev.search_query;
+            self.chips = prev.chips;
+            self.active_chip_index = prev.active_chip_index;
+            self.status_text = prev.status_text;
+            self.continuation_token = prev.continuation_token;
+            self.filter_text = prev.filter_text;
         } else if self.screen != Screen::Home {
             self.set_screen(Screen::Home);
         } else {
@@ -274,10 +314,27 @@ impl App {
     }
 
     pub fn nav_forward(&mut self) {
-        if let Some((next_screen, next_idx)) = self.nav_future.pop() {
-            self.nav_history.push((self.screen, self.selected_index));
-            self.screen = next_screen;
-            self.selected_index = next_idx;
+        if let Some(next) = self.nav_future.pop() {
+            self.nav_history.push(NavState {
+                screen: self.screen,
+                selected_index: self.selected_index,
+                items: self.items.clone(),
+                search_query: self.search_query.clone(),
+                chips: self.chips.clone(),
+                active_chip_index: self.active_chip_index,
+                status_text: self.status_text.clone(),
+                continuation_token: self.continuation_token.clone(),
+                filter_text: self.filter_text.clone(),
+            });
+            self.screen = next.screen;
+            self.selected_index = next.selected_index;
+            self.items = next.items;
+            self.search_query = next.search_query;
+            self.chips = next.chips;
+            self.active_chip_index = next.active_chip_index;
+            self.status_text = next.status_text;
+            self.continuation_token = next.continuation_token;
+            self.filter_text = next.filter_text;
         }
     }
 
@@ -292,6 +349,9 @@ impl App {
         // Poll mpv playback status
         let was_playing = self.player.status.is_alive;
         if self.player.poll_updates() {
+            if self.player.status.stall_error && !self.status_text.contains("stalled") {
+                self.status_text = "Playback error: stream stalled (check ~/.cache/ytui/mpv.log)".to_string();
+            }
             dirty = true;
         }
 

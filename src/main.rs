@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{channel, Sender};
 use ytui::app::{App, Focus, Screen};
-use ytui::backend::models::{Card, ChannelTab, SearchFilters};
+use ytui::backend::models::{Card, ChannelTab, LiveState, SearchFilters, VideoCard};
 use ytui::backend::Backend;
 use ytui::config::Config;
 use ytui::events::AppEvent;
@@ -616,6 +616,15 @@ async fn handle_key_event(
             Action::ToggleFullscreen => {
                 app.player.send_command(IpcCommand::ToggleFullscreen);
             }
+            Action::NavBackHistory => {
+                if app.screen == Screen::Watch {
+                    app.player.stop();
+                }
+                app.nav_back();
+            }
+            Action::NavForwardHistory => {
+                app.nav_forward();
+            }
             Action::StopPlayback => {
                 app.player.stop();
             }
@@ -745,6 +754,44 @@ fn play_selected_card(app: &mut App, mode: Option<PlaybackMode>, tx: Sender<AppE
             }
         }
         Card::Playlist(p) => {
+            if p.is_mix {
+                let seed_id = if p.id.starts_with("RDMM") && p.id.len() >= 15 {
+                    Some(&p.id[4..15])
+                } else if p.id.starts_with("RDAMVM") && p.id.len() >= 17 {
+                    Some(&p.id[6..17])
+                } else if p.id.starts_with("RD") && p.id.len() >= 13 {
+                    Some(&p.id[2..13])
+                } else {
+                    None
+                };
+
+                if let Some(vid) = seed_id {
+                    let v = VideoCard {
+                        id: vid.to_string(),
+                        title: p.title.clone(),
+                        channel: p.channel.clone(),
+                        channel_id: None,
+                        verified: false,
+                        duration: None,
+                        views: None,
+                        published: None,
+                        thumb_url: p.thumb_url.clone(),
+                        progress_pct: None,
+                        live: LiveState::None,
+                        badges: Vec::new(),
+                    };
+                    app.status_text = format!("Launching mix seed '{}'...", v.title);
+                    let _ = app.player.play_video(v, mode, &app.config);
+                    if mode != Some(PlaybackMode::Inline) {
+                        app.set_screen(Screen::Watch);
+                        trigger_watch_fetch(app, tx, vid.to_string());
+                    } else {
+                        app.status_text = "Inline playback finished".to_string();
+                    }
+                    return;
+                }
+            }
+
             app.status_text = format!("Opening playlist '{}'...", p.title);
             app.set_screen(Screen::PlaylistView);
             app.selected_index = 0;

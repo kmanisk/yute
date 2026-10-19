@@ -6,23 +6,23 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 pub const SIDEBAR_ITEMS: &[(&str, Screen, &str)] = &[
-    ("Home", Screen::Home, "[H]"),
-    ("Subscriptions", Screen::Subscriptions, "[S]"),
-    ("History", Screen::History, "[Y]"),
-    ("Playlists", Screen::Playlists, "[P]"),
-    ("Watch Later", Screen::WatchLater, "[W]"),
-    ("Liked Videos", Screen::Liked, "[L]"),
-    ("Local Videos", Screen::LocalVideos, "[V]"),
-    ("Queue", Screen::Queue, "[Q]"),
-    ("Settings", Screen::Settings, "[O]"),
-    ("Accounts", Screen::Accounts, "[A]"),
+    ("Home", Screen::Home, "gh"),
+    ("Subscriptions", Screen::Subscriptions, "gs"),
+    ("History", Screen::History, "gy"),
+    ("Playlists", Screen::Playlists, "gp"),
+    ("Watch Later", Screen::WatchLater, "gw"),
+    ("Liked Videos", Screen::Liked, "gl"),
+    ("Local Videos", Screen::LocalVideos, "gv"),
+    ("Queue", Screen::Queue, "gq"),
+    ("Settings", Screen::Settings, "go"),
+    ("Accounts", Screen::Accounts, "ga"),
 ];
 
 pub fn sidebar_width(expanded: bool) -> u16 {
     if expanded {
         24
     } else {
-        12
+        16
     }
 }
 
@@ -65,32 +65,43 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         if app.sidebar_expanded {
             let marker = if is_current { "*" } else { " " };
             lines.push(Line::from(vec![
-                Span::styled(format!("{pointer} "), if is_cursor { Style::default().fg(app.theme.accent) } else { Style::default().fg(app.theme.text_secondary) }),
+                Span::styled(
+                    format!("{pointer} "),
+                    if is_cursor {
+                        Style::default().fg(app.theme.accent)
+                    } else {
+                        Style::default().fg(app.theme.text_secondary)
+                    },
+                ),
                 Span::styled(format!("{icon} {label:<14} {marker}"), style),
             ]));
         } else {
             let short_label = match *screen {
                 Screen::Home => "Home",
                 Screen::Subscriptions => "Subs",
-                Screen::History => "Hist",
-                Screen::Playlists => "Play",
-                Screen::WatchLater => "Late",
-                Screen::Liked => "Like",
-                Screen::LocalVideos => "Locl",
-                Screen::Queue => "Queu",
-                Screen::Settings => "Sett",
-                Screen::Accounts => "Acct",
+                Screen::History => "History",
+                Screen::Playlists => "Playlists",
+                Screen::WatchLater => "Later",
+                Screen::Liked => "Liked",
+                Screen::LocalVideos => "Local",
+                Screen::Queue => "Queue",
+                Screen::Settings => "Settings",
+                Screen::Accounts => "Accounts",
                 _ => label,
             };
             lines.push(Line::from(vec![
-                Span::styled(format!("{pointer}{icon} {short_label}"), style),
+                Span::styled(format!("{pointer} {icon} {short_label}"), style),
             ]));
         }
     }
 
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(Style::default().fg(if is_focused { app.theme.accent } else { app.theme.border }))
+        .border_style(Style::default().fg(if is_focused {
+            app.theme.accent
+        } else {
+            app.theme.border
+        }))
         .style(Style::default().bg(app.theme.bg));
 
     let p = Paragraph::new(lines).block(block);

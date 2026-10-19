@@ -105,22 +105,26 @@ impl YtDlpBackend {
                 thumb_url = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
             }
 
+            let is_mix = id.starts_with("RD") || title.to_lowercase().contains("mix");
             let is_playlist = id.starts_with("PL") || id == "WL" || id == "LL"
+                || is_mix
                 || item.get("ie_key").and_then(|k| k.as_str()) == Some("YoutubeTab");
 
             if is_playlist {
+                let default_chan = if is_mix { "YouTube" } else { "Playlist" };
                 let channel = item.get("uploader")
                     .or_else(|| item.get("channel"))
                     .and_then(|s| s.as_str())
-                    .unwrap_or("Playlist")
+                    .unwrap_or(default_chan)
                     .to_string();
+                let video_count = if is_mix { Some("Mix".to_string()) } else { None };
                 cards.push(Card::Playlist(crate::backend::models::PlaylistCard {
                     id,
                     title,
                     channel,
-                    video_count: None,
+                    video_count,
                     thumb_url,
-                    is_mix: false,
+                    is_mix,
                 }));
                 continue;
             }

@@ -61,7 +61,11 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
         pct
     );
 
-    let (state_str, state_style) = if status.paused_for_cache {
+    let (state_str, state_style) = if status.stall_error {
+        ("[STALLED]", Style::default().fg(ratatui::style::Color::Red).add_modifier(Modifier::BOLD))
+    } else if !status.file_loaded {
+        ("[LOADING]", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD))
+    } else if status.paused_for_cache {
         ("[BUFFERING]", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD))
     } else if status.paused {
         ("[PAUSED]", Style::default().fg(app.theme.text_secondary).add_modifier(Modifier::BOLD))

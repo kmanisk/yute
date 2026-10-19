@@ -5,9 +5,10 @@ pub mod queue;
 use crate::backend::models::VideoCard;
 use crate::config::Config;
 use anyhow::{Context, Result};
-use ipc::{IpcCommand, MpvIpc, PlaybackStatus};
+use ipc::{generate_socket_path, IpcCommand, MpvIpc, PlaybackStatus};
 use mpvconf::MpvProfile;
 use queue::PlayQueue;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -28,6 +29,7 @@ pub struct Player {
     pub status: PlaybackStatus,
     pub is_playing: Arc<AtomicBool>,
     child_process: Option<Child>,
+    current_sock_path: Option<PathBuf>,
     ipc: Option<MpvIpc>,
     tx_status: Sender<PlaybackStatus>,
     rx_status: Receiver<PlaybackStatus>,
@@ -58,10 +60,15 @@ impl Player {
             status: PlaybackStatus::default(),
             is_playing: Arc::new(AtomicBool::new(false)),
             child_process: None,
+            current_sock_path: None,
             ipc: None,
             tx_status,
             rx_status,
         }
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.child_process.is_some() && self.status.is_alive
     }
 
     pub fn play_video(
@@ -70,17 +77,29 @@ impl Player {
         mode_override: Option<PlaybackMode>,
         cfg: &Config,
     ) -> Result<()> {
-        self.stop();
-
         let active_mode = mode_override.unwrap_or(self.mode);
         let target_url = if video.id.starts_with('/') || video.id.starts_with('.') {
-            // Local file
             video.id.clone()
         } else {
             format!("https://www.youtube.com/watch?v={}", video.id)
         };
 
         self.current_video = Some(video);
+
+        // If window player is already running, switch video via IPC loadfile replace
+        if (active_mode == PlaybackMode::Window || active_mode == PlaybackMode::Auto)
+            && self.is_alive()
+        {
+            if let Some(ref ipc) = self.ipc {
+                ipc.send(IpcCommand::LoadFile(target_url));
+                self.status.file_loaded = false;
+                self.status.time_pos = 0.0;
+                self.status.stall_error = false;
+                return Ok(());
+            }
+        }
+
+        self.stop();
 
         match active_mode {
             PlaybackMode::Window | PlaybackMode::Auto => {
@@ -97,22 +116,41 @@ impl Player {
     fn start_window_playback(&mut self, url: &str, cfg: &Config) -> Result<()> {
         self.stop();
 
-        let sock_path = MpvIpc::socket_path();
+        let sock_path = generate_socket_path();
         if sock_path.exists() {
             let _ = std::fs::remove_file(&sock_path);
         }
 
+        let cache_dir = if let Some(home) = std::env::var_os("HOME") {
+            PathBuf::from(home).join(".cache/ytui")
+        } else {
+            PathBuf::from("/tmp/ytui")
+        };
+        let _ = std::fs::create_dir_all(&cache_dir);
+        let mpv_log_file = cache_dir.join("mpv.log");
+
+        let hwdec = if cfg.playback.hwdec.is_empty() || cfg.playback.hwdec == "auto-safe" {
+            "no".to_string()
+        } else {
+            cfg.playback.hwdec.clone()
+        };
+
         let mut cmd = Command::new("mpv");
         cmd.arg(format!("--input-ipc-server={}", sock_path.display()))
+            .arg("--no-terminal")
+            .arg("--no-input-terminal")
             .arg("--force-window=yes")
             .arg("--idle=no")
+            .arg(format!("--log-file={}", mpv_log_file.display()))
             .arg(format!("--ytdl-format={}", cfg.playback.resolved_ytdl_format()))
-            .arg(format!("--hwdec={}", cfg.playback.hwdec))
+            .arg(format!("--hwdec={hwdec}"))
             .arg("--vo=gpu")
             .arg("--cache=yes")
             .arg("--demuxer-max-bytes=64M")
             .arg("--demuxer-max-back-bytes=20M")
-            .arg("--demuxer-readahead-secs=10");
+            .arg("--demuxer-readahead-secs=10")
+            .arg("--ytdl=yes")
+            .arg("--ytdl-raw-options-append=no-playlist=");
 
         if !cfg.playback.osd_bar {
             cmd.arg("--osd-bar=no");
@@ -125,7 +163,7 @@ impl Player {
         let cookies_path = crate::config::resolve_path(&cfg.backend.cookies_file);
         if cookies_path.exists() {
             let has_auth = std::fs::read_to_string(&cookies_path)
-                .map(|s| s.contains("LOGIN_INFO") || s.contains("SAPISID"))
+                .map(|s| s.contains("LOGIN_INFO") || s.contains("SAPISID") || s.contains("__Secure"))
                 .unwrap_or(false);
             if has_auth {
                 cmd.arg(format!(
@@ -151,9 +189,14 @@ impl Player {
 
         let child = cmd.spawn().context("Failed to spawn mpv window")?;
         self.child_process = Some(child);
+        self.current_sock_path = Some(sock_path.clone());
         self.is_playing.store(true, Ordering::SeqCst);
 
-        let ipc = MpvIpc::start(self.tx_status.clone(), Arc::clone(&self.is_playing))?;
+        let ipc = MpvIpc::start(
+            sock_path,
+            self.tx_status.clone(),
+            Arc::clone(&self.is_playing),
+        )?;
         self.ipc = Some(ipc);
 
         Ok(())
@@ -162,7 +205,7 @@ impl Player {
     fn start_inline_playback(&mut self, url: &str, cfg: &Config) -> Result<()> {
         self.stop();
 
-        // Detect protocol flags
+        // Detect terminal graphic protocol flags
         let mut vo_arg = "--vo=sixel".to_string();
         let mut extra_vo = vec!["--vo-sixel-buffered=yes".to_string()];
 
@@ -176,16 +219,24 @@ impl Player {
             extra_vo = vec![];
         }
 
+        let hwdec = if cfg.playback.hwdec.is_empty() || cfg.playback.hwdec == "auto-safe" {
+            "no".to_string()
+        } else {
+            cfg.playback.hwdec.clone()
+        };
+
         let mut cmd = Command::new("mpv");
         cmd.arg(&vo_arg)
-            .arg(format!("--hwdec={}", cfg.playback.hwdec))
+            .arg(format!("--hwdec={hwdec}"))
             .arg("--cache=yes")
             .arg("--demuxer-max-bytes=100M")
             .arg("--demuxer-readahead-secs=15")
             .arg(format!(
                 "--ytdl-format=bestvideo[height<={}]+bestaudio/best[height<={}]/best",
                 cfg.inline.max_height, cfg.inline.max_height
-            ));
+            ))
+            .arg("--ytdl=yes")
+            .arg("--ytdl-raw-options-append=no-playlist=");
 
         for extra in &extra_vo {
             cmd.arg(extra);
@@ -244,6 +295,9 @@ impl Player {
                 self.child_process = None;
                 self.is_playing.store(false, Ordering::SeqCst);
                 self.status.is_alive = false;
+                if let Some(sock) = self.current_sock_path.take() {
+                    let _ = std::fs::remove_file(sock);
+                }
                 updated = true;
             }
         }
@@ -283,18 +337,8 @@ impl Player {
         self.is_playing.store(false, Ordering::SeqCst);
         self.status.is_alive = false;
 
-        let sock_path = MpvIpc::socket_path();
-        if sock_path.exists() {
-            let _ = std::fs::remove_file(&sock_path);
-        }
-
-        #[cfg(unix)]
-        {
-            let _ = std::process::Command::new("pkill")
-                .arg("-9")
-                .arg("-f")
-                .arg("ytui-mpv.sock")
-                .status();
+        if let Some(sock) = self.current_sock_path.take() {
+            let _ = std::fs::remove_file(sock);
         }
     }
 }

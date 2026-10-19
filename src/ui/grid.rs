@@ -118,7 +118,23 @@ fn render_card(
     // Thumbnail image rendering
     let thumb_url = card.thumb_url().to_string();
     if !thumb_url.is_empty() && app.config.general.graphics != "none" {
-        if let Some(proto) = app.thumbs.get_protocol(&thumb_url) {
+        let screen_size = f.area();
+        let dialog_w = 44.min(screen_size.width.saturating_sub(4));
+        let dialog_h = 7.min(screen_size.height.saturating_sub(2));
+        let modal_x = (screen_size.width.saturating_sub(dialog_w)) / 2;
+        let modal_y = (screen_size.height.saturating_sub(dialog_h)) / 2;
+        let overlaps_modal = app.confirming_quit
+            && thumb_area.x < modal_x + dialog_w
+            && thumb_area.x + thumb_area.width > modal_x
+            && thumb_area.y < modal_y + dialog_h
+            && thumb_area.y + thumb_area.height > modal_y;
+
+        if overlaps_modal {
+            // Suppress Kitty/Sixel graphics when dialog is displayed on top
+            let p = Paragraph::new("")
+                .style(Style::default().bg(app.theme.surface));
+            f.render_widget(p, thumb_area);
+        } else if let Some(proto) = app.thumbs.get_protocol(&thumb_url) {
             let img_widget = ratatui_image::StatefulImage::default();
             f.render_stateful_widget(img_widget, thumb_area, proto);
         } else {
@@ -197,16 +213,26 @@ fn render_card(
                 .style(Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD));
             f.render_widget(title_p, title_area);
 
-            let count_str = p.video_count.as_deref().unwrap_or("Playlist");
-            let badge_str = if p.is_mix { "MIX" } else { "PLAYLIST" };
-            let meta_spans = vec![
-                Span::styled(&p.channel, Style::default().fg(app.theme.text_secondary)),
-                Span::styled(" · ", Style::default().fg(app.theme.text_secondary)),
-                Span::styled(
-                    format!("{badge_str} ({count_str})"),
-                    Style::default().bg(app.theme.badge_bg).fg(app.theme.text),
-                ),
-            ];
+            let meta_spans = if p.is_mix {
+                vec![
+                    Span::styled(&p.channel, Style::default().fg(app.theme.text_secondary)),
+                    Span::styled(" · ", Style::default().fg(app.theme.text_secondary)),
+                    Span::styled(
+                        "Mix · YouTube",
+                        Style::default().bg(app.theme.badge_bg).fg(app.theme.accent).add_modifier(Modifier::BOLD),
+                    ),
+                ]
+            } else {
+                let count_str = p.video_count.as_deref().unwrap_or("Playlist");
+                vec![
+                    Span::styled(&p.channel, Style::default().fg(app.theme.text_secondary)),
+                    Span::styled(" · ", Style::default().fg(app.theme.text_secondary)),
+                    Span::styled(
+                        format!("PLAYLIST ({count_str})"),
+                        Style::default().bg(app.theme.badge_bg).fg(app.theme.text),
+                    ),
+                ]
+            };
             let meta_p = Paragraph::new(Line::from(meta_spans));
             f.render_widget(meta_p, meta_area);
         }

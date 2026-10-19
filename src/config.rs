@@ -119,7 +119,7 @@ fn default_max_resolution() -> String {
 }
 
 fn default_hwdec() -> String {
-    "auto-safe".to_string()
+    "no".to_string()
 }
 
 fn default_osd_bar() -> bool {
@@ -133,7 +133,7 @@ impl Default for PlaybackConfig {
             use_user_mpv_config: false,
             ytdl_format: "bestvideo[height<=?1080]+bestaudio/best".to_string(),
             max_resolution: "1080p".to_string(),
-            hwdec: "auto-safe".to_string(),
+            hwdec: "no".to_string(),
             osd_bar: false,
             mark_watched: true,
             autoplay: true,

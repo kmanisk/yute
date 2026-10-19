@@ -27,12 +27,13 @@ impl MpvProfile {
         let mut conf = String::from(
             "# ytui dedicated mpv configuration\n\
             ytdl-format=bestvideo[height<=?1080]+bestaudio/best\n\
-            hwdec=auto-safe\n\
+            hwdec=no\n\
             vo=gpu\n\
             cache=yes\n\
             demuxer-max-bytes=64M\n\
             demuxer-max-back-bytes=20M\n\
             demuxer-readahead-secs=10\n\
+            ytdl-raw-options-append=no-playlist=\n\
             osd-bar=no\n\
             keep-open=no\n\
             force-window=yes\n",

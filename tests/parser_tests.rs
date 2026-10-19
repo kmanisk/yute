@@ -129,7 +129,48 @@ fn test_parse_lockup_view_model() {
             assert_eq!(p.title, "Rust Mastery Playlist");
             assert_eq!(p.channel, "Rust Channel");
             assert_eq!(p.video_count.as_deref(), Some("45 videos"));
+            assert!(!p.is_mix);
         }
         _ => panic!("Expected Playlist card"),
+    }
+}
+
+#[test]
+fn test_parse_lockup_view_model_mix() {
+    let raw = serde_json::json!({
+        "lockupViewModel": {
+            "contentId": "RDn5wLZyvEukM",
+            "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST",
+            "metadata": {
+                "lockupMetadataViewModel": {
+                    "title": { "content": "Mix - Instrumental Focus" },
+                    "metadataRows": [
+                        {
+                            "metadataParts": [
+                                { "text": { "content": "Playlist" } }
+                            ]
+                        },
+                        {
+                            "metadataParts": [
+                                { "text": { "content": "PLAYLIST" } }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let page = parse_feed_page(&raw);
+    assert_eq!(page.items.len(), 1);
+    match &page.items[0] {
+        Card::Playlist(p) => {
+            assert_eq!(p.id, "RDn5wLZyvEukM");
+            assert_eq!(p.title, "Mix - Instrumental Focus");
+            assert_eq!(p.channel, "YouTube");
+            assert_eq!(p.video_count.as_deref(), Some("Mix"));
+            assert!(p.is_mix);
+        }
+        _ => panic!("Expected Mix Playlist card"),
     }
 }

@@ -135,6 +135,7 @@ fn render_quit_confirmation(f: &mut Frame, app: &App, area: ratatui::layout::Rec
         .split(vert[1]);
 
     let card_area = horiz[1];
+    f.render_widget(ratatui::widgets::Clear, card_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
