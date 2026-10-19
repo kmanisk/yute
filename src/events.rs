@@ -10,5 +10,6 @@ pub enum AppEvent {
     FeedContinued(anyhow::Result<FeedPage>),
     WatchDataLoaded(anyhow::Result<WatchData>),
     SuggestionsLoaded(anyhow::Result<Vec<String>>),
+    AccountLoaded(anyhow::Result<(String, String)>),
     StatusMessage(String),
 }

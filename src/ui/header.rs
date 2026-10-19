@@ -10,12 +10,20 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    let right_width = if area.width >= 110 {
+        38u16
+    } else if area.width >= 85 {
+        30u16
+    } else {
+        20u16
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(22), // Logo + hamburger
             Constraint::Min(20),   // Centered search pill
-            Constraint::Length(16), // Spinner + Account block
+            Constraint::Length(right_width), // Right: ASCII YouTube badge + Account block
         ])
         .split(area);
 
@@ -76,7 +84,7 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     );
     f.render_widget(search_pill, chunks[1]);
 
-    // Right: spinner indicator + account initial block
+    // Right: spinner indicator + ASCII YouTube badge + account pill
     let spinners = ["-", "\\", "|", "/"];
     let spinner_str = if app.is_loading {
         spinners[app.spinner_frame % spinners.len()]
@@ -85,22 +93,49 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let account_initial = if app.account_initial.is_empty() {
-        "U"
+        "M"
     } else {
         &app.account_initial
     };
 
-    let right_spans = vec![
-        Span::styled(format!(" {spinner_str}  "), Style::default().fg(app.theme.red)),
-        Span::styled(
-            format!(" [{account_initial}] "),
+    let account_label = if !app.account_name.is_empty() {
+        if right_width >= 34 {
+            format!(" [{account_initial}] {} ", app.account_name)
+        } else {
+            let first_word = app.account_name.split_whitespace().next().unwrap_or(&app.account_name);
+            format!(" [{account_initial}] {first_word} ")
+        }
+    } else if !app.account_handle.is_empty() {
+        format!(" [{account_initial}] {} ", app.account_handle)
+    } else {
+        format!(" [{account_initial}] User ")
+    };
+
+    let mut right_spans = Vec::new();
+    if app.is_loading {
+        right_spans.push(Span::styled(format!("{spinner_str} "), Style::default().fg(app.theme.red)));
+    }
+
+    if right_width >= 28 {
+        right_spans.push(Span::styled(
+            " |> YouTube ",
             Style::default()
-                .bg(app.theme.surface_hover)
-                .fg(app.theme.text)
+                .bg(app.theme.red)
+                .fg(ratatui::style::Color::White)
                 .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-    ];
+        ));
+        right_spans.push(Span::raw(" "));
+    }
+
+    right_spans.push(Span::styled(
+        account_label,
+        Style::default()
+            .bg(app.theme.surface_hover)
+            .fg(app.theme.text)
+            .add_modifier(Modifier::BOLD),
+    ));
+    right_spans.push(Span::raw(" "));
+
     let right_lines = if area.height >= 3 {
         vec![Line::from(""), Line::from(right_spans)]
     } else {

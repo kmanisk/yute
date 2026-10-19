@@ -70,6 +70,8 @@ impl Player {
         mode_override: Option<PlaybackMode>,
         cfg: &Config,
     ) -> Result<()> {
+        self.stop();
+
         let active_mode = mode_override.unwrap_or(self.mode);
         let target_url = if video.id.starts_with('/') || video.id.starts_with('.') {
             // Local file
@@ -144,23 +146,36 @@ impl Player {
     }
 
     fn start_inline_playback(&mut self, url: &str, cfg: &Config) -> Result<()> {
+        self.stop();
+
         // Detect protocol flags
         let mut vo_arg = "--vo=sixel".to_string();
-        let mut extra_vo = "--vo-sixel-buffered=yes".to_string();
+        let mut extra_vo = vec!["--vo-sixel-buffered=yes".to_string()];
 
         let term = std::env::var("TERM").unwrap_or_default();
-        if term.contains("kitty") || std::env::var("KITTY_PID").is_ok() {
+        let term_prog = std::env::var("TERM_PROGRAM").unwrap_or_default();
+        if term.contains("kitty") || term_prog.contains("kitty") || std::env::var("KITTY_PID").is_ok() {
             vo_arg = "--vo=kitty".to_string();
-            extra_vo = "--vo-kitty-use-shm=yes".to_string();
+            extra_vo = vec!["--vo-kitty-use-shm=yes".to_string()];
+        } else if term.contains("alacritty") {
+            vo_arg = "--vo=tct".to_string();
+            extra_vo = vec![];
         }
 
         let mut cmd = Command::new("mpv");
         cmd.arg(&vo_arg)
-            .arg(&extra_vo)
+            .arg(format!("--hwdec={}", cfg.playback.hwdec))
+            .arg("--cache=yes")
+            .arg("--demuxer-max-bytes=100M")
+            .arg("--demuxer-readahead-secs=15")
             .arg(format!(
-                "--ytdl-format=bestvideo[height<={}]+bestaudio/best[height<={}]",
+                "--ytdl-format=bestvideo[height<={}]+bestaudio/best[height<={}]/best",
                 cfg.inline.max_height, cfg.inline.max_height
             ));
+
+        for extra in &extra_vo {
+            cmd.arg(extra);
+        }
 
         for extra in &cfg.inline.extra_args {
             cmd.arg(extra);
@@ -176,9 +191,24 @@ impl Player {
 
         cmd.arg(url);
 
-        // Terminal handoff: mpv inherits terminal stdio
+        // Terminal handoff: release raw mode so mpv controls stdio and receives hotkeys
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
+
         let mut child = cmd.spawn().context("Failed to run inline mpv")?;
         let _ = child.wait();
+
+        // Restore terminal raw mode and alternate screen for ytui
+        let _ = crossterm::terminal::enable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::EnterAlternateScreen,
+            crossterm::cursor::Hide
+        );
 
         Ok(())
     }
@@ -214,9 +244,16 @@ impl Player {
         }
         if let Some(ref mut child) = self.child_process {
             let _ = child.kill();
+            let _ = child.wait();
             self.child_process = None;
         }
+        self.ipc = None;
         self.is_playing.store(false, Ordering::SeqCst);
         self.status.is_alive = false;
+
+        let sock_path = MpvIpc::socket_path();
+        if sock_path.exists() {
+            let _ = std::fs::remove_file(&sock_path);
+        }
     }
 }

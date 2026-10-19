@@ -270,4 +270,30 @@ impl Backend for InnerTubeBackend {
         // Handled via mpv's ytdl-raw-options mark-watched
         Ok(())
     }
+
+    async fn account_info(&self) -> Result<(String, String)> {
+        let body = self.make_body(json!({}));
+        let val = self.post_endpoint("account/account_menu", body).await?;
+
+        let header = val.pointer("/actions/0/openPopupAction/popup/multiPageMenuRenderer/header/activeAccountHeaderRenderer");
+        if let Some(h) = header {
+            let name = h
+                .pointer("/accountName/simpleText")
+                .and_then(|v| v.as_str())
+                .or_else(|| h.pointer("/accountName/runs/0/text").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            let handle = h
+                .pointer("/channelHandle/simpleText")
+                .and_then(|v| v.as_str())
+                .or_else(|| h.pointer("/channelHandle/runs/0/text").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            if !name.is_empty() || !handle.is_empty() {
+                return Ok((name, handle));
+            }
+        }
+
+        Err(anyhow!("No active account found in account menu"))
+    }
 }

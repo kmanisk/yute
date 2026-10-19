@@ -233,7 +233,13 @@ impl KeymapState {
             KeyCode::Char('q') | KeyCode::Esc => Some((Action::Back, 1)),
             KeyCode::Char(':') => Some((Action::CommandLine, 1)),
             KeyCode::Char('?') => Some((Action::Help, 1)),
-            KeyCode::Enter => Some((Action::PlayDefault, 1)),
+            KeyCode::Enter => {
+                if mods.contains(KeyModifiers::SHIFT) {
+                    Some((Action::PlayInline, 1))
+                } else {
+                    Some((Action::PlayDefault, 1))
+                }
+            }
             KeyCode::Char('e') => Some((Action::PlayInline, 1)),
             KeyCode::Char('w') => Some((Action::PlayWindow, 1)),
             KeyCode::Char('o') => Some((Action::OpenBrowser, 1)),

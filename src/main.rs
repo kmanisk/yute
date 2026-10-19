@@ -85,6 +85,14 @@ async fn main() -> anyhow::Result<()> {
     app.is_loading = true;
     trigger_home_fetch(&app, tx_event.clone(), None);
 
+    // Fetch authenticated account profile info in background
+    let backend_acc = Arc::clone(&app.backend);
+    let tx_acc = tx_event.clone();
+    tokio::spawn(async move {
+        let res = backend_acc.account_info().await;
+        let _ = tx_acc.send(AppEvent::AccountLoaded(res)).await;
+    });
+
     let mut keymap = KeymapState::new();
     let mut reader = EventStream::new();
     let mut ticker = tokio::time::interval(Duration::from_millis(100));
@@ -277,13 +285,17 @@ async fn handle_key_event(
 
         match action {
             Action::Quit | Action::Back => {
-                if app.focus == Focus::Sidebar {
+                if app.screen == Screen::Watch {
+                    app.player.stop();
+                    app.nav_back();
+                } else if app.focus == Focus::Sidebar {
                     app.focus = Focus::Content;
                 } else {
                     app.nav_back();
                 }
             }
             Action::ForceQuit => {
+                app.player.stop();
                 app.should_quit = true;
             }
             Action::Up => {
@@ -544,6 +556,9 @@ async fn handle_key_event(
 }
 
 fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
+    if app.screen == Screen::Watch {
+        app.player.stop();
+    }
     app.focus = Focus::Content;
     match app.sidebar_index {
         0 => {
@@ -647,8 +662,12 @@ fn play_selected_card(app: &mut App, mode: Option<PlaybackMode>, tx: Sender<AppE
             let id = v.id.clone();
             app.status_text = format!("Launching '{}'...", v.title);
             let _ = app.player.play_video(v, mode, &app.config);
-            app.set_screen(Screen::Watch);
-            trigger_watch_fetch(app, tx, id);
+            if mode != Some(PlaybackMode::Inline) {
+                app.set_screen(Screen::Watch);
+                trigger_watch_fetch(app, tx, id);
+            } else {
+                app.status_text = "Inline playback finished".to_string();
+            }
         }
         Card::Playlist(p) => {
             app.status_text = format!("Opening playlist '{}'...", p.title);
@@ -750,6 +769,19 @@ fn handle_app_event(app: &mut App, event: AppEvent, _tx: Sender<AppEvent>) {
         }
         AppEvent::StatusMessage(msg) => {
             app.status_text = msg;
+        }
+        AppEvent::AccountLoaded(res) => {
+            if let Ok((name, handle)) = res {
+                if !name.is_empty() {
+                    app.account_name = name;
+                }
+                if !handle.is_empty() {
+                    app.account_handle = handle;
+                }
+                if let Some(ch) = app.account_name.chars().next() {
+                    app.account_initial = ch.to_uppercase().to_string();
+                }
+            }
         }
         _ => {}
     }

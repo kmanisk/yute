@@ -24,6 +24,9 @@ pub trait Backend: Send + Sync {
     async fn channel(&self, id: &str, tab: ChannelTab) -> anyhow::Result<FeedPage>;
     async fn live_chat(&self, token: &str) -> anyhow::Result<ChatBatch>;
     async fn mark_watched(&self, id: &str) -> anyhow::Result<()>;
+    async fn account_info(&self) -> anyhow::Result<(String, String)> {
+        anyhow::bail!("Account info not supported by this backend")
+    }
 }
 
 pub struct BackendChain {
@@ -189,5 +192,14 @@ impl Backend for BackendChain {
             }
         }
         Ok(())
+    }
+
+    async fn account_info(&self) -> anyhow::Result<(String, String)> {
+        for b in &self.backends {
+            if let Ok(info) = b.account_info().await {
+                return Ok(info);
+            }
+        }
+        anyhow::bail!("No backend could provide account info")
     }
 }

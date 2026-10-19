@@ -222,3 +222,54 @@ fn test_3x3_grid_dimensions() {
     assert_eq!(buffer.area.height, 30);
 }
 
+#[test]
+fn test_shift_enter_inline_playback_keymap() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ytui::keymap::{Action, KeymapState};
+
+    let mut keymap = KeymapState::new();
+
+    let key_shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+    assert_eq!(
+        keymap.handle_key(key_shift_enter, false),
+        Some((Action::PlayInline, 1)),
+        "Shift+Enter must trigger PlayInline action"
+    );
+
+    let key_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(
+        keymap.handle_key(key_enter, false),
+        Some((Action::PlayDefault, 1)),
+        "Enter must trigger PlayDefault action"
+    );
+}
+
+#[test]
+fn test_header_shows_account_and_ascii_logo() {
+    let backend = TestBackend::new(140, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = create_mock_app();
+    app.account_name = "Mathew Manisk".to_string();
+    app.account_initial = "M".to_string();
+
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    // Check header rows (0..3) for logo and account details
+    let mut found_logo = false;
+    let mut found_account = false;
+    for y in 0..3 {
+        let line: String = (0..140).map(|x| buffer[(x, y)].symbol()).collect();
+        if line.contains("|> YouTube") {
+            found_logo = true;
+        }
+        if line.contains("Mathew Manisk") && line.contains("[M]") {
+            found_account = true;
+        }
+    }
+
+    assert!(found_logo, "Header must render ASCII '|> YouTube' logo at top-right");
+    assert!(found_account, "Header must render user account pill with initial and name at top-right");
+}
+
+

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, COOKIE, ORIGIN, USER_AGENT};
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
@@ -41,18 +41,25 @@ impl AuthContext {
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let mut ctx = Self::default();
         if !path.exists() {
-            // Attempt auto-extraction from Brave if present
             Self::try_auto_extract_brave_cookies(path);
         }
 
-        if !path.exists() {
-            return Ok(ctx);
+        if path.exists() {
+            if let Ok(content) = fs::read_to_string(path) {
+                ctx.parse_netscape_cookies(&content);
+            }
         }
 
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read cookies file: {}", path.display()))?;
+        // Auto-refresh from Brave if cookies are missing authenticated YouTube tokens
+        if ctx.sapisid.is_none() || !ctx.cookies.contains_key("LOGIN_INFO") {
+            Self::try_auto_extract_brave_cookies(path);
+            if path.exists() {
+                if let Ok(content) = fs::read_to_string(path) {
+                    ctx.parse_netscape_cookies(&content);
+                }
+            }
+        }
 
-        ctx.parse_netscape_cookies(&content);
         Ok(ctx)
     }
 
@@ -74,8 +81,9 @@ impl AuthContext {
                     .arg(format!("brave:{cand}"))
                     .arg("--cookies")
                     .arg(target_path)
-                    .arg("--skip-download")
-                    .arg("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+                    .arg("--playlist-items")
+                    .arg("0")
+                    .arg("https://www.youtube.com")
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
@@ -95,7 +103,9 @@ impl AuthContext {
     }
 
     pub fn parse_netscape_cookies(&mut self, text: &str) {
-        let mut pairs = Vec::new();
+        let mut yt_cookies = HashMap::new();
+        let mut google_cookies = HashMap::new();
+
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -104,23 +114,39 @@ impl AuthContext {
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() >= 7 {
                 let domain = parts[0].to_lowercase();
-                if !domain.contains("youtube.com") && !domain.contains("google.com") {
-                    continue;
-                }
-
                 let name = parts[5].trim().to_string();
                 let value = parts[6].trim().to_string();
-                if name == "SAPISID" || name == "__Secure-3PAPISID" {
-                    if self.sapisid.is_none() || name == "SAPISID" {
+
+                if domain.contains("youtube.com") {
+                    if name == "SAPISID" || name == "__Secure-3PAPISID" {
+                        if self.sapisid.is_none() || name == "SAPISID" {
+                            self.sapisid = Some(value.clone());
+                        }
+                    }
+                    yt_cookies.insert(name, value);
+                } else if domain == ".google.com" || domain == "google.com" || domain == ".google.co.in" {
+                    if (name == "SAPISID" || name == "__Secure-3PAPISID") && self.sapisid.is_none() {
                         self.sapisid = Some(value.clone());
                     }
+                    google_cookies.insert(name, value);
                 }
-                pairs.push(format!("{name}={value}"));
-                self.cookies.insert(name, value);
             }
         }
-        if !pairs.is_empty() {
-            self.cookie_header = Some(pairs.join("; "));
+
+        // YouTube domain cookies override general Google cookies
+        self.cookies = google_cookies;
+        for (k, v) in yt_cookies {
+            self.cookies.insert(k, v);
+        }
+
+        if !self.cookies.is_empty() {
+            let header_str = self
+                .cookies
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("; ");
+            self.cookie_header = Some(header_str);
         }
     }
 

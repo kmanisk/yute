@@ -71,6 +71,8 @@ pub struct App {
     pub backend: Arc<BackendChain>,
     pub should_quit: bool,
     pub account_initial: String,
+    pub account_name: String,
+    pub account_handle: String,
 }
 
 impl App {
@@ -135,7 +137,9 @@ impl App {
             nav_future: Vec::new(),
             backend: chain,
             should_quit: false,
-            account_initial: "K".to_string(),
+            account_initial: "M".to_string(),
+            account_name: "Mathew Manisk".to_string(),
+            account_handle: "@mathewmanisk5707".to_string(),
         }
     }
 
@@ -157,6 +161,9 @@ impl App {
     }
 
     pub fn set_screen(&mut self, screen: Screen) {
+        if self.screen == Screen::Watch && screen != Screen::Watch {
+            self.player.stop();
+        }
         if self.screen != screen {
             self.nav_history.push((self.screen, self.selected_index));
             self.nav_future.clear();
@@ -168,6 +175,9 @@ impl App {
     }
 
     pub fn nav_back(&mut self) {
+        if self.screen == Screen::Watch {
+            self.player.stop();
+        }
         if let Some((prev_screen, prev_idx)) = self.nav_history.pop() {
             self.nav_future.push((self.screen, self.selected_index));
             self.screen = prev_screen;
