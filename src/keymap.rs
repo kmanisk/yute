@@ -30,6 +30,7 @@ pub enum Action {
     NavLiked,
     NavLocal,
     NavQueue,
+    NavSettings,
     NavChannel,
     NavBackHistory,
     NavForwardHistory,
@@ -128,6 +129,7 @@ impl KeymapState {
                     KeyCode::Char('l') => return Some((Action::NavLiked, 1)),
                     KeyCode::Char('v') => return Some((Action::NavLocal, 1)),
                     KeyCode::Char('q') => return Some((Action::NavQueue, 1)),
+                    KeyCode::Char('o') => return Some((Action::NavSettings, 1)),
                     KeyCode::Char('c') => return Some((Action::NavChannel, 1)),
                     _ => return None,
                 }
@@ -227,6 +229,7 @@ impl KeymapState {
             KeyCode::Char('L') => Some((Action::NavLiked, 1)),
             KeyCode::Char('V') => Some((Action::NavLocal, 1)),
             KeyCode::Char('Q') => Some((Action::NavQueue, 1)),
+            KeyCode::Char('O') => Some((Action::NavSettings, 1)),
             KeyCode::Char('q') | KeyCode::Esc => Some((Action::Back, 1)),
             KeyCode::Char(':') => Some((Action::CommandLine, 1)),
             KeyCode::Char('?') => Some((Action::Help, 1)),

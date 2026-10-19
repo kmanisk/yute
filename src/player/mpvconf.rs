@@ -24,27 +24,29 @@ impl MpvProfile {
         self.ensure_dirs()?;
 
         let mpv_conf_path = self.dir.join("mpv.conf");
-        if !mpv_conf_path.exists() {
-            let mut conf = String::from(
-                "# ytui dedicated mpv configuration\n\
-                ytdl-format=bestvideo[height<=?1080]+bestaudio/best\n\
-                demuxer-max-bytes=150M\n\
-                demuxer-max-back-bytes=50M\n\
-                demuxer-readahead-secs=30\n\
-                keep-open=no\n\
-                force-window=immediate\n",
-            );
-            if let Some(cp) = user_cookies {
-                if cp.exists() {
-                    conf.push_str(&format!(
-                        "ytdl-raw-options-append=cookies={}\n\
-                        ytdl-raw-options-append=mark-watched=\n",
-                        cp.display()
-                    ));
-                }
+        let mut conf = String::from(
+            "# ytui dedicated mpv configuration\n\
+            ytdl-format=bestvideo[height<=?1080]+bestaudio/best\n\
+            hwdec=auto-safe\n\
+            vo=gpu\n\
+            cache=yes\n\
+            demuxer-max-bytes=150M\n\
+            demuxer-max-back-bytes=50M\n\
+            demuxer-readahead-secs=20\n\
+            osd-bar=no\n\
+            keep-open=no\n\
+            force-window=immediate\n",
+        );
+        if let Some(cp) = user_cookies {
+            if cp.exists() {
+                conf.push_str(&format!(
+                    "ytdl-raw-options-append=cookies={}\n\
+                    ytdl-raw-options-append=mark-watched=\n",
+                    cp.display()
+                ));
             }
-            fs::write(mpv_conf_path, conf)?;
         }
+        let _ = fs::write(mpv_conf_path, conf);
 
         let input_conf_path = self.dir.join("input.conf");
         if !input_conf_path.exists() {

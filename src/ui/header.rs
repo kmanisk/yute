@@ -26,7 +26,12 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" |> ", Style::default().fg(app.theme.red).add_modifier(Modifier::BOLD)),
         Span::styled("YouTube", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
     ];
-    f.render_widget(Paragraph::new(Line::from(logo_spans)), chunks[0]);
+    let logo_lines = if area.height >= 3 {
+        vec![Line::from(""), Line::from(logo_spans)]
+    } else {
+        vec![Line::from(logo_spans)]
+    };
+    f.render_widget(Paragraph::new(logo_lines), chunks[0]);
 
     // Center: search pill with rounded or square borders
     let is_search_focused = app.focus == Focus::SearchInput;
@@ -96,6 +101,11 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::raw(" "),
     ];
-    let right_p = Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right);
+    let right_lines = if area.height >= 3 {
+        vec![Line::from(""), Line::from(right_spans)]
+    } else {
+        vec![Line::from(right_spans)]
+    };
+    let right_p = Paragraph::new(right_lines).alignment(Alignment::Right);
     f.render_widget(right_p, chunks[2]);
 }

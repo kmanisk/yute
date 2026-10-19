@@ -21,9 +21,11 @@ pub enum Screen {
     History,
     WatchLater,
     Playlists,
+    PlaylistView,
     Liked,
     LocalVideos,
     Queue,
+    Settings,
     Help,
 }
 
@@ -43,6 +45,7 @@ pub struct App {
     pub focus: Focus,
     pub sidebar_expanded: bool,
     pub sidebar_index: usize,
+    pub settings_index: usize,
     pub chips: Vec<Chip>,
     pub active_chip_index: usize,
     pub items: Vec<Card>,
@@ -107,6 +110,7 @@ impl App {
             screen: Screen::Home,
             focus: Focus::Content,
             sidebar_index: 0,
+            settings_index: 0,
             chips: Vec::new(),
             active_chip_index: 0,
             items: Vec::new(),

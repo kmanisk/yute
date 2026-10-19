@@ -129,3 +129,96 @@ fn test_thumbnail_cache_key_canonicalization() {
     assert_eq!(key2, "yt_xnP7qKxwzjg");
     assert_eq!(key1, key2, "Canonical cache keys must match regardless of transient query parameters");
 }
+
+#[test]
+fn test_search_input_visible_and_typable() {
+    use ytui::app::Focus;
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = create_mock_app();
+
+    app.focus = Focus::SearchInput;
+    app.search_query = "rust ratatui".to_string();
+
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    // Line 1 should contain search text inside the 3-height header
+    let line1: String = (0..80).map(|x| buffer[(x, 1)].symbol()).collect();
+    assert!(
+        line1.contains("rust ratatui"),
+        "Search query text must be rendered and visible in row 1 of header, got: {line1}"
+    );
+}
+
+#[test]
+fn test_settings_screen_rendering_and_cycling() {
+    use ytui::app::Screen;
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = create_mock_app();
+
+    app.set_screen(Screen::Settings);
+    app.settings_index = 0; // Max Resolution
+
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    let full_text: String = (0..24)
+        .map(|y| {
+            let line: String = (0..80).map(|x| buffer[(x, y)].symbol()).collect();
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(full_text.contains("Settings & Playback Tuning"));
+    assert!(full_text.contains("Max Resolution"));
+
+    // Cycle max resolution forward
+    assert_eq!(app.config.playback.max_resolution, "1080p");
+    ui::settings::cycle_setting(&mut app, true);
+    assert_eq!(app.config.playback.max_resolution, "720p");
+    assert_eq!(
+        app.config.playback.resolved_ytdl_format(),
+        "bestvideo[height<=?720]+bestaudio/best[height<=?720]/best"
+    );
+
+    // Reset back
+    ui::settings::cycle_setting(&mut app, false);
+    assert_eq!(app.config.playback.max_resolution, "1080p");
+}
+
+#[test]
+fn test_nav_settings_keymap() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ytui::keymap::{Action, KeymapState};
+
+    let mut keymap = KeymapState::new();
+
+    let key_shift_o = KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT);
+    assert_eq!(keymap.handle_key(key_shift_o, false), Some((Action::NavSettings, 1)));
+
+    let key_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+    assert_eq!(keymap.handle_key(key_g, false), None);
+
+    let key_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
+    assert_eq!(keymap.handle_key(key_o, false), Some((Action::NavSettings, 1)));
+}
+
+#[test]
+fn test_3x3_grid_dimensions() {
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = create_mock_app();
+
+    assert_eq!(app.config.grid.columns, 3);
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer.area.width, 120);
+    assert_eq!(buffer.area.height, 30);
+}
+

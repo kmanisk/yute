@@ -240,6 +240,41 @@ async fn handle_key_event(
     };
 
     for _ in 0..count {
+        if app.screen == Screen::Settings {
+            match action {
+                Action::Up => {
+                    app.settings_index = app.settings_index.saturating_sub(1);
+                }
+                Action::Down => {
+                    app.settings_index = (app.settings_index + 1).min(ui::settings::SETTINGS_ITEMS.len().saturating_sub(1));
+                }
+                Action::Left => {
+                    ui::settings::cycle_setting(app, false);
+                }
+                Action::Right | Action::PlayDefault => {
+                    ui::settings::cycle_setting(app, true);
+                }
+                Action::Back | Action::Quit => {
+                    app.nav_back();
+                }
+                Action::ForceQuit => {
+                    app.should_quit = true;
+                }
+                Action::NavHome => {
+                    app.set_screen(Screen::Home);
+                    app.sidebar_index = 0;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        let grid_cols = if app.config.grid.columns > 0 {
+            app.config.grid.columns as usize
+        } else {
+            3
+        };
+
         match action {
             Action::Quit | Action::Back => {
                 if app.focus == Focus::Sidebar {
@@ -254,12 +289,8 @@ async fn handle_key_event(
             Action::Up => {
                 if app.focus == Focus::Sidebar {
                     app.sidebar_index = app.sidebar_index.saturating_sub(1);
-                } else if app.screen == Screen::Search {
-                    app.selected_index = app.selected_index.saturating_sub(1);
                 } else {
-                    let min_w = app.config.grid.min_card_width.max(28);
-                    let cols = (80 / min_w).clamp(1, 6) as usize;
-                    app.selected_index = app.selected_index.saturating_sub(cols);
+                    app.selected_index = app.selected_index.saturating_sub(grid_cols);
                 }
             }
             Action::Down => {
@@ -268,13 +299,7 @@ async fn handle_key_event(
                 } else {
                     let total = app.filtered_items().len();
                     if total > 0 {
-                        let step = if app.screen == Screen::Search {
-                            1
-                        } else {
-                            let min_w = app.config.grid.min_card_width.max(28);
-                            (80 / min_w).clamp(1, 6) as usize
-                        };
-                        app.selected_index = (app.selected_index + step).min(total - 1);
+                        app.selected_index = (app.selected_index + grid_cols).min(total - 1);
                     }
                 }
             }
@@ -282,13 +307,7 @@ async fn handle_key_event(
                 if app.focus == Focus::Sidebar {
                     // Already in sidebar
                 } else {
-                    let cols = if app.screen == Screen::Search {
-                        1
-                    } else {
-                        let min_w = app.config.grid.min_card_width.max(28);
-                        (80 / min_w).clamp(1, 6) as usize
-                    };
-                    if app.items.is_empty() || app.selected_index % cols == 0 {
+                    if app.items.is_empty() || app.selected_index % grid_cols == 0 {
                         app.focus = Focus::Sidebar;
                     } else {
                         app.selected_index = app.selected_index.saturating_sub(1);
@@ -465,6 +484,11 @@ async fn handle_key_event(
                 app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
                 app.status_text = format!("Queue: {} items", app.items.len());
             }
+            Action::NavSettings => {
+                app.set_screen(Screen::Settings);
+                app.sidebar_index = 8;
+                app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
+            }
             Action::PlayDefault => {
                 if app.focus == Focus::Sidebar {
                     activate_sidebar_item(app, tx.clone());
@@ -595,6 +619,11 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
             app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
             app.status_text = format!("Queue: {} items", app.items.len());
         }
+        8 => {
+            app.set_screen(Screen::Settings);
+            app.sidebar_index = 8;
+            app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
+        }
         _ => {}
     }
 }
@@ -623,6 +652,10 @@ fn play_selected_card(app: &mut App, mode: Option<PlaybackMode>, tx: Sender<AppE
         }
         Card::Playlist(p) => {
             app.status_text = format!("Opening playlist '{}'...", p.title);
+            app.set_screen(Screen::PlaylistView);
+            app.selected_index = 0;
+            app.items.clear();
+            app.is_loading = true;
             let backend = Arc::clone(&app.backend);
             let p_id = p.id.clone();
             tokio::spawn(async move {
@@ -663,6 +696,10 @@ fn execute_command(app: &mut App, tx: Sender<AppEvent>) {
         trigger_search_fetch(app, tx, q);
     } else if cmd == "help" {
         app.set_screen(Screen::Help);
+    } else if cmd == "settings" {
+        app.set_screen(Screen::Settings);
+        app.sidebar_index = 8;
+        app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
     } else if cmd == "cache clear" {
         let _ = app.thumbs.cache().clear();
         app.status_text = "Cache cleared".to_string();

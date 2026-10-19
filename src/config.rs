@@ -77,15 +77,22 @@ pub struct ApiConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GridConfig {
+    #[serde(default = "default_columns")]
+    pub columns: u16,
     pub min_card_width: u16,
     pub show_shorts: bool,
     pub sidebar_expanded: bool,
 }
 
+fn default_columns() -> u16 {
+    3
+}
+
 impl Default for GridConfig {
     fn default() -> Self {
         Self {
-            min_card_width: 38,
+            columns: 3,
+            min_card_width: 26,
             show_shorts: false,
             sidebar_expanded: false,
         }
@@ -97,8 +104,26 @@ pub struct PlaybackConfig {
     pub default_mode: String,
     pub use_user_mpv_config: bool,
     pub ytdl_format: String,
+    #[serde(default = "default_max_resolution")]
+    pub max_resolution: String,
+    #[serde(default = "default_hwdec")]
+    pub hwdec: String,
+    #[serde(default = "default_osd_bar")]
+    pub osd_bar: bool,
     pub mark_watched: bool,
     pub autoplay: bool,
+}
+
+fn default_max_resolution() -> String {
+    "1080p".to_string()
+}
+
+fn default_hwdec() -> String {
+    "auto-safe".to_string()
+}
+
+fn default_osd_bar() -> bool {
+    false
 }
 
 impl Default for PlaybackConfig {
@@ -106,9 +131,32 @@ impl Default for PlaybackConfig {
         Self {
             default_mode: "window".to_string(),
             use_user_mpv_config: false,
-            ytdl_format: "bestvideo[height<=1080]+bestaudio/best".to_string(),
+            ytdl_format: "bestvideo[height<=?1080]+bestaudio/best".to_string(),
+            max_resolution: "1080p".to_string(),
+            hwdec: "auto-safe".to_string(),
+            osd_bar: false,
             mark_watched: true,
             autoplay: true,
+        }
+    }
+}
+
+impl PlaybackConfig {
+    pub fn resolved_ytdl_format(&self) -> String {
+        match self.max_resolution.as_str() {
+            "480p" => "bestvideo[height<=?480]+bestaudio/best[height<=?480]/best".to_string(),
+            "720p" => "bestvideo[height<=?720]+bestaudio/best[height<=?720]/best".to_string(),
+            "1080p" => "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best".to_string(),
+            "1440p" => "bestvideo[height<=?1440]+bestaudio/best[height<=?1440]/best".to_string(),
+            "2160p" | "4k" => "bestvideo[height<=?2160]+bestaudio/best".to_string(),
+            "best" | "max" => "bestvideo+bestaudio/best".to_string(),
+            _ => {
+                if !self.ytdl_format.is_empty() {
+                    self.ytdl_format.clone()
+                } else {
+                    "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best".to_string()
+                }
+            }
         }
     }
 }

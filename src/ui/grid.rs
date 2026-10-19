@@ -25,12 +25,17 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let min_w = app.config.grid.min_card_width.max(28);
-    let num_cols = (area.width / min_w).clamp(1, 6) as usize;
+    let num_cols = if app.config.grid.columns > 0 {
+        let max_fit = (area.width / 24).max(1);
+        (app.config.grid.columns).min(max_fit).max(1) as usize
+    } else {
+        let min_w = app.config.grid.min_card_width.max(26);
+        (area.width / min_w).clamp(1, 6) as usize
+    };
     let card_w = area.width / (num_cols as u16);
 
-    let thumb_rows = app.thumbs.compute_thumbnail_rows(card_w);
-    let card_h = thumb_rows + 7; // border(2) + thumb + badge(1) + title(2) + channel(1) + stats(1)
+    // Compact card height to fit 3 rows of windows (3x3 grid)
+    let card_h = (area.height / 3).clamp(7, 10);
 
     if card_h == 0 {
         return;
@@ -65,7 +70,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         };
 
         let is_selected = item_idx == selected && app.focus == Focus::Content;
-        render_card(f, app, card, card_rect, thumb_rows, is_selected);
+        render_card(f, app, card, card_rect, is_selected);
     }
 }
 
@@ -74,7 +79,6 @@ fn render_card(
     app: &mut App,
     card: &Card,
     area: Rect,
-    thumb_rows: u16,
     is_selected: bool,
 ) {
     let (border_col, bg_col) = if is_selected {
@@ -91,26 +95,25 @@ fn render_card(
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if inner.height < 5 || inner.width < 10 {
+    if inner.height < 3 || inner.width < 10 {
         return;
     }
+
+    let title_lines = if inner.height >= 7 { 2 } else { 1 };
+    let thumb_h = inner.height.saturating_sub(title_lines + 1);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(thumb_rows.min(inner.height.saturating_sub(4))),
-            Constraint::Length(1), // Badge row
-            Constraint::Length(2), // Title (up to 2 lines)
-            Constraint::Length(1), // Channel line
-            Constraint::Length(1), // Stats line
+            Constraint::Length(thumb_h),
+            Constraint::Length(title_lines),
+            Constraint::Length(1), // Meta line
         ])
         .split(inner);
 
     let thumb_area = chunks[0];
-    let badge_area = chunks[1];
-    let title_area = chunks[2];
-    let channel_area = chunks[3];
-    let stats_area = chunks[4];
+    let title_area = chunks[1];
+    let meta_area = chunks[2];
 
     // Thumbnail image rendering
     let thumb_url = card.thumb_url().to_string();
@@ -128,18 +131,31 @@ fn render_card(
 
     match card {
         Card::Video(v) => {
-            // Badge row (duration / LIVE / progress)
-            let mut badge_spans = Vec::new();
+            // Title line
+            let mut title_spans = Vec::new();
             if let Some(pct) = v.progress_pct {
-                let filled = (pct as usize * 10) / 100;
-                let track = format!("[{}{}]", "=".repeat(filled), " ".repeat(10 - filled));
-                badge_spans.push(Span::styled(track, Style::default().fg(app.theme.red)));
+                let filled = ((pct as usize) * 5) / 100;
+                let track = format!("[{}{}] ", "=".repeat(filled), " ".repeat(5 - filled));
+                title_spans.push(Span::styled(track, Style::default().fg(app.theme.red)));
+            }
+            title_spans.push(Span::styled(
+                v.title.as_str(),
+                Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
+            ));
+            let title_p = Paragraph::new(Line::from(title_spans));
+            f.render_widget(title_p, title_area);
+
+            // Meta line: Channel [v] · duration/LIVE · views
+            let mut meta_spans = Vec::new();
+            meta_spans.push(Span::styled(&v.channel, Style::default().fg(app.theme.text_secondary)));
+            if v.verified {
+                meta_spans.push(Span::styled(" [v]", Style::default().fg(app.theme.text_secondary)));
             }
 
-            badge_spans.push(Span::raw(" "));
             match v.live {
                 LiveState::Live => {
-                    badge_spans.push(Span::styled(
+                    meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
+                    meta_spans.push(Span::styled(
                         " LIVE ",
                         Style::default()
                             .bg(app.theme.live_badge_bg)
@@ -148,7 +164,8 @@ fn render_card(
                     ));
                 }
                 LiveState::Upcoming => {
-                    badge_spans.push(Span::styled(
+                    meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
+                    meta_spans.push(Span::styled(
                         " UPCOMING ",
                         Style::default()
                             .bg(app.theme.badge_bg)
@@ -158,61 +175,40 @@ fn render_card(
                 }
                 LiveState::None => {
                     if let Some(ref dur) = v.duration {
-                        badge_spans.push(Span::styled(
-                            format!(" {dur} "),
-                            Style::default()
-                                .bg(app.theme.badge_bg)
-                                .fg(app.theme.text),
+                        meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
+                        meta_spans.push(Span::styled(
+                            dur.as_str(),
+                            Style::default().fg(app.theme.text_secondary),
                         ));
                     }
                 }
             }
 
-            let badge_p = Paragraph::new(Line::from(badge_spans)).alignment(Alignment::Right);
-            f.render_widget(badge_p, badge_area);
-
-            // Title
-            let title_p = Paragraph::new(v.title.as_str())
-                .style(Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD));
-            f.render_widget(title_p, title_area);
-
-            // Channel line with verified mark
-            let mut ch_spans = vec![
-                Span::styled(&v.channel, Style::default().fg(app.theme.text_secondary)),
-            ];
-            if v.verified {
-                ch_spans.push(Span::styled(" [v]", Style::default().fg(app.theme.text_secondary)));
-            }
-            f.render_widget(Paragraph::new(Line::from(ch_spans)), channel_area);
-
-            // Stats line
-            let mut stat_parts = Vec::new();
             if let Some(ref vw) = v.views {
-                stat_parts.push(vw.as_str());
+                meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
+                meta_spans.push(Span::styled(vw.as_str(), Style::default().fg(app.theme.text_secondary)));
             }
-            if let Some(ref pub_time) = v.published {
-                stat_parts.push(pub_time.as_str());
-            }
-            let stat_str = stat_parts.join(" · ");
-            let stat_p = Paragraph::new(stat_str)
-                .style(Style::default().fg(app.theme.text_secondary));
-            f.render_widget(stat_p, stats_area);
+
+            let meta_p = Paragraph::new(Line::from(meta_spans));
+            f.render_widget(meta_p, meta_area);
         }
         Card::Playlist(p) => {
-            let count_str = p.video_count.as_deref().unwrap_or("Playlist");
-            let badge_str = if p.is_mix { "MIX" } else { "PLAYLIST" };
-            let badge_p = Paragraph::new(Line::from(vec![
-                Span::styled(format!(" {badge_str} · {count_str} "), Style::default().bg(app.theme.badge_bg).fg(app.theme.text)),
-            ])).alignment(Alignment::Right);
-            f.render_widget(badge_p, badge_area);
-
             let title_p = Paragraph::new(p.title.as_str())
                 .style(Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD));
             f.render_widget(title_p, title_area);
 
-            let ch_p = Paragraph::new(p.channel.as_str())
-                .style(Style::default().fg(app.theme.text_secondary));
-            f.render_widget(ch_p, channel_area);
+            let count_str = p.video_count.as_deref().unwrap_or("Playlist");
+            let badge_str = if p.is_mix { "MIX" } else { "PLAYLIST" };
+            let meta_spans = vec![
+                Span::styled(&p.channel, Style::default().fg(app.theme.text_secondary)),
+                Span::styled(" · ", Style::default().fg(app.theme.text_secondary)),
+                Span::styled(
+                    format!("{badge_str} ({count_str})"),
+                    Style::default().bg(app.theme.badge_bg).fg(app.theme.text),
+                ),
+            ];
+            let meta_p = Paragraph::new(Line::from(meta_spans));
+            f.render_widget(meta_p, meta_area);
         }
         Card::Channel(c) => {
             let title_p = Paragraph::new(c.title.as_str())
@@ -220,9 +216,9 @@ fn render_card(
             f.render_widget(title_p, title_area);
 
             let subs = c.subscribers.as_deref().unwrap_or("Channel");
-            let subs_p = Paragraph::new(subs)
+            let meta_p = Paragraph::new(subs)
                 .style(Style::default().fg(app.theme.text_secondary));
-            f.render_widget(subs_p, channel_area);
+            f.render_widget(meta_p, meta_area);
         }
     }
 }

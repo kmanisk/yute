@@ -5,6 +5,7 @@ pub mod grid;
 pub mod header;
 pub mod help;
 pub mod list;
+pub mod settings;
 pub mod sidebar;
 pub mod statusbar;
 pub mod watch;
@@ -20,7 +21,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     let has_chips = app.screen == Screen::Home && !app.chips.is_empty();
-    let header_h = 2u16;
+    let header_h = 3u16;
     let chips_h = if has_chips { 1u16 } else { 0u16 };
     let status_h = 2u16;
 
@@ -64,12 +65,20 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Render specific screen content
     match app.screen {
-        Screen::Home | Screen::Subscriptions | Screen::History | Screen::WatchLater
-        | Screen::Playlists | Screen::Liked | Screen::LocalVideos | Screen::Queue => {
+        Screen::Home
+        | Screen::Subscriptions
+        | Screen::History
+        | Screen::WatchLater
+        | Screen::Playlists
+        | Screen::Liked
+        | Screen::LocalVideos
+        | Screen::Queue
+        | Screen::Search
+        | Screen::PlaylistView => {
             grid::render_grid(f, app, content_area);
         }
-        Screen::Search => {
-            list::render_list(f, app, content_area);
+        Screen::Settings => {
+            settings::render_settings(f, app, content_area);
         }
         Screen::Watch => {
             watch::render_watch(f, app, content_area);

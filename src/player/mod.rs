@@ -101,7 +101,17 @@ impl Player {
         let mut cmd = Command::new("mpv");
         cmd.arg(format!("--input-ipc-server={}", sock_path.display()))
             .arg("--force-window=immediate")
-            .arg(format!("--ytdl-format={}", cfg.playback.ytdl_format));
+            .arg(format!("--ytdl-format={}", cfg.playback.resolved_ytdl_format()))
+            .arg(format!("--hwdec={}", cfg.playback.hwdec))
+            .arg("--vo=gpu")
+            .arg("--cache=yes")
+            .arg("--demuxer-max-bytes=150M")
+            .arg("--demuxer-max-back-bytes=50M")
+            .arg("--demuxer-readahead-secs=20");
+
+        if !cfg.playback.osd_bar {
+            cmd.arg("--osd-bar=no");
+        }
 
         if !cfg.playback.use_user_mpv_config {
             cmd.arg(format!("--config-dir={}", self.profile.dir.display()));
