@@ -30,12 +30,12 @@ impl MpvProfile {
             hwdec=auto-safe\n\
             vo=gpu\n\
             cache=yes\n\
-            demuxer-max-bytes=150M\n\
-            demuxer-max-back-bytes=50M\n\
-            demuxer-readahead-secs=20\n\
+            demuxer-max-bytes=64M\n\
+            demuxer-max-back-bytes=20M\n\
+            demuxer-readahead-secs=10\n\
             osd-bar=no\n\
             keep-open=no\n\
-            force-window=immediate\n",
+            force-window=yes\n",
         );
         if let Some(cp) = user_cookies {
             if cp.exists() {
@@ -51,6 +51,9 @@ impl MpvProfile {
         let input_conf_path = self.dir.join("input.conf");
         if !input_conf_path.exists() {
             let input_conf = "# Global Speed and seeking presets\n\
+                SPACE cycle pause\n\
+                q quit\n\
+                ESC set fullscreen no\n\
                 w set speed 1.0\n\
                 e set speed 1.5\n\
                 a set speed 1.75\n\
@@ -90,16 +93,8 @@ impl MpvProfile {
                 "https://raw.githubusercontent.com/po5/mpv_sponsorblock/master/sponsorblock.lua",
             ),
             (
-                "reload.lua",
-                "https://raw.githubusercontent.com/4e6/mpv-reload/master/main.lua",
-            ),
-            (
                 "quality-menu.lua",
                 "https://raw.githubusercontent.com/christoph-heinrich/mpv-quality-menu/master/quality-menu.lua",
-            ),
-            (
-                "youtube-chat.lua",
-                "https://raw.githubusercontent.com/BanchouBoo/mpv-youtube-chat/master/youtube-chat.lua",
             ),
         ];
 

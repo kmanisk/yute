@@ -61,13 +61,19 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
         pct
     );
 
-    let state_str = if status.paused { "[PAUSED]" } else { "[PLAYING]" };
+    let (state_str, state_style) = if status.paused_for_cache {
+        ("[BUFFERING]", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD))
+    } else if status.paused {
+        ("[PAUSED]", Style::default().fg(app.theme.text_secondary).add_modifier(Modifier::BOLD))
+    } else {
+        ("[PLAYING]", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD))
+    };
     let vol_str = format!("Vol: {:.0}%", status.volume);
     let speed_str = format!("Speed: {:.2}x", status.speed);
 
     let mut lines = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled(format!(" {state_str} "), Style::default().fg(app.theme.red).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" {state_str} "), state_style),
         Span::styled(title, Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
     ]));
     lines.push(Line::from(vec![

@@ -330,5 +330,25 @@ fn test_theme_system_integration() {
     assert_eq!(theme.bg, ratatui::style::Color::Reset, "System theme bg must be Color::Reset to merge with terminal");
 }
 
+#[test]
+fn test_confirming_quit_modal() {
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    let mut app = create_mock_app();
+    assert_eq!(app.screen, ytui::app::Screen::Home);
+    assert!(!app.confirming_quit);
+
+    // Pressing nav_back at root home screen must set confirming_quit to true instead of immediate quitting
+    app.nav_back();
+    assert!(app.confirming_quit, "nav_back on root home screen must trigger confirming_quit");
+    assert!(!app.should_quit, "nav_back on root home screen must NOT immediately quit");
+
+    // Rendering draw with confirming_quit = true must succeed
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ytui::ui::draw(f, &mut app)).unwrap();
+}
+
 
 

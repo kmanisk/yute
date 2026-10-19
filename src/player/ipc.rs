@@ -14,6 +14,7 @@ pub struct PlaybackStatus {
     pub time_pos: f64,
     pub duration: f64,
     pub paused: bool,
+    pub paused_for_cache: bool,
     pub volume: f64,
     pub speed: f64,
     pub chapter: i64,
@@ -25,6 +26,8 @@ pub struct PlaybackStatus {
 pub enum IpcCommand {
     LoadFile(String),
     TogglePause,
+    Play,
+    Pause,
     Seek(f64, bool), // (secs, is_relative)
     SetVolume(f64),
     AdjustVolume(f64),
@@ -52,19 +55,19 @@ impl MpvIpc {
         tx_status: Sender<PlaybackStatus>,
         running_flag: Arc<AtomicBool>,
     ) -> Result<Self> {
-        let (tx_cmd, mut rx_cmd) = channel::<IpcCommand>(32);
+        let (tx_cmd, mut rx_cmd) = channel::<IpcCommand>(64);
         let sock_path = Self::socket_path();
 
         tokio::spawn(async move {
             let mut stream = None;
-            for _ in 0..25 {
+            for _ in 0..100 {
                 if sock_path.exists() {
                     if let Ok(s) = UnixStream::connect(&sock_path).await {
                         stream = Some(s);
                         break;
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(80)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
             }
 
             let Some(stream) = stream else {
@@ -85,6 +88,7 @@ impl MpvIpc {
                 (6, "chapter"),
                 (7, "media-title"),
                 (8, "fullscreen"),
+                (9, "paused-for-cache"),
             ];
 
             for (id, prop) in observe_props {
@@ -93,6 +97,7 @@ impl MpvIpc {
                 });
                 let _ = writer.write_all(format!("{req}\n").as_bytes()).await;
             }
+            let _ = writer.flush().await;
 
             let mut status = PlaybackStatus {
                 volume: 100.0,
@@ -108,6 +113,8 @@ impl MpvIpc {
                         let cmd_json = match cmd {
                             IpcCommand::LoadFile(url) => json!({ "command": ["loadfile", url, "replace"] }),
                             IpcCommand::TogglePause => json!({ "command": ["cycle", "pause"] }),
+                            IpcCommand::Play => json!({ "command": ["set_property", "pause", false] }),
+                            IpcCommand::Pause => json!({ "command": ["set_property", "pause", true] }),
                             IpcCommand::Seek(secs, true) => json!({ "command": ["seek", secs, "relative"] }),
                             IpcCommand::Seek(pct, false) => json!({ "command": ["seek", pct, "absolute-percent"] }),
                             IpcCommand::SetVolume(v) => json!({ "command": ["set_property", "volume", v] }),
@@ -119,6 +126,7 @@ impl MpvIpc {
                             IpcCommand::Stop => json!({ "command": ["stop"] }),
                         };
                         let _ = writer.write_all(format!("{cmd_json}\n").as_bytes()).await;
+                        let _ = writer.flush().await;
                     }
 
                     line_res = lines.next_line() => {
@@ -133,6 +141,7 @@ impl MpvIpc {
                                                     "time-pos" => status.time_pos = data.and_then(|d| d.as_f64()).unwrap_or(status.time_pos),
                                                     "duration" => status.duration = data.and_then(|d| d.as_f64()).unwrap_or(status.duration),
                                                     "pause" => status.paused = data.and_then(|d| d.as_bool()).unwrap_or(status.paused),
+                                                    "paused-for-cache" => status.paused_for_cache = data.and_then(|d| d.as_bool()).unwrap_or(false),
                                                     "volume" => status.volume = data.and_then(|d| d.as_f64()).unwrap_or(status.volume),
                                                     "speed" => status.speed = data.and_then(|d| d.as_f64()).unwrap_or(status.speed),
                                                     "chapter" => status.chapter = data.and_then(|d| d.as_i64()).unwrap_or(status.chapter),
@@ -149,7 +158,11 @@ impl MpvIpc {
                                     }
                                 }
                             }
-                            _ => {
+                            Ok(None) => {
+                                // EOF from socket (mpv exited)
+                                break;
+                            }
+                            Err(_) => {
                                 break;
                             }
                         }

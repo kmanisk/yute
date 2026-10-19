@@ -185,6 +185,21 @@ async fn handle_key_event(
     key: crossterm::event::KeyEvent,
     tx: Sender<AppEvent>,
 ) {
+    // If confirmation modal is open
+    if app.confirming_quit {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                app.player.stop();
+                app.should_quit = true;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+                app.confirming_quit = false;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     // If focused on command line
     if app.focus == Focus::CommandLine {
         match key.code {
@@ -328,7 +343,10 @@ async fn handle_key_event(
         };
 
         match action {
-            Action::Quit | Action::Back => {
+            Action::Quit => {
+                app.confirming_quit = true;
+            }
+            Action::Back => {
                 if app.screen == Screen::Watch {
                     app.player.stop();
                     app.nav_back();
@@ -453,6 +471,7 @@ async fn handle_key_event(
             Action::Refresh => {
                 app.is_loading = true;
                 app.status_text = "Refreshing feed...".to_string();
+                let _ = app.thumbs.cache().clear();
                 trigger_home_fetch(app, tx.clone(), None);
             }
             Action::NavHome => {
@@ -752,8 +771,11 @@ fn play_selected_card(app: &mut App, mode: Option<PlaybackMode>, tx: Sender<AppE
 
 fn execute_command(app: &mut App, tx: Sender<AppEvent>) {
     let cmd = app.cmd_input.trim().to_string();
-    if cmd == "q" || cmd == "quit" {
+    if cmd == "q!" || cmd == "quit!" {
+        app.player.stop();
         app.should_quit = true;
+    } else if cmd == "q" || cmd == "quit" {
+        app.confirming_quit = true;
     } else if cmd == "home" {
         app.set_screen(Screen::Home);
         trigger_home_fetch(app, tx, None);

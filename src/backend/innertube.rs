@@ -80,14 +80,10 @@ impl Backend for InnerTubeBackend {
         };
 
         let val = self.post_endpoint("browse", body).await?;
-        let mut page = parse_feed_page(&val);
+        let page = parse_feed_page(&val);
 
         if page.items.is_empty() && chip_token.is_none() {
-            if let Ok(search_page) = self.search("trending", &SearchFilters::default(), None).await {
-                if !search_page.items.is_empty() {
-                    page.items = search_page.items;
-                }
-            }
+            return Err(anyhow!("InnerTube home feed returned 0 items, falling back to recommendation extractor"));
         }
 
         Ok(page)

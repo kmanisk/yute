@@ -100,4 +100,64 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.focus == Focus::CommandLine {
         cmdline::render_cmdline(f, app, size);
     }
+
+    // Render quit confirmation modal
+    if app.confirming_quit {
+        render_quit_confirmation(f, app, size);
+    }
+}
+
+fn render_quit_confirmation(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, Borders, Paragraph};
+
+    let dialog_w = 44.min(area.width.saturating_sub(4));
+    let dialog_h = 7.min(area.height.saturating_sub(2));
+
+    let vert = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length((area.height.saturating_sub(dialog_h)) / 2),
+            Constraint::Length(dialog_h),
+            Constraint::Min(0),
+        ])
+        .split(area);
+
+    let horiz = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length((area.width.saturating_sub(dialog_w)) / 2),
+            Constraint::Length(dialog_w),
+            Constraint::Min(0),
+        ])
+        .split(vert[1]);
+
+    let card_area = horiz[1];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .title(" Quit ytui ")
+        .style(Style::default().bg(app.theme.surface));
+
+    let inner = block.inner(card_area);
+    f.render_widget(block, card_area);
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Are you sure you want to quit?", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("        [y] Yes", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::raw("        "),
+            Span::styled("[n] No", Style::default().fg(app.theme.text_secondary)),
+        ]),
+    ];
+
+    let p = Paragraph::new(lines).alignment(Alignment::Left);
+    f.render_widget(p, inner);
 }

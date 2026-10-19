@@ -80,6 +80,7 @@ pub struct App {
     pub nav_future: Vec<(Screen, usize)>,
     pub backend: Arc<BackendChain>,
     pub should_quit: bool,
+    pub confirming_quit: bool,
     pub account_initial: String,
     pub account_name: String,
     pub account_handle: String,
@@ -150,6 +151,7 @@ impl App {
             nav_future: Vec::new(),
             backend: chain,
             should_quit: false,
+            confirming_quit: false,
             account_initial: "I".to_string(),
             account_name: "I am Hunter".to_string(),
             account_handle: "@iamhunter2570".to_string(),
@@ -219,6 +221,9 @@ impl App {
         self.account_handle = acc.handle.clone();
         self.account_initial = acc.initial.clone();
         self.save_active_account();
+        // Clear cached feeds so new account's data is loaded fresh
+        let _ = self.thumbs.cache().clear();
+        self.items.clear();
         true
     }
 
@@ -264,7 +269,7 @@ impl App {
         } else if self.screen != Screen::Home {
             self.set_screen(Screen::Home);
         } else {
-            self.should_quit = true;
+            self.confirming_quit = true;
         }
     }
 

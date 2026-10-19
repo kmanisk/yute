@@ -95,6 +95,8 @@ impl Player {
     }
 
     fn start_window_playback(&mut self, url: &str, cfg: &Config) -> Result<()> {
+        self.stop();
+
         let sock_path = MpvIpc::socket_path();
         if sock_path.exists() {
             let _ = std::fs::remove_file(&sock_path);
@@ -102,14 +104,15 @@ impl Player {
 
         let mut cmd = Command::new("mpv");
         cmd.arg(format!("--input-ipc-server={}", sock_path.display()))
-            .arg("--force-window=immediate")
+            .arg("--force-window=yes")
+            .arg("--idle=no")
             .arg(format!("--ytdl-format={}", cfg.playback.resolved_ytdl_format()))
             .arg(format!("--hwdec={}", cfg.playback.hwdec))
             .arg("--vo=gpu")
             .arg("--cache=yes")
-            .arg("--demuxer-max-bytes=150M")
-            .arg("--demuxer-max-back-bytes=50M")
-            .arg("--demuxer-readahead-secs=20");
+            .arg("--demuxer-max-bytes=64M")
+            .arg("--demuxer-max-back-bytes=20M")
+            .arg("--demuxer-readahead-secs=10");
 
         if !cfg.playback.osd_bar {
             cmd.arg("--osd-bar=no");
@@ -121,13 +124,24 @@ impl Player {
 
         let cookies_path = crate::config::resolve_path(&cfg.backend.cookies_file);
         if cookies_path.exists() {
-            cmd.arg(format!(
-                "--ytdl-raw-options-append=cookies={}",
-                cookies_path.display()
-            ));
+            let has_auth = std::fs::read_to_string(&cookies_path)
+                .map(|s| s.contains("LOGIN_INFO") || s.contains("SAPISID"))
+                .unwrap_or(false);
+            if has_auth {
+                cmd.arg(format!(
+                    "--ytdl-raw-options-append=cookies={}",
+                    cookies_path.display()
+                ));
+            }
             if cfg.playback.mark_watched {
                 cmd.arg("--ytdl-raw-options-append=mark-watched=");
             }
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
         }
 
         cmd.arg(url)
@@ -248,6 +262,19 @@ impl Player {
             ipc.send(IpcCommand::Stop);
         }
         if let Some(ref mut child) = self.child_process {
+            #[cfg(unix)]
+            {
+                let pid = child.id();
+                let _ = std::process::Command::new("kill")
+                    .arg("-15")
+                    .arg(format!("-{}", pid))
+                    .status();
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                let _ = std::process::Command::new("kill")
+                    .arg("-9")
+                    .arg(format!("-{}", pid))
+                    .status();
+            }
             let _ = child.kill();
             let _ = child.wait();
             self.child_process = None;
@@ -259,6 +286,15 @@ impl Player {
         let sock_path = MpvIpc::socket_path();
         if sock_path.exists() {
             let _ = std::fs::remove_file(&sock_path);
+        }
+
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("pkill")
+                .arg("-9")
+                .arg("-f")
+                .arg("ytui-mpv.sock")
+                .status();
         }
     }
 }
