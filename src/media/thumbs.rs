@@ -53,8 +53,9 @@ impl ThumbnailManager {
                                 let path_c = cache_path.clone();
                                 let decoded = tokio::task::spawn_blocking(move || {
                                     if let Ok(img) = image::load_from_memory(&bytes) {
-                                        let _ = img.save(&path_c);
-                                        Some(img)
+                                        let thumb = img.thumbnail(360, 202);
+                                        let _ = thumb.save(&path_c);
+                                        Some(thumb)
                                     } else {
                                         None
                                     }
@@ -93,7 +94,7 @@ impl ThumbnailManager {
         };
 
         let rows = (card_cols as f32 * cell_w / cell_h * 9.0 / 16.0).round() as u16;
-        rows.max(4).min(18)
+        rows.clamp(4, 7)
     }
 
     pub fn poll_loaded(&mut self) -> bool {
@@ -120,8 +121,8 @@ impl ThumbnailManager {
 
         if !self.in_flight.contains(url) && !url.is_empty() {
             self.in_flight.insert(url.to_string());
-            let hash = format!("{:x}", Sha256::digest(url.as_bytes()));
-            let cache_path = self.cache.thumbs_dir().join(format!("{hash}.jpg"));
+            let key = cache_key_for_url(url);
+            let cache_path = self.cache.thumbs_dir().join(format!("{key}.jpg"));
             let _ = self.tx_req.send((url.to_string(), cache_path));
         }
 
@@ -148,4 +149,32 @@ impl ThumbnailManager {
         self.ram_lru.clear();
         self.lru_order.clear();
     }
+}
+
+pub fn cache_key_for_url(url: &str) -> String {
+    // Canonicalize YouTube video thumbnail URLs
+    if let Some(pos) = url.find("/vi/") {
+        let rest = &url[pos + 4..];
+        if let Some(slash) = rest.find('/') {
+            let id = &rest[..slash];
+            if !id.is_empty() {
+                return format!("yt_{id}");
+            }
+        }
+    } else if let Some(pos) = url.find("/vi_webp/") {
+        let rest = &url[pos + 9..];
+        if let Some(slash) = rest.find('/') {
+            let id = &rest[..slash];
+            if !id.is_empty() {
+                return format!("yt_{id}");
+            }
+        }
+    }
+
+    // Strip ephemeral query parameters
+    let clean = match url.split_once('?') {
+        Some((base, _)) => base,
+        None => url,
+    };
+    format!("{:x}", Sha256::digest(clean.as_bytes()))
 }

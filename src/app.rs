@@ -85,8 +85,19 @@ impl App {
             auth.client_version = config.backend.client_version.clone();
         }
 
+        let cookies_from_browser = if !config.backend.cookies_from_browser.is_empty() {
+            Some(config.backend.cookies_from_browser.clone())
+        } else {
+            let brave_origin = resolve_path("~/.config/BraveSoftware/Brave-Origin");
+            if brave_origin.exists() {
+                Some(format!("brave:{}", brave_origin.display()))
+            } else {
+                None
+            }
+        };
+
         let inner_backend = Box::new(InnerTubeBackend::new(auth));
-        let ytdlp_backend = Box::new(YtDlpBackend::new(Some(cookies_path)));
+        let ytdlp_backend = Box::new(YtDlpBackend::new(Some(cookies_path), cookies_from_browser));
         let chain = Arc::new(BackendChain::new(vec![inner_backend, ytdlp_backend]));
 
         Self {
@@ -181,7 +192,15 @@ impl App {
         }
 
         // Poll mpv playback status
+        let was_playing = self.player.status.is_alive;
         if self.player.poll_updates() {
+            dirty = true;
+        }
+
+        // Automatically return from watch screen when mpv closes
+        if was_playing && !self.player.status.is_alive && self.screen == Screen::Watch {
+            self.status_text = "Playback finished".to_string();
+            self.nav_back();
             dirty = true;
         }
 

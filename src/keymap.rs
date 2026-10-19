@@ -108,7 +108,7 @@ impl KeymapState {
 
         // Quit now
         if (mods == KeyModifiers::CONTROL && code == KeyCode::Char('c'))
-            || (mods == KeyModifiers::SHIFT && code == KeyCode::Char('Q'))
+            || (mods == KeyModifiers::CONTROL && code == KeyCode::Char('q'))
         {
             return Some((Action::ForceQuit, 1));
         }
@@ -219,6 +219,14 @@ impl KeymapState {
             KeyCode::Char('f') => Some((Action::Filter, 1)),
             KeyCode::Char('r') => Some((Action::Refresh, 1)),
             KeyCode::Char('R') => Some((Action::HardRefresh, 1)),
+            KeyCode::Char('H') => Some((Action::NavHome, 1)),
+            KeyCode::Char('S') => Some((Action::NavSubs, 1)),
+            KeyCode::Char('Y') => Some((Action::NavHistory, 1)),
+            KeyCode::Char('P') => Some((Action::NavPlaylists, 1)),
+            KeyCode::Char('W') => Some((Action::NavWatchLater, 1)),
+            KeyCode::Char('L') => Some((Action::NavLiked, 1)),
+            KeyCode::Char('V') => Some((Action::NavLocal, 1)),
+            KeyCode::Char('Q') => Some((Action::NavQueue, 1)),
             KeyCode::Char('q') | KeyCode::Esc => Some((Action::Back, 1)),
             KeyCode::Char(':') => Some((Action::CommandLine, 1)),
             KeyCode::Char('?') => Some((Action::Help, 1)),
@@ -229,12 +237,9 @@ impl KeymapState {
             KeyCode::Char('a') => Some((Action::QueueAppend, 1)),
             KeyCode::Char('A') => Some((Action::QueuePrepend, 1)),
             KeyCode::Char('v') => Some((Action::ToggleSelect, 1)),
-            KeyCode::Char('V') => Some((Action::SelectAll, 1)),
             KeyCode::Char('i') => Some((Action::ToggleInfo, 1)),
             KeyCode::Char('y') => Some((Action::YankUrl, 1)),
-            KeyCode::Char('Y') => Some((Action::YankTitleAndUrl, 1)),
             KeyCode::Char('m') => Some((Action::MarkWatched, 1)),
-            KeyCode::Char('W') => Some((Action::AddToWatchLater, 1)),
             _ => None,
         }
     }

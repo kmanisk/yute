@@ -11,11 +11,15 @@ use tokio::process::Command;
 
 pub struct YtDlpBackend {
     cookies_path: Option<PathBuf>,
+    cookies_from_browser: Option<String>,
 }
 
 impl YtDlpBackend {
-    pub fn new(cookies_path: Option<PathBuf>) -> Self {
-        Self { cookies_path }
+    pub fn new(cookies_path: Option<PathBuf>, cookies_from_browser: Option<String>) -> Self {
+        Self {
+            cookies_path,
+            cookies_from_browser,
+        }
     }
 
     async fn run_ytdlp(&self, target: &str) -> Result<Value> {
@@ -23,13 +27,39 @@ impl YtDlpBackend {
         cmd.arg("-J")
             .arg("--flat-playlist")
             .arg("--no-warnings")
+            .arg("--playlist-items")
+            .arg("1:30")
             .arg(target)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        if let Some(ref p) = self.cookies_path {
-            if p.exists() {
-                cmd.arg("--cookies").arg(p);
+        let mut cookie_set = false;
+        if let Some(ref browser) = self.cookies_from_browser {
+            if !browser.is_empty() {
+                cmd.arg("--cookies-from-browser").arg(browser);
+                cookie_set = true;
+            }
+        }
+
+        if !cookie_set {
+            if let Some(ref p) = self.cookies_path {
+                if p.exists() {
+                    let has_auth = std::fs::read_to_string(p)
+                        .map(|s| s.contains("LOGIN_INFO") || s.contains("SAPISID") || s.contains("__Secure"))
+                        .unwrap_or(false);
+                    if has_auth {
+                        cmd.arg("--cookies").arg(p);
+                        cookie_set = true;
+                    }
+                }
+            }
+        }
+
+        if !cookie_set {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let brave_origin = PathBuf::from(format!("{home}/.config/BraveSoftware/Brave-Origin"));
+            if brave_origin.exists() {
+                cmd.arg("--cookies-from-browser").arg(format!("brave:{}", brave_origin.display()));
             }
         }
 
@@ -60,6 +90,41 @@ impl YtDlpBackend {
                 continue;
             }
 
+            let mut thumb_url = item.get("thumbnail")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string();
+            if thumb_url.is_empty() {
+                if let Some(thumbs) = item.get("thumbnails").and_then(|t| t.as_array()) {
+                    if let Some(first) = thumbs.first().and_then(|t| t.get("url")).and_then(|u| u.as_str()) {
+                        thumb_url = first.to_string();
+                    }
+                }
+            }
+            if thumb_url.is_empty() {
+                thumb_url = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
+            }
+
+            let is_playlist = id.starts_with("PL") || id == "WL" || id == "LL"
+                || item.get("ie_key").and_then(|k| k.as_str()) == Some("YoutubeTab");
+
+            if is_playlist {
+                let channel = item.get("uploader")
+                    .or_else(|| item.get("channel"))
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("Playlist")
+                    .to_string();
+                cards.push(Card::Playlist(crate::backend::models::PlaylistCard {
+                    id,
+                    title,
+                    channel,
+                    video_count: None,
+                    thumb_url,
+                    is_mix: false,
+                }));
+                continue;
+            }
+
             let channel = item.get("uploader")
                 .or_else(|| item.get("channel"))
                 .and_then(|s| s.as_str())
@@ -75,14 +140,6 @@ impl YtDlpBackend {
             let views = item.get("view_count")
                 .and_then(|v| v.as_u64())
                 .map(|cnt| format!("{cnt} views"));
-
-            let mut thumb_url = item.get("thumbnail")
-                .and_then(|t| t.as_str())
-                .unwrap_or("")
-                .to_string();
-            if thumb_url.is_empty() {
-                thumb_url = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
-            }
 
             cards.push(Card::Video(VideoCard {
                 id,
@@ -151,7 +208,13 @@ impl Backend for YtDlpBackend {
     }
 
     async fn playlists(&self) -> Result<FeedPage> {
-        Err(anyhow!("Playlists listing not directly supported in yt-dlp fallback"))
+        let val = self.run_ytdlp("https://www.youtube.com/feed/playlists").await?;
+        let items = self.parse_entries(&val);
+        Ok(FeedPage {
+            chips: Vec::new(),
+            items,
+            continuation: None,
+        })
     }
 
     async fn playlist(&self, id: &str) -> Result<FeedPage> {

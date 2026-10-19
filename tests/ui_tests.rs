@@ -71,3 +71,61 @@ fn test_render_at_200x60() {
     assert_eq!(buffer.area.width, 200);
     assert_eq!(buffer.area.height, 60);
 }
+
+#[test]
+fn test_collapsed_sidebar_shows_queue_at_80x24() {
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = create_mock_app();
+    app.sidebar_expanded = false;
+
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    let mut found_queue = false;
+    for y in 0..24 {
+        let line: String = (0..12).map(|x| buffer[(x, y)].symbol()).collect();
+        if line.contains("[Q]") {
+            found_queue = true;
+            break;
+        }
+    }
+    assert!(found_queue, "Queue [Q] must be visible in collapsed sidebar on 80x24 terminal");
+}
+
+#[test]
+fn test_capital_letter_navigation_keymaps() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ytui::keymap::{Action, KeymapState};
+
+    let mut keymap = KeymapState::new();
+
+    let check_key = |keymap: &mut KeymapState, c: char, expected: Action| {
+        let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT);
+        let res = keymap.handle_key(key, false);
+        assert_eq!(res, Some((expected, 1)), "Key '{c}' should map to {expected:?}");
+    };
+
+    check_key(&mut keymap, 'H', Action::NavHome);
+    check_key(&mut keymap, 'S', Action::NavSubs);
+    check_key(&mut keymap, 'Y', Action::NavHistory);
+    check_key(&mut keymap, 'P', Action::NavPlaylists);
+    check_key(&mut keymap, 'W', Action::NavWatchLater);
+    check_key(&mut keymap, 'L', Action::NavLiked);
+    check_key(&mut keymap, 'V', Action::NavLocal);
+    check_key(&mut keymap, 'Q', Action::NavQueue);
+}
+
+#[test]
+fn test_thumbnail_cache_key_canonicalization() {
+    use ytui::media::thumbs::cache_key_for_url;
+
+    let url1 = "https://i.ytimg.com/vi/xnP7qKxwzjg/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLB7K3yljM3gHdl2Dv3MFIzcVIS0_Q";
+    let url2 = "https://i.ytimg.com/vi/xnP7qKxwzjg/hqdefault.jpg?sqp=different_token&rs=different_salt";
+    let key1 = cache_key_for_url(url1);
+    let key2 = cache_key_for_url(url2);
+
+    assert_eq!(key1, "yt_xnP7qKxwzjg");
+    assert_eq!(key2, "yt_xnP7qKxwzjg");
+    assert_eq!(key1, key2, "Canonical cache keys must match regardless of transient query parameters");
+}

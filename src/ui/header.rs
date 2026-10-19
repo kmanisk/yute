@@ -19,13 +19,12 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    // Left: hamburger toggle + YouTube wordmark + region tag
+    // Left: hamburger toggle + YouTube wordmark
     let hamburger = if app.sidebar_expanded { "[=]" } else { "[-]" };
     let logo_spans = vec![
         Span::styled(format!("{hamburger} "), Style::default().fg(app.theme.text_secondary)),
         Span::styled(" |> ", Style::default().fg(app.theme.red).add_modifier(Modifier::BOLD)),
         Span::styled("YouTube", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" {}", app.config.backend.gl), Style::default().fg(app.theme.text_secondary)),
     ];
     f.render_widget(Paragraph::new(Line::from(logo_spans)), chunks[0]);
 
@@ -37,16 +36,33 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         app.theme.border
     };
 
-    let search_text = if app.search_query.is_empty() && !is_search_focused {
-        Span::styled(" Search...", Style::default().fg(app.theme.text_secondary))
+    let search_spans = if is_search_focused {
+        if app.search_query.is_empty() {
+            vec![
+                Span::styled(" [?] ", Style::default().fg(app.theme.accent)),
+                Span::styled("█ ", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+                Span::styled("Type to search... (Enter to submit, Esc to cancel)", Style::default().fg(app.theme.text_secondary)),
+            ]
+        } else {
+            vec![
+                Span::styled(" [?] ", Style::default().fg(app.theme.accent)),
+                Span::styled(format!(" {}", app.search_query), Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+                Span::styled("█", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            ]
+        }
+    } else if app.search_query.is_empty() {
+        vec![
+            Span::styled(" [?] ", Style::default().fg(app.theme.text_secondary)),
+            Span::styled(" Search (/ to search)...", Style::default().fg(app.theme.text_secondary)),
+        ]
     } else {
-        Span::styled(format!(" {}", app.search_query), Style::default().fg(app.theme.text))
+        vec![
+            Span::styled(" [?] ", Style::default().fg(app.theme.text_secondary)),
+            Span::styled(format!(" {}", app.search_query), Style::default().fg(app.theme.text)),
+        ]
     };
 
-    let search_pill = Paragraph::new(Line::from(vec![
-        Span::styled(" [?] ", Style::default().fg(app.theme.text_secondary)),
-        search_text,
-    ]))
+    let search_pill = Paragraph::new(Line::from(search_spans))
     .block(
         Block::default()
             .borders(Borders::ALL)

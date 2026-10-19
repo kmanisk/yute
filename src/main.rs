@@ -80,7 +80,9 @@ async fn main() -> anyhow::Result<()> {
     let mut app = App::new(config, picker);
     let (tx_event, mut rx_event) = channel::<AppEvent>(64);
 
-    // Initial load: trigger home feed fetch
+    // Initial load: load disk cache immediately for fast launch, then fetch fresh
+    try_load_feed_cache(&mut app, "feed_home");
+    app.is_loading = true;
     trigger_home_fetch(&app, tx_event.clone(), None);
 
     let mut keymap = KeymapState::new();
@@ -101,6 +103,9 @@ async fn main() -> anyhow::Result<()> {
                 if let Some(Ok(event)) = event_opt {
                     match event {
                         Event::Key(key) => {
+                            if key.kind != crossterm::event::KeyEventKind::Press {
+                                continue;
+                            }
                             handle_key_event(&mut app, &mut keymap, key, tx_event.clone()).await;
                         }
                         Event::Resize(w, h) => {
@@ -205,8 +210,24 @@ async fn handle_key_event(
             KeyCode::Backspace => {
                 app.search_query.pop();
             }
+            KeyCode::Char('u') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                app.search_query.clear();
+            }
+            KeyCode::Char('w') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                if let Some(idx) = app.search_query.trim_end().rfind(' ') {
+                    app.search_query.truncate(idx + 1);
+                } else {
+                    app.search_query.clear();
+                }
+            }
+            KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                app.focus = Focus::Content;
+            }
             KeyCode::Char(c) => {
-                app.search_query.push(c);
+                if !key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
+                    app.search_query.push(c);
+                }
             }
             _ => {}
         }
@@ -305,13 +326,15 @@ async fn handle_key_event(
                 app.focus = match app.focus {
                     Focus::Sidebar => Focus::Chips,
                     Focus::Chips => Focus::Content,
-                    Focus::Content => Focus::Sidebar,
+                    Focus::Content => Focus::SearchInput,
+                    Focus::SearchInput => Focus::Sidebar,
                     _ => Focus::Content,
                 };
             }
             Action::CycleFocusBackward => {
                 app.focus = match app.focus {
-                    Focus::Sidebar => Focus::Content,
+                    Focus::Sidebar => Focus::SearchInput,
+                    Focus::SearchInput => Focus::Content,
                     Focus::Content => Focus::Chips,
                     Focus::Chips => Focus::Sidebar,
                     _ => Focus::Content,
@@ -359,10 +382,17 @@ async fn handle_key_event(
             }
             Action::NavHome => {
                 app.set_screen(Screen::Home);
+                app.sidebar_index = 0;
+                try_load_feed_cache(app, "feed_home");
+                app.is_loading = true;
                 trigger_home_fetch(app, tx.clone(), None);
             }
             Action::NavSubs => {
                 app.set_screen(Screen::Subscriptions);
+                app.sidebar_index = 1;
+                try_load_feed_cache(app, "feed_subs");
+                app.is_loading = true;
+                app.status_text = "Loading Subscriptions...".to_string();
                 let backend = Arc::clone(&app.backend);
                 let tx_c = tx.clone();
                 tokio::spawn(async move {
@@ -372,6 +402,10 @@ async fn handle_key_event(
             }
             Action::NavHistory => {
                 app.set_screen(Screen::History);
+                app.sidebar_index = 2;
+                try_load_feed_cache(app, "feed_history");
+                app.is_loading = true;
+                app.status_text = "Loading History...".to_string();
                 let backend = Arc::clone(&app.backend);
                 let tx_c = tx.clone();
                 tokio::spawn(async move {
@@ -381,6 +415,10 @@ async fn handle_key_event(
             }
             Action::NavWatchLater => {
                 app.set_screen(Screen::WatchLater);
+                app.sidebar_index = 4;
+                try_load_feed_cache(app, "feed_watchlater");
+                app.is_loading = true;
+                app.status_text = "Loading Watch Later...".to_string();
                 let backend = Arc::clone(&app.backend);
                 let tx_c = tx.clone();
                 tokio::spawn(async move {
@@ -390,6 +428,10 @@ async fn handle_key_event(
             }
             Action::NavPlaylists => {
                 app.set_screen(Screen::Playlists);
+                app.sidebar_index = 3;
+                try_load_feed_cache(app, "feed_playlists");
+                app.is_loading = true;
+                app.status_text = "Loading Playlists...".to_string();
                 let backend = Arc::clone(&app.backend);
                 let tx_c = tx.clone();
                 tokio::spawn(async move {
@@ -399,12 +441,17 @@ async fn handle_key_event(
             }
             Action::NavLocal => {
                 app.set_screen(Screen::LocalVideos);
+                app.sidebar_index = 6;
                 let page = scan_local_videos(&app.config.local.dirs);
                 app.items = page.items;
                 app.status_text = format!("Loaded {} local videos", app.items.len());
             }
             Action::NavLiked => {
                 app.set_screen(Screen::Liked);
+                app.sidebar_index = 5;
+                try_load_feed_cache(app, "feed_liked");
+                app.is_loading = true;
+                app.status_text = "Loading Liked Videos...".to_string();
                 let backend = Arc::clone(&app.backend);
                 let tx_c = tx.clone();
                 tokio::spawn(async move {
@@ -414,6 +461,7 @@ async fn handle_key_event(
             }
             Action::NavQueue => {
                 app.set_screen(Screen::Queue);
+                app.sidebar_index = 7;
                 app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
                 app.status_text = format!("Queue: {} items", app.items.len());
             }
@@ -476,12 +524,14 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
     match app.sidebar_index {
         0 => {
             app.set_screen(Screen::Home);
+            try_load_feed_cache(app, "feed_home");
             app.is_loading = true;
             app.status_text = "Loading Home...".to_string();
             trigger_home_fetch(app, tx, None);
         }
         1 => {
             app.set_screen(Screen::Subscriptions);
+            try_load_feed_cache(app, "feed_subs");
             app.is_loading = true;
             app.status_text = "Loading Subscriptions...".to_string();
             let backend = Arc::clone(&app.backend);
@@ -492,6 +542,7 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
         }
         2 => {
             app.set_screen(Screen::History);
+            try_load_feed_cache(app, "feed_history");
             app.is_loading = true;
             app.status_text = "Loading History...".to_string();
             let backend = Arc::clone(&app.backend);
@@ -502,6 +553,7 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
         }
         3 => {
             app.set_screen(Screen::Playlists);
+            try_load_feed_cache(app, "feed_playlists");
             app.is_loading = true;
             app.status_text = "Loading Playlists...".to_string();
             let backend = Arc::clone(&app.backend);
@@ -512,6 +564,7 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
         }
         4 => {
             app.set_screen(Screen::WatchLater);
+            try_load_feed_cache(app, "feed_watchlater");
             app.is_loading = true;
             app.status_text = "Loading Watch Later...".to_string();
             let backend = Arc::clone(&app.backend);
@@ -522,6 +575,7 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
         }
         5 => {
             app.set_screen(Screen::Liked);
+            try_load_feed_cache(app, "feed_liked");
             app.is_loading = true;
             app.status_text = "Loading Liked Videos...".to_string();
             let backend = Arc::clone(&app.backend);
@@ -622,14 +676,33 @@ fn handle_app_event(app: &mut App, event: AppEvent, _tx: Sender<AppEvent>) {
             match res {
                 Ok(page) => {
                     if !page.chips.is_empty() {
-                        app.chips = page.chips;
+                        app.chips = page.chips.clone();
                     }
-                    app.items = page.items;
-                    app.continuation_token = page.continuation;
+                    app.items = page.items.clone();
+                    app.continuation_token = page.continuation.clone();
                     app.status_text = format!("Loaded {} items", app.items.len());
+
+                    let cache_key = match app.screen {
+                        Screen::Home => "feed_home",
+                        Screen::Subscriptions => "feed_subs",
+                        Screen::History => "feed_history",
+                        Screen::Playlists => "feed_playlists",
+                        Screen::WatchLater => "feed_watchlater",
+                        Screen::Liked => "feed_liked",
+                        _ => "",
+                    };
+                    if !cache_key.is_empty() && !page.items.is_empty() {
+                        if let Ok(json) = serde_json::to_string(&page) {
+                            let _ = app.thumbs.cache().save_feed_cache(cache_key, &json);
+                        }
+                    }
                 }
                 Err(err) => {
-                    app.status_text = format!("Error loading feed: {err}");
+                    if app.items.is_empty() {
+                        app.status_text = format!("Error loading feed: {err}");
+                    } else {
+                        app.status_text = format!("Could not refresh: {err}");
+                    }
                 }
             }
         }
@@ -644,3 +717,18 @@ fn handle_app_event(app: &mut App, event: AppEvent, _tx: Sender<AppEvent>) {
         _ => {}
     }
 }
+
+fn try_load_feed_cache(app: &mut App, key: &str) {
+    if let Some(json) = app.thumbs.cache().load_feed_cache(key, 120) {
+        if let Ok(page) = serde_json::from_str::<ytui::backend::models::FeedPage>(&json) {
+            if !page.items.is_empty() {
+                app.items = page.items;
+                if !page.chips.is_empty() {
+                    app.chips = page.chips;
+                }
+                app.status_text = format!("Loaded {} items (cached)", app.items.len());
+            }
+        }
+    }
+}
+

@@ -20,7 +20,7 @@ pub fn sidebar_width(expanded: bool) -> u16 {
     if expanded {
         24
     } else {
-        10
+        12
     }
 }
 
@@ -67,20 +67,20 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 Span::styled(format!("{icon} {label:<14} {marker}"), style),
             ]));
         } else {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{pointer}{icon}"), style),
-            ]));
             let short_label = match *screen {
+                Screen::Home => "Home",
                 Screen::Subscriptions => "Subs",
-                Screen::WatchLater => "Later",
-                Screen::Liked => "Liked",
-                Screen::LocalVideos => "Local",
+                Screen::History => "Hist",
+                Screen::Playlists => "Play",
+                Screen::WatchLater => "Late",
+                Screen::Liked => "Like",
+                Screen::LocalVideos => "Locl",
+                Screen::Queue => "Queu",
                 _ => label,
             };
             lines.push(Line::from(vec![
-                Span::styled(format!(" {short_label}"), style),
+                Span::styled(format!("{pointer}{icon} {short_label}"), style),
             ]));
-            lines.push(Line::from(""));
         }
     }
 

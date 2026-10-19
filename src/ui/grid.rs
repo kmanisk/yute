@@ -30,7 +30,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let card_w = area.width / (num_cols as u16);
 
     let thumb_rows = app.thumbs.compute_thumbnail_rows(card_w);
-    let card_h = thumb_rows + 6; // thumb + badge + title(2) + channel + stats
+    let card_h = thumb_rows + 7; // border(2) + thumb + badge(1) + title(2) + channel(1) + stats(1)
 
     if card_h == 0 {
         return;
