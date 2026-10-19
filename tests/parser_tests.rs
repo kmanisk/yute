@@ -69,3 +69,67 @@ fn test_parse_watch_fixture() {
     assert_eq!(watch.video.duration.as_deref(), Some("20:45"));
     assert!(watch.description.contains("Deep dive into building an interactive YouTube TUI"));
 }
+
+#[test]
+fn test_auth_cookie_domain_filtering() {
+    use ytui::backend::auth::AuthContext;
+    let mut auth = AuthContext::default();
+    let netscape_content = "\
+# Netscape HTTP Cookie File
+.sdcard.org\tTRUE\t/\tTRUE\t123456\ttoken\tbad_sdcard_val
+.testufo.com\tTRUE\t/\tFALSE\t123456\tsession\tbad_ufo_val
+.youtube.com\tTRUE\t/\tTRUE\t123456\tSAPISID\tvalid_sapisid_123
+.youtube.com\tTRUE\t/\tTRUE\t123456\tLOGIN_INFO\tvalid_login_info
+.google.com\tTRUE\t/\tTRUE\t123456\tSID\tvalid_sid
+";
+    auth.parse_netscape_cookies(netscape_content);
+    assert_eq!(auth.sapisid.as_deref(), Some("valid_sapisid_123"));
+    assert!(auth.cookies.contains_key("SAPISID"));
+    assert!(auth.cookies.contains_key("LOGIN_INFO"));
+    assert!(auth.cookies.contains_key("SID"));
+    assert!(!auth.cookies.contains_key("bad_sdcard_val"));
+    assert!(!auth.cookies.contains_key("token"));
+    assert!(!auth.cookies.contains_key("session"));
+    let hdr = auth.cookie_header.unwrap_or_default();
+    assert!(hdr.contains("SAPISID=valid_sapisid_123"));
+    assert!(!hdr.contains("bad_sdcard_val"));
+}
+
+#[test]
+fn test_parse_lockup_view_model() {
+    let raw = serde_json::json!({
+        "lockupViewModel": {
+            "contentId": "PL1234567890",
+            "contentType": "LOCKUP_CONTENT_TYPE_PLAYLIST",
+            "metadata": {
+                "lockupMetadataViewModel": {
+                    "title": { "content": "Rust Mastery Playlist" },
+                    "metadataRows": [
+                        {
+                            "metadataParts": [
+                                { "text": { "content": "Rust Channel" } }
+                            ]
+                        },
+                        {
+                            "metadataParts": [
+                                { "text": { "content": "45 videos" } }
+                            ]
+                        }
+                    ]
+                }
+            }
+        }
+    });
+
+    let page = parse_feed_page(&raw);
+    assert_eq!(page.items.len(), 1);
+    match &page.items[0] {
+        Card::Playlist(p) => {
+            assert_eq!(p.id, "PL1234567890");
+            assert_eq!(p.title, "Rust Mastery Playlist");
+            assert_eq!(p.channel, "Rust Channel");
+            assert_eq!(p.video_count.as_deref(), Some("45 videos"));
+        }
+        _ => panic!("Expected Playlist card"),
+    }
+}

@@ -8,15 +8,31 @@ pub fn extract_text(val: &Value) -> String {
     if let Some(s) = val.get("simpleText").and_then(|v| v.as_str()) {
         return s.trim().to_string();
     }
+    if let Some(content) = val.get("content").and_then(|v| v.as_str()) {
+        return content.trim().to_string();
+    }
     if let Some(runs) = val.get("runs").and_then(|v| v.as_array()) {
         let texts: Vec<&str> = runs
             .iter()
             .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
             .collect();
-        return texts.join("").trim().to_string();
+        let res = texts.join("").trim().to_string();
+        if !res.is_empty() {
+            return res;
+        }
     }
-    if let Some(content) = val.get("content").and_then(|v| v.as_str()) {
-        return content.trim().to_string();
+    if let Some(text_obj) = val.get("text") {
+        let s = extract_text(text_obj);
+        if !s.is_empty() {
+            return s;
+        }
+    }
+    if let Some(parts) = val.get("metadataParts").and_then(|p| p.as_array()) {
+        let texts: Vec<String> = parts.iter().map(extract_text).filter(|s| !s.is_empty()).collect();
+        let res = texts.join(" • ").trim().to_string();
+        if !res.is_empty() {
+            return res;
+        }
     }
     String::new()
 }
@@ -34,6 +50,24 @@ pub fn extract_best_thumbnail(val: &Value) -> String {
             if let Some(url) = last.get("url").and_then(|u| u.as_str()) {
                 return url.to_string();
             }
+        }
+    }
+    if let Some(image) = val.get("image") {
+        let u = extract_best_thumbnail(image);
+        if !u.is_empty() {
+            return u;
+        }
+    }
+    if let Some(primary) = val.pointer("/contentImage/collectionThumbnailViewModel/primaryThumbnail/thumbnailViewModel/image") {
+        let u = extract_best_thumbnail(primary);
+        if !u.is_empty() {
+            return u;
+        }
+    }
+    if let Some(thumb_vm) = val.pointer("/contentImage/thumbnailViewModel/image") {
+        let u = extract_best_thumbnail(thumb_vm);
+        if !u.is_empty() {
+            return u;
         }
     }
     String::new()
@@ -157,25 +191,37 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
         }
     }
 
-    let thumb_url = v.get("image")
-        .and_then(|img| img.get("imageViewModel"))
-        .map(extract_best_thumbnail)
-        .unwrap_or_else(|| format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"));
+    let mut thumb_url = extract_best_thumbnail(v);
+    if thumb_url.is_empty() {
+        thumb_url = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
+    }
 
-    Some(Card::Video(VideoCard {
-        id,
-        title,
-        channel,
-        channel_id: None,
-        verified: false,
-        duration: None,
-        views: stats.first().cloned(),
-        published: if stats.len() > 1 { Some(stats[1].clone()) } else { None },
-        thumb_url,
-        progress_pct: None,
-        live: LiveState::None,
-        badges: Vec::new(),
-    }))
+    let content_type = v.get("contentType").and_then(|s| s.as_str()).unwrap_or("");
+    if content_type.contains("PLAYLIST") || id.starts_with("PL") || id.starts_with("RD") {
+        Some(Card::Playlist(PlaylistCard {
+            id,
+            title,
+            channel,
+            video_count: stats.first().cloned(),
+            thumb_url,
+            is_mix: false,
+        }))
+    } else {
+        Some(Card::Video(VideoCard {
+            id,
+            title,
+            channel,
+            channel_id: None,
+            verified: false,
+            duration: None,
+            views: stats.first().cloned(),
+            published: if stats.len() > 1 { Some(stats[1].clone()) } else { None },
+            thumb_url,
+            progress_pct: None,
+            live: LiveState::None,
+            badges: Vec::new(),
+        }))
+    }
 }
 
 pub fn parse_playlist_renderer(v: &Value) -> Option<PlaylistCard> {
@@ -315,8 +361,8 @@ pub fn walk_and_collect_cards(val: &Value, items: &mut Vec<Card>) {
         }
     } else if let Some(obj) = val.as_object() {
         for (k, v) in obj {
-            // Skip richSectionRenderer shelves like Shorts
-            if k == "richSectionRenderer" {
+            // Skip shorts shelves
+            if k == "reelShelfRenderer" {
                 continue;
             }
             walk_and_collect_cards(v, items);

@@ -105,7 +105,7 @@ impl App {
             search_suggestions: Vec::new(),
             suggestion_index: None,
             cmd_input: String::new(),
-            status_text: "All good :)".to_string(),
+            status_text: "Ready".to_string(),
             is_loading: false,
             spinner_frame: 0,
             player,

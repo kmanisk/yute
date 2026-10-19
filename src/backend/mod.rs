@@ -40,14 +40,15 @@ impl BackendChain {
 impl Backend for BackendChain {
     async fn home(&self, chip_token: Option<&str>) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
+        let mut empty_res = None;
         for b in &self.backends {
             match b.home(chip_token).await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
-                Ok(res) => return Ok(res),
+                Ok(res) => empty_res = Some(res),
                 Err(e) => last_err = e,
             }
         }
-        Err(last_err)
+        empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
     async fn continue_feed(&self, token: &str) -> anyhow::Result<FeedPage> {
@@ -63,68 +64,80 @@ impl Backend for BackendChain {
 
     async fn subscriptions(&self) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
+        let mut empty_res = None;
         for b in &self.backends {
             match b.subscriptions().await {
-                Ok(res) => return Ok(res),
+                Ok(res) if !res.items.is_empty() => return Ok(res),
+                Ok(res) => empty_res = Some(res),
                 Err(e) => last_err = e,
             }
         }
-        Err(last_err)
+        empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
     async fn history(&self) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
+        let mut empty_res = None;
         for b in &self.backends {
             match b.history().await {
-                Ok(res) => return Ok(res),
+                Ok(res) if !res.items.is_empty() => return Ok(res),
+                Ok(res) => empty_res = Some(res),
                 Err(e) => last_err = e,
             }
         }
-        Err(last_err)
+        empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
     async fn watch_later(&self) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
+        let mut empty_res = None;
         for b in &self.backends {
             match b.watch_later().await {
-                Ok(res) => return Ok(res),
+                Ok(res) if !res.items.is_empty() => return Ok(res),
+                Ok(res) => empty_res = Some(res),
                 Err(e) => last_err = e,
             }
         }
-        Err(last_err)
+        empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
     async fn playlists(&self) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
+        let mut empty_res = None;
         for b in &self.backends {
             match b.playlists().await {
-                Ok(res) => return Ok(res),
+                Ok(res) if !res.items.is_empty() => return Ok(res),
+                Ok(res) => empty_res = Some(res),
                 Err(e) => last_err = e,
             }
         }
-        Err(last_err)
+        empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
     async fn playlist(&self, id: &str) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
+        let mut empty_res = None;
         for b in &self.backends {
             match b.playlist(id).await {
-                Ok(res) => return Ok(res),
+                Ok(res) if !res.items.is_empty() => return Ok(res),
+                Ok(res) => empty_res = Some(res),
                 Err(e) => last_err = e,
             }
         }
-        Err(last_err)
+        empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
     async fn search(&self, q: &str, filters: &SearchFilters, token: Option<&str>) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
+        let mut empty_res = None;
         for b in &self.backends {
             match b.search(q, filters, token).await {
-                Ok(res) => return Ok(res),
+                Ok(res) if !res.items.is_empty() => return Ok(res),
+                Ok(res) => empty_res = Some(res),
                 Err(e) => last_err = e,
             }
         }
-        Err(last_err)
+        empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
     async fn suggest(&self, q: &str) -> anyhow::Result<Vec<String>> {

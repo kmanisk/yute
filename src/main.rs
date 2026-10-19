@@ -187,12 +187,16 @@ async fn handle_key_event(
     if app.focus == Focus::SearchInput {
         match key.code {
             KeyCode::Enter => {
-                if !app.search_query.trim().is_empty() {
+                let q = app.search_query.trim().to_string();
+                if !q.is_empty() {
+                    app.filter_text.clear();
+                    app.selected_index = 0;
+                    app.items.clear();
                     app.set_screen(Screen::Search);
                     app.focus = Focus::Content;
                     app.is_loading = true;
-                    app.status_text = format!("Searching for '{}'...", app.search_query);
-                    trigger_search_fetch(app, tx.clone(), app.search_query.clone());
+                    app.status_text = format!("Searching for '{}'...", q);
+                    trigger_search_fetch(app, tx.clone(), q);
                 }
             }
             KeyCode::Esc => {
@@ -217,7 +221,11 @@ async fn handle_key_event(
     for _ in 0..count {
         match action {
             Action::Quit | Action::Back => {
-                app.nav_back();
+                if app.focus == Focus::Sidebar {
+                    app.focus = Focus::Content;
+                } else {
+                    app.nav_back();
+                }
             }
             Action::ForceQuit => {
                 app.should_quit = true;
@@ -225,6 +233,8 @@ async fn handle_key_event(
             Action::Up => {
                 if app.focus == Focus::Sidebar {
                     app.sidebar_index = app.sidebar_index.saturating_sub(1);
+                } else if app.screen == Screen::Search {
+                    app.selected_index = app.selected_index.saturating_sub(1);
                 } else {
                     let min_w = app.config.grid.min_card_width.max(28);
                     let cols = (80 / min_w).clamp(1, 6) as usize;
@@ -232,31 +242,63 @@ async fn handle_key_event(
                 }
             }
             Action::Down => {
-                let total = app.filtered_items().len();
                 if app.focus == Focus::Sidebar {
-                    app.sidebar_index = (app.sidebar_index + 1).min(8);
-                } else if total > 0 {
-                    let min_w = app.config.grid.min_card_width.max(28);
-                    let cols = (80 / min_w).clamp(1, 6) as usize;
-                    app.selected_index = (app.selected_index + cols).min(total - 1);
+                    app.sidebar_index = (app.sidebar_index + 1).min(ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1));
+                } else {
+                    let total = app.filtered_items().len();
+                    if total > 0 {
+                        let step = if app.screen == Screen::Search {
+                            1
+                        } else {
+                            let min_w = app.config.grid.min_card_width.max(28);
+                            (80 / min_w).clamp(1, 6) as usize
+                        };
+                        app.selected_index = (app.selected_index + step).min(total - 1);
+                    }
                 }
             }
             Action::Left => {
-                app.selected_index = app.selected_index.saturating_sub(1);
+                if app.focus == Focus::Sidebar {
+                    // Already in sidebar
+                } else {
+                    let cols = if app.screen == Screen::Search {
+                        1
+                    } else {
+                        let min_w = app.config.grid.min_card_width.max(28);
+                        (80 / min_w).clamp(1, 6) as usize
+                    };
+                    if app.items.is_empty() || app.selected_index % cols == 0 {
+                        app.focus = Focus::Sidebar;
+                    } else {
+                        app.selected_index = app.selected_index.saturating_sub(1);
+                    }
+                }
             }
             Action::Right => {
-                let total = app.filtered_items().len();
-                if total > 0 {
-                    app.selected_index = (app.selected_index + 1).min(total - 1);
+                if app.focus == Focus::Sidebar {
+                    activate_sidebar_item(app, tx.clone());
+                } else {
+                    let total = app.filtered_items().len();
+                    if total > 0 {
+                        app.selected_index = (app.selected_index + 1).min(total - 1);
+                    }
                 }
             }
             Action::First => {
-                app.selected_index = 0;
+                if app.focus == Focus::Sidebar {
+                    app.sidebar_index = 0;
+                } else {
+                    app.selected_index = 0;
+                }
             }
             Action::Last => {
-                let total = app.filtered_items().len();
-                if total > 0 {
-                    app.selected_index = total - 1;
+                if app.focus == Focus::Sidebar {
+                    app.sidebar_index = ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1);
+                } else {
+                    let total = app.filtered_items().len();
+                    if total > 0 {
+                        app.selected_index = total - 1;
+                    }
                 }
             }
             Action::CycleFocusForward => {
@@ -276,7 +318,13 @@ async fn handle_key_event(
                 };
             }
             Action::ToggleSidebar => {
-                app.sidebar_expanded = !app.sidebar_expanded;
+                if app.focus == Focus::Sidebar {
+                    app.sidebar_expanded = false;
+                    app.focus = Focus::Content;
+                } else {
+                    app.sidebar_expanded = true;
+                    app.focus = Focus::Sidebar;
+                }
             }
             Action::PrevChip => {
                 if !app.chips.is_empty() {
@@ -355,8 +403,26 @@ async fn handle_key_event(
                 app.items = page.items;
                 app.status_text = format!("Loaded {} local videos", app.items.len());
             }
+            Action::NavLiked => {
+                app.set_screen(Screen::Liked);
+                let backend = Arc::clone(&app.backend);
+                let tx_c = tx.clone();
+                tokio::spawn(async move {
+                    let res = backend.playlist("LL").await;
+                    let _ = tx_c.send(AppEvent::FeedLoaded(res)).await;
+                });
+            }
+            Action::NavQueue => {
+                app.set_screen(Screen::Queue);
+                app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
+                app.status_text = format!("Queue: {} items", app.items.len());
+            }
             Action::PlayDefault => {
-                play_selected_card(app, None, tx.clone());
+                if app.focus == Focus::Sidebar {
+                    activate_sidebar_item(app, tx.clone());
+                } else {
+                    play_selected_card(app, None, tx.clone());
+                }
             }
             Action::PlayInline => {
                 play_selected_card(app, Some(PlaybackMode::Inline), tx.clone());
@@ -402,6 +468,80 @@ async fn handle_key_event(
             }
             _ => {}
         }
+    }
+}
+
+fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
+    app.focus = Focus::Content;
+    match app.sidebar_index {
+        0 => {
+            app.set_screen(Screen::Home);
+            app.is_loading = true;
+            app.status_text = "Loading Home...".to_string();
+            trigger_home_fetch(app, tx, None);
+        }
+        1 => {
+            app.set_screen(Screen::Subscriptions);
+            app.is_loading = true;
+            app.status_text = "Loading Subscriptions...".to_string();
+            let backend = Arc::clone(&app.backend);
+            tokio::spawn(async move {
+                let res = backend.subscriptions().await;
+                let _ = tx.send(AppEvent::FeedLoaded(res)).await;
+            });
+        }
+        2 => {
+            app.set_screen(Screen::History);
+            app.is_loading = true;
+            app.status_text = "Loading History...".to_string();
+            let backend = Arc::clone(&app.backend);
+            tokio::spawn(async move {
+                let res = backend.history().await;
+                let _ = tx.send(AppEvent::FeedLoaded(res)).await;
+            });
+        }
+        3 => {
+            app.set_screen(Screen::Playlists);
+            app.is_loading = true;
+            app.status_text = "Loading Playlists...".to_string();
+            let backend = Arc::clone(&app.backend);
+            tokio::spawn(async move {
+                let res = backend.playlists().await;
+                let _ = tx.send(AppEvent::FeedLoaded(res)).await;
+            });
+        }
+        4 => {
+            app.set_screen(Screen::WatchLater);
+            app.is_loading = true;
+            app.status_text = "Loading Watch Later...".to_string();
+            let backend = Arc::clone(&app.backend);
+            tokio::spawn(async move {
+                let res = backend.watch_later().await;
+                let _ = tx.send(AppEvent::FeedLoaded(res)).await;
+            });
+        }
+        5 => {
+            app.set_screen(Screen::Liked);
+            app.is_loading = true;
+            app.status_text = "Loading Liked Videos...".to_string();
+            let backend = Arc::clone(&app.backend);
+            tokio::spawn(async move {
+                let res = backend.playlist("LL").await;
+                let _ = tx.send(AppEvent::FeedLoaded(res)).await;
+            });
+        }
+        6 => {
+            app.set_screen(Screen::LocalVideos);
+            let page = scan_local_videos(&app.config.local.dirs);
+            app.items = page.items;
+            app.status_text = format!("Loaded {} local videos", app.items.len());
+        }
+        7 => {
+            app.set_screen(Screen::Queue);
+            app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
+            app.status_text = format!("Queue: {} items", app.items.len());
+        }
+        _ => {}
     }
 }
 

@@ -41,6 +41,11 @@ impl AuthContext {
     pub fn load_from_file(path: &Path) -> Result<Self> {
         let mut ctx = Self::default();
         if !path.exists() {
+            // Attempt auto-extraction from Brave if present
+            Self::try_auto_extract_brave_cookies(path);
+        }
+
+        if !path.exists() {
             return Ok(ctx);
         }
 
@@ -49,6 +54,44 @@ impl AuthContext {
 
         ctx.parse_netscape_cookies(&content);
         Ok(ctx)
+    }
+
+    fn try_auto_extract_brave_cookies(target_path: &Path) {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let candidates = [
+            format!("{home}/.config/BraveSoftware/Brave-Origin"),
+            format!("{home}/.config/BraveSoftware/Brave-Browser"),
+        ];
+
+        for cand in candidates {
+            let cookie_db = format!("{cand}/Default/Cookies");
+            if Path::new(&cookie_db).exists() {
+                if let Some(parent) = target_path.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                let status = std::process::Command::new("yt-dlp")
+                    .arg("--cookies-from-browser")
+                    .arg(format!("brave:{cand}"))
+                    .arg("--cookies")
+                    .arg(target_path)
+                    .arg("--skip-download")
+                    .arg("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+
+                if let Ok(st) = status {
+                    if st.success() && target_path.exists() {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = fs::set_permissions(target_path, fs::Permissions::from_mode(0o600));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     pub fn parse_netscape_cookies(&mut self, text: &str) {
@@ -60,6 +103,11 @@ impl AuthContext {
             }
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() >= 7 {
+                let domain = parts[0].to_lowercase();
+                if !domain.contains("youtube.com") && !domain.contains("google.com") {
+                    continue;
+                }
+
                 let name = parts[5].trim().to_string();
                 let value = parts[6].trim().to_string();
                 if name == "SAPISID" || name == "__Secure-3PAPISID" {
