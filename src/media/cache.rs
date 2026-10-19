@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+#[derive(Clone)]
 pub struct DiskCache {
     base_dir: PathBuf,
     max_bytes: u64,
@@ -41,20 +42,10 @@ impl DiskCache {
     }
 
     #[allow(dead_code)]
-    pub fn load_feed_cache(&self, key: &str, ttl_min: u64) -> Option<String> {
+    pub fn load_feed_cache(&self, key: &str, _ttl_min: u64) -> Option<String> {
         let path = self.feeds_dir().join(format!("{key}.json"));
         if !path.exists() {
             return None;
-        }
-
-        if let Ok(meta) = fs::metadata(&path) {
-            if let Ok(modified) = meta.modified() {
-                if let Ok(age) = SystemTime::now().duration_since(modified) {
-                    if age > Duration::from_secs(ttl_min * 60) {
-                        return None;
-                    }
-                }
-            }
         }
 
         fs::read_to_string(path).ok()
@@ -93,6 +84,28 @@ impl DiskCache {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn prune_feeds(&self, max_age_days: u64) -> Result<()> {
+        let feeds = self.feeds_dir();
+        if !feeds.exists() {
+            return Ok(());
+        }
+        let cutoff = SystemTime::now() - Duration::from_secs(max_age_days * 86400);
+        for entry in fs::read_dir(&feeds)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                if let Ok(meta) = entry.metadata() {
+                    if let Ok(mtime) = meta.modified() {
+                        if mtime < cutoff {
+                            let _ = fs::remove_file(path);
+                        }
+                    }
+                }
+            }
+        }
         Ok(())
     }
 

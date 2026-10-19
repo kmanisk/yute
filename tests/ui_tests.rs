@@ -283,7 +283,7 @@ fn test_header_shows_account_and_ascii_logo() {
     let mut found_account = false;
     for y in 0..3 {
         let line: String = (0..140).map(|x| buffer[(x, y)].symbol()).collect();
-        if line.contains("|> YouTube") {
+        if line.contains("YouTube") {
             found_logo = true;
         }
         if line.contains("Mathew Manisk") && line.contains("[M]") {
@@ -291,7 +291,7 @@ fn test_header_shows_account_and_ascii_logo() {
         }
     }
 
-    assert!(found_logo, "Header must render ASCII '|> YouTube' logo");
+    assert!(found_logo, "Header must render ASCII YouTube logo");
     assert!(found_account, "Header must render user account pill with initial and name at top-right");
 }
 
@@ -463,6 +463,42 @@ fn test_unique_socket_generation() {
     let s1_str = s1.to_string_lossy();
     assert!(s1_str.contains("ytui-mpv-"));
     assert!(s1_str.ends_with(".sock"));
+}
+
+#[test]
+fn test_stats_for_nerds_keybinding() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ytui::keymap::{Action, KeymapState};
+
+    let mut keymap = KeymapState::new();
+
+    // In watch mode: 'i' and 'I' trigger ToggleStats
+    let key_i = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE);
+    assert_eq!(
+        keymap.handle_key(key_i, true),
+        Some((Action::ToggleStats, 1)),
+        "'i' in watch mode must trigger ToggleStats"
+    );
+
+    let key_upper_i = KeyEvent::new(KeyCode::Char('I'), KeyModifiers::SHIFT);
+    assert_eq!(
+        keymap.handle_key(key_upper_i, true),
+        Some((Action::ToggleStats, 1)),
+        "'I' in watch mode must trigger ToggleStats"
+    );
+
+    // In browsing mode: Enter triggers PlayDefault, Shift+Enter triggers PlayInline
+    let key_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(
+        keymap.handle_key(key_enter, false),
+        Some((Action::PlayDefault, 1))
+    );
+
+    let key_shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+    assert_eq!(
+        keymap.handle_key(key_shift_enter, false),
+        Some((Action::PlayInline, 1))
+    );
 }
 
 

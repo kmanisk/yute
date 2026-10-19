@@ -24,8 +24,8 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
 
     // Row 0: Context-sensitive key hints
     let hints = match app.screen {
-        Screen::Watch => "Space pause · h/l seek · +/- vol · </> speed · c chat · d desc · f full · q back",
-        _ => "j/k move · Enter play · e inline · / search · f filter · r refresh · b sidebar · ? help · q back",
+        Screen::Watch => "Space pause · h/l seek · +/- vol · </> speed · i stats · c chat · d desc · f full · q back",
+        _ => "j/k move · Enter play · Shift+Enter terminal · / search · f filter · r refresh · b sidebar · ? help · q back",
     };
 
     let p_hints = Paragraph::new(Line::from(vec![
@@ -34,18 +34,11 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(p_hints, rows[0]);
 
     if rows.len() > 1 {
-        // Row 1: status box line with [backend] [mode] [All good :)]
-        let mode_str = match app.player.mode {
-            crate::player::PlaybackMode::Window => "window",
-            crate::player::PlaybackMode::Inline => "inline",
-            crate::player::PlaybackMode::Auto => "auto",
-        };
-
+        // Row 1: status box line with [backend] [status_text]
         let backend_str = "innertube";
 
         let status_spans = vec![
             Span::styled(format!(" [{backend_str}]"), Style::default().fg(app.theme.text_secondary)),
-            Span::styled(format!(" [{mode_str}]"), Style::default().fg(app.theme.text_secondary)),
             Span::raw("  "),
             Span::styled(
                 format!("[ {} ]", app.status_text),

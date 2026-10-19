@@ -26,8 +26,9 @@ pub fn render_help(f: &mut Frame, app: &App, area: Rect) {
 
     let entries = [
         ("h / j / k / l", "Move cursor across cards / items"),
-        ("Enter", "Play in default mode (window/inline)"),
-        ("e / w", "Play inline in terminal / in external window"),
+        ("Enter", "Play video in external MPV window"),
+        ("Shift-Enter", "Play video directly in terminal (Kitty/Sixel)"),
+        ("w", "Play in external window"),
         ("o", "Open current video in browser"),
         ("/", "Focus search bar (insert mode)"),
         ("f", "Live filter loaded cards"),
@@ -39,6 +40,7 @@ pub fn render_help(f: &mut Frame, app: &App, area: Rect) {
         ("gw / gp / gl", "Go to Watch Later / Playlists / Liked"),
         ("gv / gq", "Go to Local Videos / Play Queue"),
         ("Space", "Pause / Resume playback in watch mode"),
+        ("i / I", "Toggle Stats for Nerds overlay in mpv"),
         ("h / l / H / L", "Seek -5s / +5s / -30s / +30s"),
         ("+ / - / M", "Volume up / Volume down / Mute"),
         ("< / >", "Speed down / Speed up (0.25x steps)"),

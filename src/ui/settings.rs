@@ -12,7 +12,6 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Stream Cache", "Pre-buffer size and readahead to prevent stream pauses"),
     ("OSD Seekbar", "Clean bottom bar vs center screen overlay box"),
     ("Use User MPV Config", "Use ~/.config/mpv/mpv.conf or ytui dedicated profile"),
-    ("Default Playback Mode", "Spawn windowed MPV player or inline terminal player"),
     ("Autoplay Next", "Automatically queue and play next recommended video"),
 ];
 
@@ -75,8 +74,7 @@ pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
                     "Disabled (Use ytui Profile)".to_string()
                 }
             }
-            6 => app.config.playback.default_mode.clone(),
-            7 => {
+            6 => {
                 if app.config.playback.autoplay {
                     "Enabled".to_string()
                 } else {
@@ -192,15 +190,6 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
             app.status_text = format!("Use user MPV config: {}", app.config.playback.use_user_mpv_config);
         }
         6 => {
-            // Default Playback Mode
-            if app.config.playback.default_mode == "window" {
-                app.config.playback.default_mode = "inline".to_string();
-            } else {
-                app.config.playback.default_mode = "window".to_string();
-            }
-            app.status_text = format!("Default playback mode: {}", app.config.playback.default_mode);
-        }
-        7 => {
             // Autoplay
             app.config.playback.autoplay = !app.config.playback.autoplay;
             app.status_text = format!("Autoplay: {}", app.config.playback.autoplay);

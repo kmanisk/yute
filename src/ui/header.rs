@@ -10,29 +10,50 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let right_width = if area.width >= 110 {
-        38u16
-    } else if area.width >= 85 {
-        30u16
+    let right_width = if area.width >= 120 {
+        44u16
+    } else if area.width >= 90 {
+        36u16
     } else {
-        20u16
+        24u16
+    };
+
+    let left_width = if area.width >= 90 {
+        22u16
+    } else {
+        16u16
     };
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(22), // Logo + hamburger
-            Constraint::Min(20),   // Centered search pill
+            Constraint::Length(left_width), // Left: hamburger + current section
+            Constraint::Min(20),            // Center: search pill
             Constraint::Length(right_width), // Right: ASCII YouTube badge + Account block
         ])
         .split(area);
 
-    // Left: hamburger toggle + YouTube wordmark
+    // Left: hamburger toggle + current section title
     let hamburger = if app.sidebar_expanded { "[=]" } else { "[-]" };
+    let section_name = match app.screen {
+        crate::app::Screen::Home => "Home",
+        crate::app::Screen::Subscriptions => "Subscriptions",
+        crate::app::Screen::History => "History",
+        crate::app::Screen::WatchLater => "Watch Later",
+        crate::app::Screen::Playlists | crate::app::Screen::PlaylistView => "Playlists",
+        crate::app::Screen::Liked => "Liked",
+        crate::app::Screen::LocalVideos => "Local",
+        crate::app::Screen::Queue => "Queue",
+        crate::app::Screen::Settings => "Settings",
+        crate::app::Screen::Accounts => "Accounts",
+        crate::app::Screen::Watch => "Watch",
+        crate::app::Screen::Search => "Search",
+        crate::app::Screen::Help => "Help",
+    };
+
     let logo_spans = vec![
         Span::styled(format!("{hamburger} "), Style::default().fg(app.theme.text_secondary)),
-        Span::styled(" |> ", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
-        Span::styled("YouTube", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(section_name, Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
     ];
     let logo_lines = if area.height >= 3 {
         vec![Line::from(""), Line::from(logo_spans)]
@@ -84,12 +105,12 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     );
     f.render_widget(search_pill, chunks[1]);
 
-    // Right: spinner indicator + ASCII YouTube badge + account pill
+    // Right: spinner indicator + ASCII YouTube badge + account avatar
     let spinners = ["-", "\\", "|", "/"];
     let spinner_str = if app.is_loading {
         spinners[app.spinner_frame % spinners.len()]
     } else {
-        " "
+        ""
     };
 
     let account_initial = if app.account_initial.is_empty() {
@@ -98,31 +119,58 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         &app.account_initial
     };
 
-    let account_label = if !app.account_name.is_empty() {
-        if right_width >= 34 {
-            format!(" [{account_initial}] {} ", app.account_name)
-        } else {
-            let first_word = app.account_name.split_whitespace().next().unwrap_or(&app.account_name);
-            format!(" [{account_initial}] {first_word} ")
-        }
-    } else if !app.account_handle.is_empty() {
-        format!(" [{account_initial}] {} ", app.account_handle)
-    } else {
-        format!(" [{account_initial}] User ")
-    };
-
     let mut right_spans = Vec::new();
-    if app.is_loading {
+    if app.is_loading && !spinner_str.is_empty() {
         right_spans.push(Span::styled(format!("{spinner_str} "), Style::default().fg(app.theme.accent)));
     }
 
+    if right_width >= 32 {
+        right_spans.push(Span::styled(
+            " ▕▶▏YouTube ",
+            Style::default()
+                .bg(app.theme.accent)
+                .fg(ratatui::style::Color::White)
+                .add_modifier(Modifier::BOLD),
+        ));
+        right_spans.push(Span::raw(" "));
+    } else if right_width >= 24 {
+        right_spans.push(Span::styled(
+            " ▕▶▏",
+            Style::default()
+                .bg(app.theme.accent)
+                .fg(ratatui::style::Color::White)
+                .add_modifier(Modifier::BOLD),
+        ));
+        right_spans.push(Span::raw(" "));
+    }
+
+    // Account pill with turquoise avatar circle
     right_spans.push(Span::styled(
-        account_label,
+        format!(" [{account_initial}] "),
         Style::default()
-            .bg(app.theme.surface_hover)
-            .fg(app.theme.text)
+            .bg(ratatui::style::Color::Rgb(0, 150, 136))
+            .fg(ratatui::style::Color::White)
             .add_modifier(Modifier::BOLD),
     ));
+
+    if right_width >= 36 && !app.account_name.is_empty() {
+        right_spans.push(Span::styled(
+            format!(" {} ", app.account_name),
+            Style::default()
+                .bg(app.theme.surface_hover)
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else if right_width >= 28 && !app.account_name.is_empty() {
+        let first_word = app.account_name.split_whitespace().next().unwrap_or(&app.account_name);
+        right_spans.push(Span::styled(
+            format!(" {first_word} "),
+            Style::default()
+                .bg(app.theme.surface_hover)
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
     right_spans.push(Span::raw(" "));
 
     let right_lines = if area.height >= 3 {

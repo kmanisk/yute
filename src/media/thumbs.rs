@@ -53,7 +53,7 @@ impl ThumbnailManager {
                                 let path_c = cache_path.clone();
                                 let decoded = tokio::task::spawn_blocking(move || {
                                     if let Ok(img) = image::load_from_memory(&bytes) {
-                                        let thumb = img.thumbnail(360, 202);
+                                        let thumb = img.thumbnail(640, 360);
                                         let _ = thumb.save(&path_c);
                                         Some(thumb)
                                     } else {

@@ -78,6 +78,7 @@ pub enum Action {
     ToggleDescription,
     ToggleFullscreen,
     ToggleAutoplay,
+    ToggleStats,
     StopPlayback,
 }
 
@@ -182,7 +183,7 @@ impl KeymapState {
                         return Some((Action::PlayDefault, 1));
                     }
                 }
-                KeyCode::Char('e') => return Some((Action::PlayInline, 1)),
+                KeyCode::Char('i') | KeyCode::Char('I') => return Some((Action::ToggleStats, 1)),
                 KeyCode::Char('n') => return Some((Action::NextItem, 1)),
                 KeyCode::Char('N') => return Some((Action::PrevItem, 1)),
                 KeyCode::Char('+') | KeyCode::Char('=') => return Some((Action::VolumeUp, 1)),
@@ -249,7 +250,6 @@ impl KeymapState {
                     Some((Action::PlayDefault, 1))
                 }
             }
-            KeyCode::Char('e') => Some((Action::PlayInline, 1)),
             KeyCode::Char('w') => Some((Action::PlayWindow, 1)),
             KeyCode::Char('o') => Some((Action::OpenBrowser, 1)),
             KeyCode::Char('A') | KeyCode::Char('C') => Some((Action::NavAccounts, 1)),

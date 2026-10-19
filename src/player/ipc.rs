@@ -72,6 +72,7 @@ pub enum IpcCommand {
     AdjustSpeed(f64),
     CycleSubtitle,
     ToggleFullscreen,
+    ToggleStats,
     Stop,
 }
 
@@ -192,6 +193,7 @@ impl MpvIpc {
                             IpcCommand::AdjustSpeed(ds) => json!({ "command": ["add", "speed", ds] }),
                             IpcCommand::CycleSubtitle => json!({ "command": ["cycle", "sub-visibility"] }),
                             IpcCommand::ToggleFullscreen => json!({ "command": ["cycle", "fullscreen"] }),
+                            IpcCommand::ToggleStats => json!({ "command": ["script-binding", "stats/display-stats-toggle"] }),
                             IpcCommand::Stop => json!({ "command": ["stop"] }),
                         };
                         let _ = writer.write_all(format!("{cmd_json}\n").as_bytes()).await;

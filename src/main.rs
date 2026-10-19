@@ -93,8 +93,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Initial load: load disk cache immediately for fast launch, then fetch fresh
     try_load_feed_cache(&mut app, "feed_home");
-    app.is_loading = true;
+    if app.items.is_empty() {
+        app.is_loading = true;
+    }
     trigger_home_fetch(&app, tx_event.clone(), None);
+
+    // Prune cache in background to prevent disk bloat
+    let cache_clone = app.thumbs.cache().clone();
+    tokio::task::spawn_blocking(move || {
+        let _ = cache_clone.prune_thumbnails();
+        let _ = cache_clone.prune_feeds(3);
+    });
 
     // Fetch authenticated account profile info in background
     let backend_acc = Arc::clone(&app.backend);
@@ -148,6 +157,7 @@ async fn main() -> anyhow::Result<()> {
         app.player.stop();
     }
     let _ = app.thumbs.cache().prune_thumbnails();
+    let _ = app.thumbs.cache().prune_feeds(3);
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
@@ -624,6 +634,10 @@ async fn handle_key_event(
             }
             Action::NavForwardHistory => {
                 app.nav_forward();
+            }
+            Action::ToggleStats => {
+                app.player.toggle_stats();
+                app.status_text = "Toggled Stats for Nerds overlay".to_string();
             }
             Action::StopPlayback => {
                 app.player.stop();

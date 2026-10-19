@@ -50,8 +50,8 @@ impl AuthContext {
             }
         }
 
-        // Auto-refresh from Brave if cookies are missing authenticated YouTube tokens
-        if ctx.sapisid.is_none() || !ctx.cookies.contains_key("LOGIN_INFO") {
+        // Only attempt extraction if cookies file was completely empty or missing
+        if ctx.cookies.is_empty() {
             Self::try_auto_extract_brave_cookies(path);
             if path.exists() {
                 if let Ok(content) = fs::read_to_string(path) {

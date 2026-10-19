@@ -3,7 +3,7 @@ use crate::backend::models::{Card, LiveState};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
@@ -34,8 +34,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let card_w = area.width / (num_cols as u16);
 
-    // Compact card height to fit 3 rows of windows (3x3 grid)
-    let card_h = (area.height / 3).clamp(7, 10);
+    // Proportional 16:9 thumbnail sizing with generous card height
+    let target_thumb_h = ((card_w as f32) * (9.0 / 16.0) * 0.52).round() as u16;
+    let card_h = (target_thumb_h + 5).clamp(11, 18);
 
     if card_h == 0 {
         return;
@@ -145,9 +146,33 @@ fn render_card(
         }
     }
 
+    // Video duration badge in the bottom-right corner of the thumbnail
+    if let Card::Video(v) = card {
+        let badge_info = match v.live {
+            LiveState::Live => Some((" LIVE ", app.theme.live_badge_bg, Color::White)),
+            LiveState::Upcoming => Some((" UPCOMING ", app.theme.badge_bg, app.theme.text)),
+            LiveState::None => v.duration.as_deref().map(|d| (d, Color::Rgb(15, 15, 15), Color::White)),
+        };
+
+        if let Some((text, bg, fg)) = badge_info {
+            let badge_w = (text.len() as u16) + 2;
+            if thumb_area.width > badge_w + 1 && thumb_area.height >= 2 {
+                let badge_rect = Rect {
+                    x: thumb_area.x + thumb_area.width.saturating_sub(badge_w + 1),
+                    y: thumb_area.y + thumb_area.height.saturating_sub(1),
+                    width: badge_w,
+                    height: 1,
+                };
+                let badge_p = Paragraph::new(format!(" {text} "))
+                    .style(Style::default().bg(bg).fg(fg).add_modifier(Modifier::BOLD));
+                f.render_widget(badge_p, badge_rect);
+            }
+        }
+    }
+
     match card {
         Card::Video(v) => {
-            // Title line
+            // Title line with clean 2-line word wrapping
             let mut title_spans = Vec::new();
             if let Some(pct) = v.progress_pct {
                 let filled = ((pct as usize) * 5) / 100;
@@ -158,51 +183,23 @@ fn render_card(
                 v.title.as_str(),
                 Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
             ));
-            let title_p = Paragraph::new(Line::from(title_spans));
+            let title_p = Paragraph::new(Line::from(title_spans))
+                .wrap(Wrap { trim: true });
             f.render_widget(title_p, title_area);
 
-            // Meta line: Channel [v] · duration/LIVE · views
+            // Meta line: Channel [v] · views · published
             let mut meta_spans = Vec::new();
             meta_spans.push(Span::styled(&v.channel, Style::default().fg(app.theme.text_secondary)));
             if v.verified {
                 meta_spans.push(Span::styled(" [v]", Style::default().fg(app.theme.text_secondary)));
             }
-
-            match v.live {
-                LiveState::Live => {
-                    meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
-                    meta_spans.push(Span::styled(
-                        " LIVE ",
-                        Style::default()
-                            .bg(app.theme.live_badge_bg)
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-                LiveState::Upcoming => {
-                    meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
-                    meta_spans.push(Span::styled(
-                        " UPCOMING ",
-                        Style::default()
-                            .bg(app.theme.badge_bg)
-                            .fg(app.theme.text)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
-                LiveState::None => {
-                    if let Some(ref dur) = v.duration {
-                        meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
-                        meta_spans.push(Span::styled(
-                            dur.as_str(),
-                            Style::default().fg(app.theme.text_secondary),
-                        ));
-                    }
-                }
-            }
-
             if let Some(ref vw) = v.views {
                 meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
                 meta_spans.push(Span::styled(vw.as_str(), Style::default().fg(app.theme.text_secondary)));
+            }
+            if let Some(ref pub_time) = v.published {
+                meta_spans.push(Span::styled(" · ", Style::default().fg(app.theme.text_secondary)));
+                meta_spans.push(Span::styled(pub_time.as_str(), Style::default().fg(app.theme.text_secondary)));
             }
 
             let meta_p = Paragraph::new(Line::from(meta_spans));
@@ -210,6 +207,7 @@ fn render_card(
         }
         Card::Playlist(p) => {
             let title_p = Paragraph::new(p.title.as_str())
+                .wrap(Wrap { trim: true })
                 .style(Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD));
             f.render_widget(title_p, title_area);
 
@@ -238,6 +236,7 @@ fn render_card(
         }
         Card::Channel(c) => {
             let title_p = Paragraph::new(c.title.as_str())
+                .wrap(Wrap { trim: true })
                 .style(Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD));
             f.render_widget(title_p, title_area);
 

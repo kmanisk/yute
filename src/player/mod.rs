@@ -262,12 +262,13 @@ impl Player {
             .arg(url);
 
         // Terminal handoff: release raw mode so mpv controls stdio and receives hotkeys
-        let _ = crossterm::terminal::disable_raw_mode();
         let _ = crossterm::execute!(
             std::io::stdout(),
+            crossterm::event::PopKeyboardEnhancementFlags,
             crossterm::terminal::LeaveAlternateScreen,
             crossterm::cursor::Show
         );
+        let _ = crossterm::terminal::disable_raw_mode();
 
         let mut child = cmd.spawn().context("Failed to run inline mpv")?;
         let _ = child.wait();
@@ -277,7 +278,11 @@ impl Player {
         let _ = crossterm::execute!(
             std::io::stdout(),
             crossterm::terminal::EnterAlternateScreen,
-            crossterm::cursor::Hide
+            crossterm::cursor::Hide,
+            crossterm::event::PushKeyboardEnhancementFlags(
+                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | crossterm::event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+            )
         );
 
         Ok(())
@@ -309,6 +314,10 @@ impl Player {
         if let Some(ref ipc) = self.ipc {
             ipc.send(cmd);
         }
+    }
+
+    pub fn toggle_stats(&self) {
+        self.send_command(IpcCommand::ToggleStats);
     }
 
     pub fn stop(&mut self) {

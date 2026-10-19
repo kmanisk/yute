@@ -50,36 +50,36 @@ impl MpvProfile {
         let _ = fs::write(mpv_conf_path, conf);
 
         let input_conf_path = self.dir.join("input.conf");
-        if !input_conf_path.exists() {
-            let input_conf = "# Global Speed and seeking presets\n\
-                SPACE cycle pause\n\
-                q quit\n\
-                ESC set fullscreen no\n\
-                w set speed 1.0\n\
-                e set speed 1.5\n\
-                a set speed 1.75\n\
-                r set speed 2.0\n\
-                d multiply speed 1.1\n\
-                R add speed 0.05\n\
-                E add speed -0.05\n\
-                z seek -5\n\
-                x seek 5\n\
-                j seek -10\n\
-                l seek 10\n\
-                0 seek 0 absolute-percent\n\
-                1 seek 10 absolute-percent\n\
-                2 seek 20 absolute-percent\n\
-                3 seek 30 absolute-percent\n\
-                4 seek 40 absolute-percent\n\
-                5 seek 50 absolute-percent\n\
-                6 seek 60 absolute-percent\n\
-                7 seek 70 absolute-percent\n\
-                8 seek 80 absolute-percent\n\
-                9 seek 90 absolute-percent\n\
-                c cycle sub-visibility\n\
-                m cycle mute\n";
-            fs::write(input_conf_path, input_conf)?;
-        }
+        let input_conf = "# Global Speed, seeking presets, and stats for nerds\n\
+            SPACE cycle pause\n\
+            q quit\n\
+            ESC set fullscreen no\n\
+            i script-binding stats/display-stats-toggle\n\
+            I script-binding stats/display-stats-toggle\n\
+            w set speed 1.0\n\
+            e set speed 1.5\n\
+            a set speed 1.75\n\
+            r set speed 2.0\n\
+            d multiply speed 1.1\n\
+            R add speed 0.05\n\
+            E add speed -0.05\n\
+            z seek -5\n\
+            x seek 5\n\
+            j seek -10\n\
+            l seek 10\n\
+            0 seek 0 absolute-percent\n\
+            1 seek 10 absolute-percent\n\
+            2 seek 20 absolute-percent\n\
+            3 seek 30 absolute-percent\n\
+            4 seek 40 absolute-percent\n\
+            5 seek 50 absolute-percent\n\
+            6 seek 60 absolute-percent\n\
+            7 seek 70 absolute-percent\n\
+            8 seek 80 absolute-percent\n\
+            9 seek 90 absolute-percent\n\
+            c cycle sub-visibility\n\
+            m cycle mute\n";
+        let _ = fs::write(input_conf_path, input_conf);
 
         Ok(())
     }
