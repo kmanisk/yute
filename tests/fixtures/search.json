@@ -1,0 +1,33 @@
+{
+  "contents": {
+    "twoColumnSearchResultsRenderer": {
+      "primaryContents": {
+        "sectionListRenderer": {
+          "contents": [
+            {
+              "itemSectionRenderer": {
+                "contents": [
+                  {
+                    "videoRenderer": {
+                      "videoId": "search_result_1",
+                      "title": { "simpleText": "Ultimate Ratatui TUI Guide" },
+                      "ownerText": { "runs": [{ "text": "Rust Systems" }] },
+                      "lengthText": { "simpleText": "28:15" },
+                      "viewCountText": { "simpleText": "52K views" },
+                      "publishedTimeText": { "simpleText": "1 month ago" },
+                      "thumbnail": {
+                        "thumbnails": [
+                          { "url": "https://i.ytimg.com/vi/search_result_1/hqdefault.jpg" }
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

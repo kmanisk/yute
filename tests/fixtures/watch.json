@@ -1,0 +1,40 @@
+{
+  "videoDetails": {
+    "videoId": "watch_sample_vid",
+    "title": "Building a High-Performance YouTube TUI in Rust",
+    "author": "Antigravity Engineering",
+    "channelId": "UC_antigravity",
+    "shortDescription": "Deep dive into building an interactive YouTube TUI with Sixel graphics and MPV.",
+    "lengthSeconds": "1245",
+    "viewCount": "184000",
+    "isLiveContent": false,
+    "thumbnail": {
+      "thumbnails": [
+        { "url": "https://i.ytimg.com/vi/watch_sample_vid/hqdefault.jpg" }
+      ]
+    }
+  },
+  "contents": {
+    "twoColumnWatchNextResults": {
+      "results": {
+        "results": {
+          "contents": [
+            {
+              "videoPrimaryInfoRenderer": {
+                "title": { "runs": [{ "text": "Building a High-Performance YouTube TUI in Rust" }] },
+                "viewCount": { "simpleText": "184,000 views" },
+                "dateText": { "simpleText": "Oct 19, 2026" }
+              }
+            },
+            {
+              "videoSecondaryInfoRenderer": {
+                "owner": { "runs": [{ "text": "Antigravity Engineering" }] },
+                "description": { "runs": [{ "text": "Deep dive into building an interactive YouTube TUI with Sixel graphics and MPV." }] }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

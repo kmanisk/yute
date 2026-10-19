@@ -1,0 +1,117 @@
+{
+  "header": {
+    "feedFilterChipBarRenderer": {
+      "contents": [
+        {
+          "chipCloudChipRenderer": {
+            "text": { "simpleText": "All" },
+            "isSelected": true
+          }
+        },
+        {
+          "chipCloudChipRenderer": {
+            "text": { "simpleText": "Gaming" },
+            "isSelected": false,
+            "navigationEndpoint": {
+              "continuationEndpoint": {
+                "continuationCommand": {
+                  "token": "token_gaming_123"
+                }
+              }
+            }
+          }
+        },
+        {
+          "chipCloudChipRenderer": {
+            "text": { "simpleText": "Linux" },
+            "isSelected": false,
+            "navigationEndpoint": {
+              "continuationEndpoint": {
+                "continuationCommand": {
+                  "token": "token_linux_456"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "contents": {
+    "twoColumnBrowseResultsRenderer": {
+      "tabs": [
+        {
+          "tabRenderer": {
+            "content": {
+              "richGridRenderer": {
+                "contents": [
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "videoRenderer": {
+                          "videoId": "vid_sample_1",
+                          "title": { "runs": [{ "text": "Linux Gaming on CachyOS with RTX 5050" }] },
+                          "ownerText": { "runs": [{ "text": "Arch Linux Crew" }] },
+                          "lengthText": { "simpleText": "14:20" },
+                          "viewCountText": { "simpleText": "140K views" },
+                          "publishedTimeText": { "simpleText": "2 days ago" },
+                          "thumbnail": {
+                            "thumbnails": [
+                              { "url": "https://i.ytimg.com/vi/vid_sample_1/hqdefault.jpg" }
+                            ]
+                          },
+                          "thumbnailOverlays": [
+                            {
+                              "thumbnailOverlayResumePlaybackRenderer": {
+                                "percentDurationWatched": 45
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "richItemRenderer": {
+                      "content": {
+                        "videoRenderer": {
+                          "videoId": "vid_sample_2",
+                          "title": { "runs": [{ "text": "LIVE: Counter-Strike 2 Major Finals" }] },
+                          "ownerText": { "runs": [{ "text": "ESL CS" }] },
+                          "lengthText": { "simpleText": "" },
+                          "viewCountText": { "simpleText": "45K watching" },
+                          "publishedTimeText": { "simpleText": "LIVE" },
+                          "badges": [
+                            {
+                              "metadataBadgeRenderer": {
+                                "label": "LIVE"
+                              }
+                            }
+                          ],
+                          "thumbnail": {
+                            "thumbnails": [
+                              { "url": "https://i.ytimg.com/vi/vid_sample_2/hqdefault.jpg" }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "continuationItemRenderer": {
+                      "continuationEndpoint": {
+                        "continuationCommand": {
+                          "token": "continuation_home_page_2"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
