@@ -31,6 +31,7 @@ pub enum Action {
     NavLocal,
     NavQueue,
     NavSettings,
+    NavAccounts,
     NavChannel,
     NavBackHistory,
     NavForwardHistory,
@@ -130,6 +131,7 @@ impl KeymapState {
                     KeyCode::Char('v') => return Some((Action::NavLocal, 1)),
                     KeyCode::Char('q') => return Some((Action::NavQueue, 1)),
                     KeyCode::Char('o') => return Some((Action::NavSettings, 1)),
+                    KeyCode::Char('a') => return Some((Action::NavAccounts, 1)),
                     KeyCode::Char('c') => return Some((Action::NavChannel, 1)),
                     _ => return None,
                 }
@@ -173,7 +175,14 @@ impl KeymapState {
                 KeyCode::Char('L') => return Some((Action::SeekForward30, count)),
                 KeyCode::Char('j') | KeyCode::Down => return Some((Action::Down, count)),
                 KeyCode::Char('k') | KeyCode::Up => return Some((Action::Up, count)),
-                KeyCode::Enter => return Some((Action::PlayDefault, 1)),
+                KeyCode::Enter => {
+                    if mods.contains(KeyModifiers::SHIFT) {
+                        return Some((Action::PlayInline, 1));
+                    } else {
+                        return Some((Action::PlayDefault, 1));
+                    }
+                }
+                KeyCode::Char('e') => return Some((Action::PlayInline, 1)),
                 KeyCode::Char('n') => return Some((Action::NextItem, 1)),
                 KeyCode::Char('N') => return Some((Action::PrevItem, 1)),
                 KeyCode::Char('+') | KeyCode::Char('=') => return Some((Action::VolumeUp, 1)),
@@ -243,8 +252,8 @@ impl KeymapState {
             KeyCode::Char('e') => Some((Action::PlayInline, 1)),
             KeyCode::Char('w') => Some((Action::PlayWindow, 1)),
             KeyCode::Char('o') => Some((Action::OpenBrowser, 1)),
+            KeyCode::Char('A') | KeyCode::Char('C') => Some((Action::NavAccounts, 1)),
             KeyCode::Char('a') => Some((Action::QueueAppend, 1)),
-            KeyCode::Char('A') => Some((Action::QueuePrepend, 1)),
             KeyCode::Char('v') => Some((Action::ToggleSelect, 1)),
             KeyCode::Char('i') => Some((Action::ToggleInfo, 1)),
             KeyCode::Char('y') => Some((Action::YankUrl, 1)),

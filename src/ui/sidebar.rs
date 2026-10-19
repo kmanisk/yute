@@ -15,6 +15,7 @@ pub const SIDEBAR_ITEMS: &[(&str, Screen, &str)] = &[
     ("Local Videos", Screen::LocalVideos, "[V]"),
     ("Queue", Screen::Queue, "[Q]"),
     ("Settings", Screen::Settings, "[O]"),
+    ("Accounts", Screen::Accounts, "[A]"),
 ];
 
 pub fn sidebar_width(expanded: bool) -> u16 {
@@ -78,6 +79,7 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 Screen::LocalVideos => "Locl",
                 Screen::Queue => "Queu",
                 Screen::Settings => "Sett",
+                Screen::Accounts => "Acct",
                 _ => label,
             };
             lines.push(Line::from(vec![

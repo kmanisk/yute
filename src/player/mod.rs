@@ -189,7 +189,12 @@ impl Player {
             ));
         }
 
-        cmd.arg(url);
+        cmd.arg("--force-window=no")
+            .arg("--terminal=yes")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .arg(url);
 
         // Terminal handoff: release raw mode so mpv controls stdio and receives hotkeys
         let _ = crossterm::terminal::disable_raw_mode();

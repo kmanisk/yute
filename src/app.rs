@@ -26,6 +26,7 @@ pub enum Screen {
     LocalVideos,
     Queue,
     Settings,
+    Accounts,
     Help,
 }
 
@@ -36,6 +37,15 @@ pub enum Focus {
     Content,
     SearchInput,
     CommandLine,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct AccountProfile {
+    pub id: String,
+    pub name: String,
+    pub handle: String,
+    pub initial: String,
+    pub channel_id: Option<String>,
 }
 
 pub struct App {
@@ -73,6 +83,9 @@ pub struct App {
     pub account_initial: String,
     pub account_name: String,
     pub account_handle: String,
+    pub accounts: Vec<AccountProfile>,
+    pub active_account_index: usize,
+    pub accounts_cursor: usize,
 }
 
 impl App {
@@ -105,7 +118,7 @@ impl App {
         let ytdlp_backend = Box::new(YtDlpBackend::new(Some(cookies_path), cookies_from_browser));
         let chain = Arc::new(BackendChain::new(vec![inner_backend, ytdlp_backend]));
 
-        Self {
+        let mut app = Self {
             sidebar_expanded: config.grid.sidebar_expanded,
             config,
             theme,
@@ -137,10 +150,76 @@ impl App {
             nav_future: Vec::new(),
             backend: chain,
             should_quit: false,
-            account_initial: "M".to_string(),
-            account_name: "Mathew Manisk".to_string(),
-            account_handle: "@mathewmanisk5707".to_string(),
+            account_initial: "I".to_string(),
+            account_name: "I am Hunter".to_string(),
+            account_handle: "@iamhunter2570".to_string(),
+            accounts: vec![
+                AccountProfile {
+                    id: "hunter".to_string(),
+                    name: "I am Hunter".to_string(),
+                    handle: "@iamhunter2570".to_string(),
+                    initial: "I".to_string(),
+                    channel_id: Some("UC3wUMz2AWASPNDptNox9hDw".to_string()),
+                },
+                AccountProfile {
+                    id: "mathew".to_string(),
+                    name: "Mathew Manisk".to_string(),
+                    handle: "@mathewmanisk5707".to_string(),
+                    initial: "M".to_string(),
+                    channel_id: Some("113582914790437266954".to_string()),
+                },
+                AccountProfile {
+                    id: "guest".to_string(),
+                    name: "Guest (Logged Out)".to_string(),
+                    handle: "@guest".to_string(),
+                    initial: "G".to_string(),
+                    channel_id: None,
+                },
+            ],
+            active_account_index: 0,
+            accounts_cursor: 0,
+        };
+
+        // Load saved active account if exists
+        let active_path = resolve_path("~/.config/ytui/active_account.json");
+        if let Ok(content) = std::fs::read_to_string(&active_path) {
+            if let Ok(saved) = serde_json::from_str::<AccountProfile>(&content) {
+                if let Some(pos) = app.accounts.iter().position(|a| a.id == saved.id || a.handle == saved.handle) {
+                    app.active_account_index = pos;
+                    app.accounts_cursor = pos;
+                    app.account_initial = app.accounts[pos].initial.clone();
+                    app.account_name = app.accounts[pos].name.clone();
+                    app.account_handle = app.accounts[pos].handle.clone();
+                }
+            }
         }
+
+        app
+    }
+
+    pub fn save_active_account(&self) {
+        if let Some(acc) = self.accounts.get(self.active_account_index) {
+            let path = resolve_path("~/.config/ytui/active_account.json");
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Ok(json) = serde_json::to_string_pretty(acc) {
+                let _ = std::fs::write(path, json);
+            }
+        }
+    }
+
+    pub fn switch_account(&mut self, index: usize) -> bool {
+        if index >= self.accounts.len() {
+            return false;
+        }
+        self.active_account_index = index;
+        let acc = &self.accounts[index];
+        self.account_name = acc.name.clone();
+        self.account_handle = acc.handle.clone();
+        self.account_initial = acc.initial.clone();
+        self.save_active_account();
+        true
     }
 
     pub fn filtered_items(&self) -> Vec<&Card> {

@@ -268,8 +268,67 @@ fn test_header_shows_account_and_ascii_logo() {
         }
     }
 
-    assert!(found_logo, "Header must render ASCII '|> YouTube' logo at top-right");
+    assert!(found_logo, "Header must render ASCII '|> YouTube' logo");
     assert!(found_account, "Header must render user account pill with initial and name at top-right");
 }
+
+#[test]
+fn test_accounts_screen_switching() {
+    let mut app = create_mock_app();
+    assert_eq!(app.account_name, "I am Hunter");
+    assert_eq!(app.account_handle, "@iamhunter2570");
+    assert_eq!(app.account_initial, "I");
+
+    // Switch to Mathew Manisk (index 1)
+    let switched = app.switch_account(1);
+    assert!(switched);
+    assert_eq!(app.active_account_index, 1);
+    assert_eq!(app.account_name, "Mathew Manisk");
+    assert_eq!(app.account_handle, "@mathewmanisk5707");
+    assert_eq!(app.account_initial, "M");
+
+    // Switch back to I am Hunter (index 0)
+    let switched_back = app.switch_account(0);
+    assert!(switched_back);
+    assert_eq!(app.active_account_index, 0);
+    assert_eq!(app.account_name, "I am Hunter");
+    assert_eq!(app.account_handle, "@iamhunter2570");
+}
+
+#[test]
+fn test_accounts_keymap() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ytui::keymap::{Action, KeymapState};
+
+    let mut keymap = KeymapState::new();
+
+    let key_shift_a = KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT);
+    assert_eq!(
+        keymap.handle_key(key_shift_a, false),
+        Some((Action::NavAccounts, 1)),
+        "Shift+A must map to NavAccounts"
+    );
+
+    let key_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+    assert_eq!(keymap.handle_key(key_g, false), None);
+
+    let key_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+    assert_eq!(
+        keymap.handle_key(key_a, false),
+        Some((Action::NavAccounts, 1)),
+        "g a must map to NavAccounts"
+    );
+}
+
+#[test]
+fn test_theme_system_integration() {
+    use ytui::theme::Theme;
+
+    let sys = Theme::system_theme();
+    assert!(sys.is_some(), "System theme should be successfully loaded from ~/.local/state/theme/colors.sh");
+    let theme = sys.unwrap();
+    assert_eq!(theme.bg, ratatui::style::Color::Reset, "System theme bg must be Color::Reset to merge with terminal");
+}
+
 
 

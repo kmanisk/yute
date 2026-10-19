@@ -31,7 +31,7 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let hamburger = if app.sidebar_expanded { "[=]" } else { "[-]" };
     let logo_spans = vec![
         Span::styled(format!("{hamburger} "), Style::default().fg(app.theme.text_secondary)),
-        Span::styled(" |> ", Style::default().fg(app.theme.red).add_modifier(Modifier::BOLD)),
+        Span::styled(" |> ", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
         Span::styled("YouTube", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
     ];
     let logo_lines = if area.height >= 3 {
@@ -113,18 +113,7 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     let mut right_spans = Vec::new();
     if app.is_loading {
-        right_spans.push(Span::styled(format!("{spinner_str} "), Style::default().fg(app.theme.red)));
-    }
-
-    if right_width >= 28 {
-        right_spans.push(Span::styled(
-            " |> YouTube ",
-            Style::default()
-                .bg(app.theme.red)
-                .fg(ratatui::style::Color::White)
-                .add_modifier(Modifier::BOLD),
-        ));
-        right_spans.push(Span::raw(" "));
+        right_spans.push(Span::styled(format!("{spinner_str} "), Style::default().fg(app.theme.accent)));
     }
 
     right_spans.push(Span::styled(

@@ -81,10 +81,62 @@ impl Theme {
         }
     }
 
+    pub fn system_theme() -> Option<Self> {
+        let home = std::env::var_os("HOME")?;
+        let colors_sh = PathBuf::from(home).join(".local/state/theme/colors.sh");
+        if !colors_sh.exists() {
+            return None;
+        }
+
+        let content = fs::read_to_string(colors_sh).ok()?;
+        let mut map = std::collections::HashMap::new();
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("export ") {
+                if let Some((k, v)) = rest.split_once('=') {
+                    let v = v.trim_matches('"').trim_matches('\'');
+                    map.insert(k.trim().to_string(), v.to_string());
+                }
+            }
+        }
+
+        // Terminal default background (transparent, merges with terminal like btop/cava)
+        let bg = Color::Reset;
+        let fg = map.get("THEME_FG").map(|s| hex(s, Color::White)).unwrap_or(Color::White);
+        let accent = map.get("THEME_ACCENT").map(|s| hex(s, Color::Cyan)).unwrap_or(Color::Cyan);
+        let sel = map.get("THEME_SEL").map(|s| hex(s, Color::DarkGray)).unwrap_or(Color::DarkGray);
+        let muted = map.get("THEME_MUTED").map(|s| hex(s, Color::Gray)).unwrap_or(Color::Gray);
+        let red = map.get("THEME_RED").map(|s| hex(s, Color::Red)).unwrap_or(Color::Red);
+
+        Some(Self {
+            bg,
+            surface: Color::Reset,
+            surface_hover: sel,
+            border: muted,
+            text: fg,
+            text_secondary: muted,
+            red,
+            accent,
+            chip_active_bg: accent,
+            chip_active_fg: Color::Black,
+            chip_inactive_bg: Color::Reset,
+            chip_inactive_fg: fg,
+            badge_bg: Color::Reset,
+            live_badge_bg: red,
+            progress_track: muted,
+            progress_fill: accent,
+        })
+    }
+
     pub fn load(name: &str) -> Self {
-        let mut base = match name {
-            "youtube-light" => Self::youtube_light(),
-            _ => Self::youtube_dark(),
+        let mut base = if name == "youtube-light" {
+            Self::youtube_light()
+        } else if let Some(sys) = Self::system_theme() {
+            sys
+        } else if name == "youtube-dark" {
+            Self::youtube_dark()
+        } else {
+            Self::youtube_dark()
         };
 
         // Check if theme.toml exists in config dir

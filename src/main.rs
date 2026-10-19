@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 
 use clap::{Parser, Subcommand};
-use crossterm::event::{Event, EventStream, KeyCode};
+use crossterm::event::{
+    Event, EventStream, KeyCode, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -62,18 +65,26 @@ async fn main() -> anyhow::Result<()> {
     let picker = ratatui_image::picker::Picker::from_query_stdio()
         .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
 
-    // Setup terminal
+    // Setup terminal with keyboard enhancement for Shift+Enter support
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen, crossterm::cursor::Hide)?;
+    let _ = execute!(
+        out,
+        EnterAlternateScreen,
+        crossterm::cursor::Hide,
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        )
+    );
     let term_backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(term_backend)?;
 
     // Setup panic hook to cleanly restore terminal
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = execute!(stdout(), PopKeyboardEnhancementFlags, LeaveAlternateScreen, crossterm::cursor::Show);
         let _ = disable_raw_mode();
-        let _ = execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
         orig_hook(panic_info);
     }));
 
@@ -137,6 +148,7 @@ async fn main() -> anyhow::Result<()> {
         app.player.stop();
     }
     let _ = app.thumbs.cache().prune_thumbnails();
+    let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
 
@@ -261,6 +273,38 @@ async fn handle_key_event(
                 }
                 Action::Right | Action::PlayDefault => {
                     ui::settings::cycle_setting(app, true);
+                }
+                Action::Back | Action::Quit => {
+                    app.nav_back();
+                }
+                Action::ForceQuit => {
+                    app.should_quit = true;
+                }
+                Action::NavHome => {
+                    app.set_screen(Screen::Home);
+                    app.sidebar_index = 0;
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if app.screen == Screen::Accounts {
+            match action {
+                Action::Up => {
+                    app.accounts_cursor = app.accounts_cursor.saturating_sub(1);
+                }
+                Action::Down => {
+                    app.accounts_cursor = (app.accounts_cursor + 1).min(app.accounts.len().saturating_sub(1));
+                }
+                Action::PlayDefault | Action::Right => {
+                    app.switch_account(app.accounts_cursor);
+                    app.status_text = format!("Switched to account '{}'", app.account_name);
+                    app.items.clear();
+                    app.is_loading = true;
+                    trigger_home_fetch(app, tx.clone(), None);
+                    app.set_screen(Screen::Home);
+                    app.sidebar_index = 0;
                 }
                 Action::Back | Action::Quit => {
                     app.nav_back();
@@ -501,6 +545,12 @@ async fn handle_key_event(
                 app.sidebar_index = 8;
                 app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
             }
+            Action::NavAccounts => {
+                app.set_screen(Screen::Accounts);
+                app.sidebar_index = 9;
+                app.accounts_cursor = app.active_account_index;
+                app.status_text = "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
+            }
             Action::PlayDefault => {
                 if app.focus == Focus::Sidebar {
                     activate_sidebar_item(app, tx.clone());
@@ -639,6 +689,12 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
             app.sidebar_index = 8;
             app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
         }
+        9 => {
+            app.set_screen(Screen::Accounts);
+            app.sidebar_index = 9;
+            app.accounts_cursor = app.active_account_index;
+            app.status_text = "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
+        }
         _ => {}
     }
 }
@@ -719,6 +775,11 @@ fn execute_command(app: &mut App, tx: Sender<AppEvent>) {
         app.set_screen(Screen::Settings);
         app.sidebar_index = 8;
         app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
+    } else if cmd == "account" || cmd == "accounts" || cmd == "switch" {
+        app.set_screen(Screen::Accounts);
+        app.sidebar_index = 9;
+        app.accounts_cursor = app.active_account_index;
+        app.status_text = "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
     } else if cmd == "cache clear" {
         let _ = app.thumbs.cache().clear();
         app.status_text = "Cache cleared".to_string();
@@ -772,14 +833,16 @@ fn handle_app_event(app: &mut App, event: AppEvent, _tx: Sender<AppEvent>) {
         }
         AppEvent::AccountLoaded(res) => {
             if let Ok((name, handle)) = res {
-                if !name.is_empty() {
-                    app.account_name = name;
-                }
-                if !handle.is_empty() {
-                    app.account_handle = handle;
-                }
-                if let Some(ch) = app.account_name.chars().next() {
-                    app.account_initial = ch.to_uppercase().to_string();
+                if app.active_account_index == 1 {
+                    if !name.is_empty() {
+                        app.account_name = name;
+                    }
+                    if !handle.is_empty() {
+                        app.account_handle = handle;
+                    }
+                    if let Some(ch) = app.account_name.chars().next() {
+                        app.account_initial = ch.to_uppercase().to_string();
+                    }
                 }
             }
         }

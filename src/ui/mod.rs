@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod chat;
 pub mod chips;
 pub mod cmdline;
@@ -79,6 +80,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         Screen::Settings => {
             settings::render_settings(f, app, content_area);
+        }
+        Screen::Accounts => {
+            accounts::render_accounts(f, app, content_area);
         }
         Screen::Watch => {
             watch::render_watch(f, app, content_area);
