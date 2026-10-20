@@ -40,7 +40,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     // 1-cell gutter between columns, equal 1-cell left and right margin
     let margin_x = 1u16;
     let gutter_x = 1u16;
-    let net_avail_w = area.width.saturating_sub(margin_x * 2 + (num_cols.saturating_sub(1) as u16) * gutter_x);
+    let net_avail_w = area
+        .width
+        .saturating_sub(margin_x * 2 + (num_cols.saturating_sub(1) as u16) * gutter_x);
     let base_col_w = net_avail_w / (num_cols as u16);
     let rem_w = net_avail_w % (num_cols as u16);
 
@@ -72,7 +74,10 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let card_h = max_card_h.clamp(7, 12);
     let inner_h = card_h.saturating_sub(2);
     let title_h = if inner_h >= 6 { 2u16 } else { 1u16 };
-    let thumb_h = inner_h.saturating_sub(title_h + 1).min(thumb_rows).clamp(3, 7);
+    let thumb_h = inner_h
+        .saturating_sub(title_h + 1)
+        .min(thumb_rows)
+        .clamp(3, 7);
 
     // visible_rows: whole rows that fit cleanly
     let visible_rows = ((area.height + gutter_y) / (card_h + gutter_y)).max(1) as usize;
@@ -143,12 +148,15 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let sb_x = area.x + area.width - 1;
         let sb_height = area.height.saturating_sub(2);
         if sb_height > 2 {
-            let thumb_size = ((visible_rows as f32 / total_rows as f32) * (sb_height as f32)).round().max(1.0) as u16;
+            let thumb_size = ((visible_rows as f32 / total_rows as f32) * (sb_height as f32))
+                .round()
+                .max(1.0) as u16;
             let thumb_pos = if start_row == 0 || total_rows <= visible_rows {
                 0
             } else {
                 ((start_row as f32 / (total_rows.saturating_sub(visible_rows).max(1) as f32))
-                    * ((sb_height.saturating_sub(thumb_size)) as f32)).round() as u16
+                    * ((sb_height.saturating_sub(thumb_size)) as f32))
+                    .round() as u16
             };
 
             for y_off in 0..sb_height {
@@ -158,7 +166,15 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
                 } else {
                     ("│", Style::default().fg(app.theme.border))
                 };
-                f.render_widget(Paragraph::new(ch).style(style), Rect { x: sb_x, y, width: 1, height: 1 });
+                f.render_widget(
+                    Paragraph::new(ch).style(style),
+                    Rect {
+                        x: sb_x,
+                        y,
+                        width: 1,
+                        height: 1,
+                    },
+                );
             }
         }
     }
@@ -181,7 +197,11 @@ fn render_grid_card(
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Rounded)
-            .border_style(Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD))
+            .border_style(
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )
             .style(Style::default().bg(app.theme.surface_hover))
     } else {
         Block::default()
@@ -253,7 +273,9 @@ fn render_grid_card(
         if let Some(proto) = app.thumbs.get_protocol(&thumb_url) {
             if is_shorts {
                 // Center 9:16 vertical Short thumbnail in the 16:9 slot
-                let short_w = ((thumb_area.height as f32) * app.cell_h_px * 9.0 / (16.0 * app.cell_w_px)).round() as u16;
+                let short_w = ((thumb_area.height as f32) * app.cell_h_px * 9.0
+                    / (16.0 * app.cell_w_px))
+                    .round() as u16;
                 let short_w = short_w.clamp(6, thumb_area.width);
                 let x_off = (thumb_area.width.saturating_sub(short_w)) / 2;
                 let bg_p = Paragraph::new("").style(Style::default().bg(Color::Rgb(15, 15, 15)));
@@ -297,7 +319,9 @@ fn render_grid_card(
     }
 
     // Render corner badges
-    let now_playing = app.player.is_alive() && app.player.status.file_loaded && app.player.current_video_id() == Some(card.id());
+    let now_playing = app.player.is_alive()
+        && app.player.status.file_loaded
+        && app.player.current_video_id() == Some(card.id());
     if now_playing {
         let badge_text = " ▶ Now playing ";
         let badge_w = (badge_text.len() as u16).min(thumb_area.width);
@@ -307,8 +331,12 @@ fn render_grid_card(
             width: badge_w,
             height: 1,
         };
-        let p = Paragraph::new(badge_text)
-            .style(Style::default().bg(app.theme.accent).fg(Color::White).add_modifier(Modifier::BOLD));
+        let p = Paragraph::new(badge_text).style(
+            Style::default()
+                .bg(app.theme.accent)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
         f.render_widget(p, badge_rect);
     } else {
         match card {
@@ -322,8 +350,12 @@ fn render_grid_card(
                         width: badge_w,
                         height: 1,
                     };
-                    let p = Paragraph::new(badge_text)
-                        .style(Style::default().bg(app.theme.live_badge_bg).fg(Color::White).add_modifier(Modifier::BOLD));
+                    let p = Paragraph::new(badge_text).style(
+                        Style::default()
+                            .bg(app.theme.live_badge_bg)
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    );
                     f.render_widget(p, badge_rect);
                 } else if is_shorts {
                     let badge_text = " SHORTS ";
@@ -334,8 +366,12 @@ fn render_grid_card(
                         width: badge_w,
                         height: 1,
                     };
-                    let p = Paragraph::new(badge_text)
-                        .style(Style::default().bg(Color::Rgb(200, 20, 20)).fg(Color::White).add_modifier(Modifier::BOLD));
+                    let p = Paragraph::new(badge_text).style(
+                        Style::default()
+                            .bg(Color::Rgb(200, 20, 20))
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    );
                     f.render_widget(p, badge_rect);
                 } else if let Some(ref dur) = v.duration {
                     let badge_text = format!(" {dur} ");
@@ -346,8 +382,12 @@ fn render_grid_card(
                         width: badge_w,
                         height: 1,
                     };
-                    let p = Paragraph::new(badge_text)
-                        .style(Style::default().bg(Color::Rgb(15, 15, 15)).fg(Color::White).add_modifier(Modifier::BOLD));
+                    let p = Paragraph::new(badge_text).style(
+                        Style::default()
+                            .bg(Color::Rgb(15, 15, 15))
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    );
                     f.render_widget(p, badge_rect);
                 }
             }
@@ -360,8 +400,12 @@ fn render_grid_card(
                     width: badge_w,
                     height: 1,
                 };
-                let p_w = Paragraph::new(badge_text)
-                    .style(Style::default().bg(app.theme.badge_bg).fg(app.theme.accent).add_modifier(Modifier::BOLD));
+                let p_w = Paragraph::new(badge_text).style(
+                    Style::default()
+                        .bg(app.theme.badge_bg)
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                );
                 f.render_widget(p_w, badge_rect);
             }
             _ => {}
@@ -389,7 +433,12 @@ fn render_grid_card(
                     let track = format!("[{}{}] ", "=".repeat(filled), " ".repeat(5 - filled));
                     line_spans.push(Line::from(vec![
                         Span::styled(track, Style::default().fg(app.theme.red)),
-                        Span::styled(tl, Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            tl,
+                            Style::default()
+                                .fg(app.theme.text)
+                                .add_modifier(Modifier::BOLD),
+                        ),
                     ]));
                     continue;
                 }
@@ -397,7 +446,9 @@ fn render_grid_card(
         }
         line_spans.push(Line::from(Span::styled(
             tl,
-            Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
         )));
     }
     f.render_widget(Paragraph::new(line_spans), title_area);

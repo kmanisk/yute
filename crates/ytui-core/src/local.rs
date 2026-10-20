@@ -21,7 +21,10 @@ pub fn scan_local_videos(dirs: &[String]) -> FeedPage {
                         if extensions.iter().any(|&e| e.eq_ignore_ascii_case(ext)) {
                             let meta = entry.metadata().ok();
                             let len = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                            let mtime = meta.as_ref().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
+                            let mtime = meta
+                                .as_ref()
+                                .and_then(|m| m.modified().ok())
+                                .unwrap_or(SystemTime::UNIX_EPOCH);
                             files.push((path, len, mtime));
                         }
                     }
@@ -35,7 +38,11 @@ pub fn scan_local_videos(dirs: &[String]) -> FeedPage {
 
     let mut items = Vec::new();
     for (path, size, _) in files {
-        let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("video").to_string();
+        let filename = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("video")
+            .to_string();
         let size_mb = size / (1024 * 1024);
         let path_str = path.to_string_lossy().to_string();
 

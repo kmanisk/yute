@@ -24,7 +24,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         return;
     }
 
-    let show_chips = !matches!(app.screen, Screen::Watch | Screen::Settings | Screen::Accounts | Screen::Help);
+    let show_chips = !matches!(
+        app.screen,
+        Screen::Watch | Screen::Settings | Screen::Accounts | Screen::Help
+    );
     let header_h = 3u16;
     let chips_h = if show_chips { 1u16 } else { 0u16 };
     let status_h = 2u16;
@@ -56,10 +59,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let sb_width = sidebar::sidebar_width(app.sidebar_expanded);
     let body_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(sb_width),
-            Constraint::Min(20),
-        ])
+        .constraints([Constraint::Length(sb_width), Constraint::Min(20)])
         .split(body_area);
 
     let sidebar_area = body_chunks[0];
@@ -98,8 +98,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     };
 
     let total = app.filtered_items().len();
-    let view_tag = if app.current_view_mode() == ViewMode::List { " [List] " } else { " [Grid] " };
-    let pane_title = if matches!(app.screen, Screen::Settings | Screen::Accounts | Screen::Watch | Screen::Help) {
+    let view_tag = if app.current_view_mode() == ViewMode::List {
+        " [List] "
+    } else {
+        " [Grid] "
+    };
+    let pane_title = if matches!(
+        app.screen,
+        Screen::Settings | Screen::Accounts | Screen::Watch | Screen::Help
+    ) {
         format!(" {title_prefix} ")
     } else {
         format!(" {title_prefix} ({total}){view_tag}")
@@ -204,12 +211,20 @@ fn render_quit_confirmation(f: &mut Frame, app: &App, area: ratatui::layout::Rec
 
     let lines = vec![
         Line::from(""),
-        Line::from(vec![
-            Span::styled("Are you sure you want to quit?", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "Are you sure you want to quit?",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("[y] Yes", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[y] Yes",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw("        "),
             Span::styled("[n] No", Style::default().fg(app.theme.text_secondary)),
         ]),

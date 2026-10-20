@@ -27,11 +27,13 @@ fn get_machine_encryption_key() -> [u8; 32] {
 
 pub fn encrypt_auth_data(plaintext: &[u8]) -> Result<String> {
     let key_bytes = get_machine_encryption_key();
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
-        .map_err(|e| anyhow!("Cipher error: {e}"))?;
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| anyhow!("Cipher error: {e}"))?;
 
     let mut nonce_bytes = [0u8; 12];
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     let pid = std::process::id();
     let now_bytes = now.to_le_bytes();
     let pid_bytes = pid.to_le_bytes();
@@ -52,8 +54,7 @@ pub fn encrypt_auth_data(plaintext: &[u8]) -> Result<String> {
 
 pub fn decrypt_auth_data(encrypted_str: &str) -> Result<Vec<u8>> {
     let hex_part = encrypted_str.trim_start_matches("YTUI_ENC_V1:").trim();
-    let payload = hex::decode(hex_part)
-        .map_err(|e| anyhow!("Hex decode error: {e}"))?;
+    let payload = hex::decode(hex_part).map_err(|e| anyhow!("Hex decode error: {e}"))?;
     if payload.len() < 12 {
         return Err(anyhow!("Encrypted payload too short"));
     }
@@ -62,8 +63,7 @@ pub fn decrypt_auth_data(encrypted_str: &str) -> Result<Vec<u8>> {
     let mut nonce_bytes = [0u8; 12];
     nonce_bytes.copy_from_slice(nonce_slice);
     let key_bytes = get_machine_encryption_key();
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
-        .map_err(|e| anyhow!("Cipher error: {e}"))?;
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| anyhow!("Cipher error: {e}"))?;
     let nonce = Nonce::from(nonce_bytes);
 
     let plaintext = cipher
@@ -73,9 +73,11 @@ pub fn decrypt_auth_data(encrypted_str: &str) -> Result<Vec<u8>> {
     Ok(plaintext)
 }
 
-pub const OAUTH_CLIENT_ID: &str = "861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com";
+pub const OAUTH_CLIENT_ID: &str =
+    "861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com";
 pub const OAUTH_CLIENT_SECRET: &str = "SboVhoG9s0rNafixCSGGKXAT";
-pub const OAUTH_SCOPE: &str = "http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content";
+pub const OAUTH_SCOPE: &str =
+    "http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content";
 pub const OAUTH_GRANT_TYPE_DEVICE: &str = "http://oauth.net/grant_type/device/1.0";
 pub const OAUTH_GRANT_TYPE_REFRESH: &str = "refresh_token";
 pub const OAUTH_MODEL_NAME: &str = "ytlr::";
@@ -170,7 +172,12 @@ impl AuthContext {
         self.load_auth_with_mode(auth_path, cookies_path, "tv_oauth")
     }
 
-    pub fn load_auth_with_mode(&mut self, auth_path: &Path, cookies_path: &Path, auth_mode: &str) -> Result<()> {
+    pub fn load_auth_with_mode(
+        &mut self,
+        auth_path: &Path,
+        cookies_path: &Path,
+        auth_mode: &str,
+    ) -> Result<()> {
         self.auth_file_path = Some(auth_path.to_path_buf());
         match auth_mode {
             "guest" => {
@@ -232,7 +239,9 @@ impl AuthContext {
                 .ok()
                 .and_then(|s| {
                     if s.starts_with("YTUI_ENC_V1:") {
-                        decrypt_auth_data(&s).ok().and_then(|b| serde_json::from_slice::<AuthStorage>(&b).ok())
+                        decrypt_auth_data(&s)
+                            .ok()
+                            .and_then(|b| serde_json::from_slice::<AuthStorage>(&b).ok())
                     } else {
                         serde_json::from_str::<AuthStorage>(&s).ok()
                     }
@@ -246,18 +255,30 @@ impl AuthContext {
             storage.visitor_data = Some(vis.clone());
         }
 
-        if let (Some(ref acc_token), Some(ref ref_token)) = (&self.access_token, &self.refresh_token) {
-            let active_key = storage.active_account.clone().unwrap_or_else(|| "default".to_string());
+        if let (Some(ref acc_token), Some(ref ref_token)) =
+            (&self.access_token, &self.refresh_token)
+        {
+            let active_key = storage
+                .active_account
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
             let exp = self.token_expires_at.unwrap_or_else(|| {
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() + 3600
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    + 3600
             });
-            storage.accounts.insert(active_key.clone(), AuthAccount {
-                access_token: acc_token.clone(),
-                refresh_token: ref_token.clone(),
-                expires_at: exp,
-                name: String::new(),
-                handle: String::new(),
-            });
+            storage.accounts.insert(
+                active_key.clone(),
+                AuthAccount {
+                    access_token: acc_token.clone(),
+                    refresh_token: ref_token.clone(),
+                    expires_at: exp,
+                    name: String::new(),
+                    handle: String::new(),
+                },
+            );
             storage.active_account = Some(active_key);
         }
 
@@ -292,7 +313,9 @@ impl AuthContext {
                 .ok()
                 .and_then(|s| {
                     if s.starts_with("YTUI_ENC_V1:") {
-                        decrypt_auth_data(&s).ok().and_then(|b| serde_json::from_slice::<AuthStorage>(&b).ok())
+                        decrypt_auth_data(&s)
+                            .ok()
+                            .and_then(|b| serde_json::from_slice::<AuthStorage>(&b).ok())
                     } else {
                         serde_json::from_str::<AuthStorage>(&s).ok()
                     }
@@ -306,7 +329,10 @@ impl AuthContext {
             storage.visitor_data = Some(vis.clone());
         }
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         let exp = expires_in.map(|sec| now + sec).unwrap_or(now + 3600);
 
         self.access_token = Some(access_token.clone());
@@ -316,7 +342,10 @@ impl AuthContext {
         let active_key = if !handle.is_empty() {
             handle.clone()
         } else {
-            storage.active_account.clone().unwrap_or_else(|| "default".to_string())
+            storage
+                .active_account
+                .clone()
+                .unwrap_or_else(|| "default".to_string())
         };
 
         storage.accounts.insert(
@@ -401,7 +430,8 @@ impl AuthContext {
                         #[cfg(unix)]
                         {
                             use std::os::unix::fs::PermissionsExt;
-                            let _ = fs::set_permissions(target_path, fs::Permissions::from_mode(0o600));
+                            let _ =
+                                fs::set_permissions(target_path, fs::Permissions::from_mode(0o600));
                         }
                         break;
                     }
@@ -432,8 +462,12 @@ impl AuthContext {
                         }
                     }
                     yt_cookies.insert(name, value);
-                } else if domain == ".google.com" || domain == "google.com" || domain == ".google.co.in" {
-                    if (name == "SAPISID" || name == "__Secure-3PAPISID") && self.sapisid.is_none() {
+                } else if domain == ".google.com"
+                    || domain == "google.com"
+                    || domain == ".google.co.in"
+                {
+                    if (name == "SAPISID" || name == "__Secure-3PAPISID") && self.sapisid.is_none()
+                    {
                         self.sapisid = Some(value.clone());
                     }
                     google_cookies.insert(name, value);
@@ -491,7 +525,10 @@ impl AuthContext {
         Ok(res)
     }
 
-    pub async fn poll_device_token(client: &reqwest::Client, device_code: &str) -> Result<Option<DeviceTokenResponse>> {
+    pub async fn poll_device_token(
+        client: &reqwest::Client,
+        device_code: &str,
+    ) -> Result<Option<DeviceTokenResponse>> {
         let payload = serde_json::json!({
             "code": device_code,
             "client_id": OAUTH_CLIENT_ID,
@@ -540,7 +577,10 @@ impl AuthContext {
         if let Some(new_access) = tok.access_token {
             self.access_token = Some(new_access);
             let exp_in = tok.expires_in.unwrap_or(3600);
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
             self.token_expires_at = Some(now + exp_in);
             if let Some(ref path) = self.auth_file_path {
                 let _ = self.save_auth_file(path);
@@ -563,7 +603,10 @@ impl AuthContext {
         } else {
             "1"
         };
-        headers.insert("X-YouTube-Client-Name", HeaderValue::from_static(client_name_id));
+        headers.insert(
+            "X-YouTube-Client-Name",
+            HeaderValue::from_static(client_name_id),
+        );
 
         if let Ok(val) = HeaderValue::from_str(&self.client_version) {
             headers.insert("X-YouTube-Client-Version", val);

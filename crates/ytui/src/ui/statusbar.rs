@@ -66,17 +66,22 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(app.theme.text_secondary),
     ));
 
-    if app.player.is_alive() && app.player.status.file_loaded && !app.player.status.title.is_empty() {
+    if app.player.is_alive() && app.player.status.file_loaded && !app.player.status.title.is_empty()
+    {
         status_spans.push(Span::styled(" · ", Style::default().fg(app.theme.border)));
         status_spans.push(Span::styled(
             format!("▶ {}", app.player.status.title),
-            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
     } else if !app.status_text.is_empty() {
         status_spans.push(Span::styled(" · ", Style::default().fg(app.theme.border)));
         status_spans.push(Span::styled(
             &app.status_text,
-            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -132,9 +137,10 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         active_hints.push(help_hint);
 
         let hints_str = active_hints.join(" · ");
-        let hints_line = Line::from(vec![
-            Span::styled(format!(" {hints_str}"), Style::default().fg(app.theme.text_secondary)),
-        ]);
+        let hints_line = Line::from(vec![Span::styled(
+            format!(" {hints_str}"),
+            Style::default().fg(app.theme.text_secondary),
+        )]);
         f.render_widget(Paragraph::new(hints_line), rows[1]);
     }
 }

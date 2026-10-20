@@ -294,7 +294,11 @@ impl App {
         let active_path = resolve_path("~/.config/ytui/active_account.json");
         if let Ok(content) = std::fs::read_to_string(&active_path) {
             if let Ok(saved) = serde_json::from_str::<AccountProfile>(&content) {
-                if let Some(pos) = app.accounts.iter().position(|a| a.id == saved.id || a.handle == saved.handle) {
+                if let Some(pos) = app
+                    .accounts
+                    .iter()
+                    .position(|a| a.id == saved.id || a.handle == saved.handle)
+                {
                     app.active_account_index = pos;
                     app.accounts_cursor = pos;
                     app.account_initial = app.accounts[pos].initial.clone();
@@ -379,7 +383,10 @@ impl App {
                 match self.filter_kind {
                     FilterKind::All => true,
                     FilterKind::Videos => match c {
-                        Card::Video(v) => !v.badges.iter().any(|b| b == "SHORTS") && v.live == crate::backend::models::LiveState::None,
+                        Card::Video(v) => {
+                            !v.badges.iter().any(|b| b == "SHORTS")
+                                && v.live == crate::backend::models::LiveState::None
+                        }
                         _ => false,
                     },
                     FilterKind::Shorts => match c {
@@ -531,7 +538,8 @@ impl App {
         let was_playing = self.player.status.is_alive;
         if self.player.poll_updates() {
             if self.player.status.stall_error && !self.status_text.contains("stalled") {
-                self.status_text = "Playback error: stream stalled (check ~/.cache/ytui/mpv.log)".to_string();
+                self.status_text =
+                    "Playback error: stream stalled (check ~/.cache/ytui/mpv.log)".to_string();
             }
             dirty = true;
         }
@@ -568,7 +576,16 @@ impl App {
                 if final_pos > 0.0 {
                     let backend = Arc::clone(&self.backend);
                     tokio::spawn(async move {
-                        let _ = backend.ping_watchtime(&tracker.video_id, &tracker.cpn, tracker.last_ping_pos, final_pos, final_pos, true).await;
+                        let _ = backend
+                            .ping_watchtime(
+                                &tracker.video_id,
+                                &tracker.cpn,
+                                tracker.last_ping_pos,
+                                final_pos,
+                                final_pos,
+                                true,
+                            )
+                            .await;
                     });
                 }
             }

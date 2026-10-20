@@ -36,7 +36,10 @@ fn test_parse_home_fixture() {
         _ => panic!("Expected Live Video card"),
     }
 
-    assert_eq!(page.continuation.as_deref(), Some("continuation_home_page_2"));
+    assert_eq!(
+        page.continuation.as_deref(),
+        Some("continuation_home_page_2")
+    );
 }
 
 #[test]
@@ -64,10 +67,15 @@ fn test_parse_watch_fixture() {
 
     let watch = parse_watch_data(&val).expect("Watch data parsed");
     assert_eq!(watch.video.id, "watch_sample_vid");
-    assert_eq!(watch.video.title, "Building a High-Performance YouTube TUI in Rust");
+    assert_eq!(
+        watch.video.title,
+        "Building a High-Performance YouTube TUI in Rust"
+    );
     assert_eq!(watch.video.channel, "Antigravity Engineering");
     assert_eq!(watch.video.duration.as_deref(), Some("20:45"));
-    assert!(watch.description.contains("Deep dive into building an interactive YouTube TUI"));
+    assert!(watch
+        .description
+        .contains("Deep dive into building an interactive YouTube TUI"));
 }
 
 #[test]
@@ -429,7 +437,10 @@ fn test_parse_comments() {
     assert_eq!(batch.comments[0].published.as_deref(), Some("1 day ago"));
     assert_eq!(batch.comments[0].likes.as_deref(), Some("128"));
     assert_eq!(batch.comments[0].reply_count, Some(5));
-    assert_eq!(batch.continuation.as_deref(), Some("continuation_comments_page_2"));
+    assert_eq!(
+        batch.continuation.as_deref(),
+        Some("continuation_comments_page_2")
+    );
 }
 
 #[test]
@@ -493,7 +504,10 @@ fn test_parse_structured_description_content_renderer() {
     });
 
     let watch = parse_watch_data(&raw).expect("watch data parsed");
-    assert_eq!(watch.description, "Detailed tracklist and links\nhttps://example.com");
+    assert_eq!(
+        watch.description,
+        "Detailed tracklist and links\nhttps://example.com"
+    );
 }
 
 #[test]
@@ -514,4 +528,46 @@ fn test_shorts_badge_detection() {
     assert!(card.badges.contains(&"SHORTS".to_string()));
 }
 
+#[test]
+fn test_sponsorblock_tracker_skipping_and_cooldown() {
+    use ytui_core::backend::sponsorblock::{SponsorBlockTracker, SponsorSegment};
 
+    let segments = vec![
+        SponsorSegment {
+            category: "sponsor".to_string(),
+            action_type: "skip".to_string(),
+            segment: (10.0, 30.0),
+            uuid: "uuid-sponsor-1".to_string(),
+        },
+        SponsorSegment {
+            category: "selfpromo".to_string(),
+            action_type: "skip".to_string(),
+            segment: (60.0, 75.0),
+            uuid: "uuid-promo-2".to_string(),
+        },
+    ];
+
+    let mut tracker = SponsorBlockTracker::new("vid_test", segments);
+
+    // 1. Before segment: no skip
+    assert_eq!(tracker.check_position(5.0), None);
+
+    // 2. Enters segment (10.0): triggers skip
+    let skip1 = tracker.check_position(10.5);
+    assert!(skip1.is_some());
+    let (target, msg) = skip1.unwrap();
+    assert!((target - 30.1).abs() < 1e-4);
+    assert!(msg.contains("Skipped sponsor"));
+
+    // 3. Position still reported in segment during decoder lag: NO repeat skip because UUID is marked
+    assert_eq!(tracker.check_position(11.0), None);
+
+    // 4. Position at 31.0: outside segment, no skip
+    assert_eq!(tracker.check_position(31.0), None);
+
+    // 5. Seek back before first segment: clears UUID tracking
+    tracker.on_manual_seek(5.0);
+    // When playing forward and entering segment again, it can skip
+    let skip_again = tracker.check_position(10.2);
+    assert!(skip_again.is_some());
+}

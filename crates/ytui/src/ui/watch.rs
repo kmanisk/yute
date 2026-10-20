@@ -38,14 +38,24 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     let video = app.player.current_video.as_ref();
-    let title = video.map(|v| v.title.as_str()).unwrap_or("No Video Playing");
+    let title = video
+        .map(|v| v.title.as_str())
+        .unwrap_or("No Video Playing");
     let channel = video.map(|v| v.channel.as_str()).unwrap_or("");
     let verified = video.map(|v| v.verified).unwrap_or(false);
 
     // Pull richer metadata from watch_data if available
     let (views_str, published_str) = if let Some(ref wd) = app.watch_data {
-        let v_str = wd.video.views.clone().or_else(|| video.and_then(|v| v.views.clone()));
-        let p_str = wd.video.published.clone().or_else(|| video.and_then(|v| v.published.clone()));
+        let v_str = wd
+            .video
+            .views
+            .clone()
+            .or_else(|| video.and_then(|v| v.views.clone()));
+        let p_str = wd
+            .video
+            .published
+            .clone()
+            .or_else(|| video.and_then(|v| v.published.clone()));
         (v_str, p_str)
     } else {
         (
@@ -64,15 +74,45 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let (state_str, state_style) = if status.stall_error {
-        ("[STALLED]", Style::default().bg(Color::Red).fg(Color::White).add_modifier(Modifier::BOLD))
+        (
+            "[STALLED]",
+            Style::default()
+                .bg(Color::Red)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
     } else if !status.file_loaded {
-        ("[LOADING]", Style::default().bg(app.theme.badge_bg).fg(app.theme.accent).add_modifier(Modifier::BOLD))
+        (
+            "[LOADING]",
+            Style::default()
+                .bg(app.theme.badge_bg)
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )
     } else if status.paused_for_cache {
-        ("[BUFFERING]", Style::default().bg(Color::Rgb(200, 140, 20)).fg(Color::Black).add_modifier(Modifier::BOLD))
+        (
+            "[BUFFERING]",
+            Style::default()
+                .bg(Color::Rgb(200, 140, 20))
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
     } else if status.paused {
-        ("[PAUSED]", Style::default().bg(app.theme.badge_bg).fg(app.theme.text_secondary).add_modifier(Modifier::BOLD))
+        (
+            "[PAUSED]",
+            Style::default()
+                .bg(app.theme.badge_bg)
+                .fg(app.theme.text_secondary)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
-        ("[PLAYING]", Style::default().bg(app.theme.accent).fg(Color::Black).add_modifier(Modifier::BOLD))
+        (
+            "[PLAYING]",
+            Style::default()
+                .bg(app.theme.accent)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        )
     };
 
     // Calculate layout: Top info (6), Controls bar (1), Description box (remainder)
@@ -92,66 +132,141 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
     header_lines.push(Line::from(vec![
         Span::styled(format!(" {state_str} "), state_style),
         Span::raw(" "),
-        Span::styled(title, Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
 
     // Line 2: Channel [v] · views · published
     let mut meta_spans = vec![
         Span::raw("  "),
-        Span::styled(if channel.is_empty() { "YouTube" } else { channel }, Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            if channel.is_empty() {
+                "YouTube"
+            } else {
+                channel
+            },
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
     ];
     if verified {
         meta_spans.push(Span::styled(" [v]", Style::default().fg(app.theme.accent)));
     }
     if let Some(v_txt) = views_str {
         if !v_txt.is_empty() {
-            meta_spans.push(Span::styled("  ·  ", Style::default().fg(app.theme.text_secondary)));
+            meta_spans.push(Span::styled(
+                "  ·  ",
+                Style::default().fg(app.theme.text_secondary),
+            ));
             meta_spans.push(Span::styled(v_txt, Style::default().fg(app.theme.text)));
         }
     }
     if let Some(p_txt) = published_str {
         if !p_txt.is_empty() {
-            meta_spans.push(Span::styled("  ·  ", Style::default().fg(app.theme.text_secondary)));
-            meta_spans.push(Span::styled(p_txt, Style::default().fg(app.theme.text_secondary)));
+            meta_spans.push(Span::styled(
+                "  ·  ",
+                Style::default().fg(app.theme.text_secondary),
+            ));
+            meta_spans.push(Span::styled(
+                p_txt,
+                Style::default().fg(app.theme.text_secondary),
+            ));
         }
     }
     header_lines.push(Line::from(meta_spans));
 
     // Line 3: Interactive Action Chips (Likes, Dislikes, Rating, Subscribe)
-    let is_liked = app.watch_data.as_ref().and_then(|w| w.is_liked).unwrap_or(false);
-    let is_disliked = app.watch_data.as_ref().and_then(|w| w.is_disliked).unwrap_or(false);
-    let is_sub = app.watch_data.as_ref().and_then(|w| w.is_subscribed).unwrap_or(false);
-    let likes_txt = app.watch_data.as_ref().and_then(|w| w.likes.clone()).unwrap_or_else(|| "Like".to_string());
-    let dislikes_txt = app.watch_data.as_ref().and_then(|w| w.dislikes.clone()).unwrap_or_else(|| "Dislike".to_string());
+    let is_liked = app
+        .watch_data
+        .as_ref()
+        .and_then(|w| w.is_liked)
+        .unwrap_or(false);
+    let is_disliked = app
+        .watch_data
+        .as_ref()
+        .and_then(|w| w.is_disliked)
+        .unwrap_or(false);
+    let is_sub = app
+        .watch_data
+        .as_ref()
+        .and_then(|w| w.is_subscribed)
+        .unwrap_or(false);
+    let likes_txt = app
+        .watch_data
+        .as_ref()
+        .and_then(|w| w.likes.clone())
+        .unwrap_or_else(|| "Like".to_string());
+    let dislikes_txt = app
+        .watch_data
+        .as_ref()
+        .and_then(|w| w.dislikes.clone())
+        .unwrap_or_else(|| "Dislike".to_string());
 
     let mut action_spans = vec![Span::raw("  ")];
     if is_liked {
-        action_spans.push(Span::styled(format!("[+ Liked {likes_txt}]"), Style::default().fg(Color::Black).bg(app.theme.accent).add_modifier(Modifier::BOLD)));
+        action_spans.push(Span::styled(
+            format!("[+ Liked {likes_txt}]"),
+            Style::default()
+                .fg(Color::Black)
+                .bg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
     } else {
-        action_spans.push(Span::styled(format!("[+ Like {likes_txt}]"), Style::default().fg(app.theme.accent)));
+        action_spans.push(Span::styled(
+            format!("[+ Like {likes_txt}]"),
+            Style::default().fg(app.theme.accent),
+        ));
     }
 
     action_spans.push(Span::styled("   ", Style::default().fg(app.theme.border)));
 
     if is_disliked {
-        action_spans.push(Span::styled(format!("[- Disliked {dislikes_txt}]"), Style::default().fg(Color::White).bg(app.theme.red).add_modifier(Modifier::BOLD)));
+        action_spans.push(Span::styled(
+            format!("[- Disliked {dislikes_txt}]"),
+            Style::default()
+                .fg(Color::White)
+                .bg(app.theme.red)
+                .add_modifier(Modifier::BOLD),
+        ));
     } else {
-        action_spans.push(Span::styled(format!("[- Dislike {dislikes_txt}]"), Style::default().fg(app.theme.text_secondary)));
+        action_spans.push(Span::styled(
+            format!("[- Dislike {dislikes_txt}]"),
+            Style::default().fg(app.theme.text_secondary),
+        ));
     }
 
     if let Some(r) = app.watch_data.as_ref().and_then(|w| w.rating) {
         if r > 0.0 {
             action_spans.push(Span::styled("   ", Style::default().fg(app.theme.border)));
-            action_spans.push(Span::styled(format!("[Rating: {r:.1}/5]"), Style::default().fg(app.theme.text_secondary)));
+            action_spans.push(Span::styled(
+                format!("[Rating: {r:.1}/5]"),
+                Style::default().fg(app.theme.text_secondary),
+            ));
         }
     }
 
     action_spans.push(Span::styled("   ", Style::default().fg(app.theme.border)));
 
     if is_sub {
-        action_spans.push(Span::styled("[Subscribed]", Style::default().fg(app.theme.text_secondary).add_modifier(Modifier::BOLD)));
+        action_spans.push(Span::styled(
+            "[Subscribed]",
+            Style::default()
+                .fg(app.theme.text_secondary)
+                .add_modifier(Modifier::BOLD),
+        ));
     } else {
-        action_spans.push(Span::styled("[s Subscribe]", Style::default().fg(Color::Black).bg(app.theme.red).add_modifier(Modifier::BOLD)));
+        action_spans.push(Span::styled(
+            "[s Subscribe]",
+            Style::default()
+                .fg(Color::Black)
+                .bg(app.theme.red)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
     header_lines.push(Line::from(action_spans));
 
@@ -185,7 +300,12 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
     );
     header_lines.push(Line::from(vec![
         Span::raw("  "),
-        Span::styled(progress_bar, Style::default().fg(app.theme.red).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            progress_bar,
+            Style::default()
+                .fg(app.theme.red)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
 
     let p_header = Paragraph::new(header_lines);
@@ -193,22 +313,73 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Section 2: Hotkey controls cheatsheet bar
     let controls_line = Line::from(vec![
-        Span::styled(" Keys: ", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
-        Span::styled("Space/k", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " Keys: ",
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "Space/k",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" pause · ", Style::default().fg(app.theme.text_secondary)),
-        Span::styled("h/l", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "h/l",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" seek · ", Style::default().fg(app.theme.text_secondary)),
-        Span::styled("[/'", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "[/'",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" vol · ", Style::default().fg(app.theme.text_secondary)),
-        Span::styled("+/-", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
-        Span::styled(" like/dis · ", Style::default().fg(app.theme.text_secondary)),
-        Span::styled("s", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "+/-",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " like/dis · ",
+            Style::default().fg(app.theme.text_secondary),
+        ),
+        Span::styled(
+            "s",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" sub · ", Style::default().fg(app.theme.text_secondary)),
-        Span::styled("c", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
-        Span::styled(" comments · ", Style::default().fg(app.theme.text_secondary)),
-        Span::styled("i", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "c",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            " comments · ",
+            Style::default().fg(app.theme.text_secondary),
+        ),
+        Span::styled(
+            "i",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" stats · ", Style::default().fg(app.theme.text_secondary)),
-        Span::styled("q", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "q",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" back", Style::default().fg(app.theme.text_secondary)),
     ]);
     f.render_widget(Paragraph::new(controls_line), chunks[1]);
@@ -233,11 +404,19 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
         let mut desc_lines = Vec::new();
         if let Some(ref wd) = app.watch_data {
             if !wd.chapters.is_empty() {
-                desc_lines.push(Line::from(Span::styled("Chapters:", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD))));
+                desc_lines.push(Line::from(Span::styled(
+                    "Chapters:",
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                )));
                 for (offset_sec, ch_title) in &wd.chapters {
                     let t_str = format_time(*offset_sec as f64);
                     desc_lines.push(Line::from(vec![
-                        Span::styled(format!("  [{t_str}] "), Style::default().fg(app.theme.accent)),
+                        Span::styled(
+                            format!("  [{t_str}] "),
+                            Style::default().fg(app.theme.accent),
+                        ),
                         Span::styled(ch_title, Style::default().fg(app.theme.text)),
                     ]));
                 }
@@ -245,20 +424,35 @@ fn render_left_pane(f: &mut Frame, app: &mut App, area: Rect) {
             }
 
             if wd.description.is_empty() {
-                desc_lines.push(Line::from(Span::styled("No description provided.", Style::default().fg(app.theme.text_secondary))));
+                desc_lines.push(Line::from(Span::styled(
+                    "No description provided.",
+                    Style::default().fg(app.theme.text_secondary),
+                )));
             } else if app.show_description {
                 for line in wd.description.lines().take(desc_inner.height as usize * 2) {
-                    desc_lines.push(Line::from(Span::styled(line, Style::default().fg(app.theme.text))));
+                    desc_lines.push(Line::from(Span::styled(
+                        line,
+                        Style::default().fg(app.theme.text),
+                    )));
                 }
             } else {
                 let max_preview = (desc_inner.height as usize).saturating_sub(2).max(1);
                 for line in wd.description.lines().take(max_preview) {
-                    desc_lines.push(Line::from(Span::styled(line, Style::default().fg(app.theme.text))));
+                    desc_lines.push(Line::from(Span::styled(
+                        line,
+                        Style::default().fg(app.theme.text),
+                    )));
                 }
-                desc_lines.push(Line::from(Span::styled("... (press 'd' to read full description)", Style::default().fg(app.theme.text_secondary))));
+                desc_lines.push(Line::from(Span::styled(
+                    "... (press 'd' to read full description)",
+                    Style::default().fg(app.theme.text_secondary),
+                )));
             }
         } else {
-            desc_lines.push(Line::from(Span::styled("Loading video details and chapters...", Style::default().fg(app.theme.text_secondary))));
+            desc_lines.push(Line::from(Span::styled(
+                "Loading video details and chapters...",
+                Style::default().fg(app.theme.text_secondary),
+            )));
         }
 
         let p_desc = Paragraph::new(desc_lines).wrap(Wrap { trim: true });
@@ -303,21 +497,36 @@ fn render_comments_pane(f: &mut Frame, app: &mut App, area: Rect) {
     let mut lines = Vec::new();
     let skip_count = app.comments_cursor;
     for comment in items.iter().skip(skip_count) {
-        let mut header_spans = vec![
-            Span::styled(&comment.author, Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
-        ];
+        let mut header_spans = vec![Span::styled(
+            &comment.author,
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        )];
         if let Some(ref pub_time) = comment.published {
-            header_spans.push(Span::styled(format!("  ·  {pub_time}"), Style::default().fg(app.theme.text_secondary)));
+            header_spans.push(Span::styled(
+                format!("  ·  {pub_time}"),
+                Style::default().fg(app.theme.text_secondary),
+            ));
         }
         if let Some(ref likes) = comment.likes {
-            header_spans.push(Span::styled(format!("  ·  {likes} likes"), Style::default().fg(app.theme.text)));
+            header_spans.push(Span::styled(
+                format!("  ·  {likes} likes"),
+                Style::default().fg(app.theme.text),
+            ));
         }
         lines.push(Line::from(header_spans));
 
         for line in comment.text.lines() {
-            lines.push(Line::from(Span::styled(format!("  {line}"), Style::default().fg(app.theme.text))));
+            lines.push(Line::from(Span::styled(
+                format!("  {line}"),
+                Style::default().fg(app.theme.text),
+            )));
         }
-        lines.push(Line::from(Span::styled("  ─────────────────────────────────────", Style::default().fg(app.theme.border))));
+        lines.push(Line::from(Span::styled(
+            "  ─────────────────────────────────────",
+            Style::default().fg(app.theme.border),
+        )));
         lines.push(Line::from(""));
     }
 
@@ -362,7 +571,12 @@ fn render_up_next_pane(f: &mut Frame, app: &mut App, area: Rect) {
                 // Line 1: Number + Title
                 lines.push(Line::from(vec![
                     Span::styled(num_prefix, Style::default().fg(app.theme.text_secondary)),
-                    Span::styled(&v.title, Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        &v.title,
+                        Style::default()
+                            .fg(app.theme.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
 
                 // Line 2: Dynamically construct meta string (never print bare dots)
@@ -411,7 +625,12 @@ fn render_up_next_pane(f: &mut Frame, app: &mut App, area: Rect) {
             Card::Playlist(p) => {
                 lines.push(Line::from(vec![
                     Span::styled(num_prefix, Style::default().fg(app.theme.text_secondary)),
-                    Span::styled(&p.title, Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        &p.title,
+                        Style::default()
+                            .fg(app.theme.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
 
                 let type_badge = if p.is_mix {
@@ -434,7 +653,12 @@ fn render_up_next_pane(f: &mut Frame, app: &mut App, area: Rect) {
             Card::Channel(c) => {
                 lines.push(Line::from(vec![
                     Span::styled(num_prefix, Style::default().fg(app.theme.text_secondary)),
-                    Span::styled(&c.title, Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        &c.title,
+                        Style::default()
+                            .fg(app.theme.text)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
                 let sub_str = c.subscribers.as_deref().unwrap_or("Channel");
                 lines.push(Line::from(vec![

@@ -35,9 +35,10 @@ impl ThumbnailLoader {
                     tokio::spawn(async move {
                         if cache_path.exists() {
                             let path_c = cache_path.clone();
-                            let loaded = tokio::task::spawn_blocking(move || {
-                                image::open(&path_c).ok()
-                            }).await.unwrap_or(None);
+                            let loaded =
+                                tokio::task::spawn_blocking(move || image::open(&path_c).ok())
+                                    .await
+                                    .unwrap_or(None);
 
                             if let Some(img) = loaded {
                                 let _ = tx_c.send((url, Some(img)));
@@ -56,7 +57,9 @@ impl ThumbnailLoader {
                                     } else {
                                         None
                                     }
-                                }).await.unwrap_or(None);
+                                })
+                                .await
+                                .unwrap_or(None);
 
                                 if let Some(img) = decoded {
                                     let _ = tx_c.send((url, Some(img)));

@@ -27,7 +27,10 @@ pub fn render_help(f: &mut Frame, app: &App, area: Rect) {
     let entries = [
         ("h / j / k / l", "Move cursor across cards / items"),
         ("Enter", "Play video in external MPV window"),
-        ("Shift-Enter", "Play video directly in terminal (Kitty/Sixel)"),
+        (
+            "Shift-Enter",
+            "Play video directly in terminal (Kitty/Sixel)",
+        ),
         ("w", "Play in external window"),
         ("o", "Open current video in browser"),
         ("/", "Focus search bar (insert mode)"),
@@ -53,7 +56,12 @@ pub fn render_help(f: &mut Frame, app: &App, area: Rect) {
     let mut lines = Vec::new();
     for (k, desc) in entries {
         lines.push(Line::from(vec![
-            Span::styled(format!("  {k:<18}"), Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("  {k:<18}"),
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(desc, Style::default().fg(app.theme.text)),
         ]));
     }

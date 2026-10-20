@@ -4,6 +4,7 @@ pub mod innertube;
 pub mod models;
 pub mod parse;
 pub mod rss;
+pub mod sponsorblock;
 pub mod ytdlp;
 
 use async_trait::async_trait;
@@ -18,7 +19,12 @@ pub trait Backend: Send + Sync {
     async fn watch_later(&self) -> anyhow::Result<FeedPage>;
     async fn playlists(&self) -> anyhow::Result<FeedPage>;
     async fn playlist(&self, id: &str) -> anyhow::Result<FeedPage>;
-    async fn search(&self, q: &str, filters: &SearchFilters, token: Option<&str>) -> anyhow::Result<FeedPage>;
+    async fn search(
+        &self,
+        q: &str,
+        filters: &SearchFilters,
+        token: Option<&str>,
+    ) -> anyhow::Result<FeedPage>;
     async fn suggest(&self, q: &str) -> anyhow::Result<Vec<String>>;
     async fn watch(&self, video_id: &str) -> anyhow::Result<WatchData>;
     async fn channel(&self, id: &str, tab: ChannelTab) -> anyhow::Result<FeedPage>;
@@ -165,7 +171,12 @@ impl Backend for BackendChain {
         empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
-    async fn search(&self, q: &str, filters: &SearchFilters, token: Option<&str>) -> anyhow::Result<FeedPage> {
+    async fn search(
+        &self,
+        q: &str,
+        filters: &SearchFilters,
+        token: Option<&str>,
+    ) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
         for b in &self.backends {

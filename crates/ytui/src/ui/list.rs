@@ -19,8 +19,7 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
         } else {
             "No results. Press '/' to search with new query."
         };
-        let p = Paragraph::new(msg)
-            .style(Style::default().fg(app.theme.text_secondary));
+        let p = Paragraph::new(msg).style(Style::default().fg(app.theme.text_secondary));
         f.render_widget(p, area);
         return;
     }
@@ -80,9 +79,13 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
         let sb_x = area.x + area.width - 1;
         let sb_height = area.height.saturating_sub(2);
         if sb_height > 2 {
-            let thumb_size = ((visible_rows as f32 / total_items as f32) * (sb_height as f32)).round().max(1.0) as u16;
-            let thumb_pos = ((start_idx as f32 / (total_items.saturating_sub(visible_rows).max(1) as f32))
-                * ((sb_height.saturating_sub(thumb_size)) as f32)).round() as u16;
+            let thumb_size = ((visible_rows as f32 / total_items as f32) * (sb_height as f32))
+                .round()
+                .max(1.0) as u16;
+            let thumb_pos = ((start_idx as f32
+                / (total_items.saturating_sub(visible_rows).max(1) as f32))
+                * ((sb_height.saturating_sub(thumb_size)) as f32))
+                .round() as u16;
 
             for y_off in 0..sb_height {
                 let y = area.y + 1 + y_off;
@@ -91,7 +94,15 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
                 } else {
                     ("│", Style::default().fg(app.theme.border))
                 };
-                f.render_widget(Paragraph::new(ch).style(style), Rect { x: sb_x, y, width: 1, height: 1 });
+                f.render_widget(
+                    Paragraph::new(ch).style(style),
+                    Rect {
+                        x: sb_x,
+                        y,
+                        width: 1,
+                        height: 1,
+                    },
+                );
             }
         }
     }
@@ -148,7 +159,9 @@ fn render_list_row(
     if !thumb_url.is_empty() && app.config.general.graphics != "none" {
         if let Some(proto) = app.thumbs.get_protocol(&thumb_url) {
             if is_shorts {
-                let short_w = ((thumb_area.height as f32) * app.cell_h_px * 9.0 / (16.0 * app.cell_w_px)).round() as u16;
+                let short_w = ((thumb_area.height as f32) * app.cell_h_px * 9.0
+                    / (16.0 * app.cell_w_px))
+                    .round() as u16;
                 let short_w = short_w.clamp(4, thumb_area.width);
                 let x_off = (thumb_area.width.saturating_sub(short_w)) / 2;
                 let bg_p = Paragraph::new("").style(Style::default().bg(Color::Rgb(15, 15, 15)));
@@ -201,8 +214,12 @@ fn render_list_row(
                     width: badge_w,
                     height: 1,
                 };
-                let p = Paragraph::new(badge_text)
-                    .style(Style::default().bg(app.theme.live_badge_bg).fg(Color::White).add_modifier(Modifier::BOLD));
+                let p = Paragraph::new(badge_text).style(
+                    Style::default()
+                        .bg(app.theme.live_badge_bg)
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                );
                 f.render_widget(p, badge_rect);
             } else if is_shorts {
                 let badge_text = " SHORTS ";
@@ -213,8 +230,12 @@ fn render_list_row(
                     width: badge_w,
                     height: 1,
                 };
-                let p = Paragraph::new(badge_text)
-                    .style(Style::default().bg(Color::Rgb(200, 20, 20)).fg(Color::White).add_modifier(Modifier::BOLD));
+                let p = Paragraph::new(badge_text).style(
+                    Style::default()
+                        .bg(Color::Rgb(200, 20, 20))
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                );
                 f.render_widget(p, badge_rect);
             } else if let Some(ref dur) = v.duration {
                 let badge_text = format!(" {dur} ");
@@ -225,8 +246,12 @@ fn render_list_row(
                     width: badge_w,
                     height: 1,
                 };
-                let p = Paragraph::new(badge_text)
-                    .style(Style::default().bg(Color::Rgb(15, 15, 15)).fg(Color::White).add_modifier(Modifier::BOLD));
+                let p = Paragraph::new(badge_text).style(
+                    Style::default()
+                        .bg(Color::Rgb(15, 15, 15))
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                );
                 f.render_widget(p, badge_rect);
             }
         }
@@ -239,8 +264,12 @@ fn render_list_row(
                 width: badge_w,
                 height: 1,
             };
-            let p_w = Paragraph::new(badge_text)
-                .style(Style::default().bg(app.theme.badge_bg).fg(app.theme.accent).add_modifier(Modifier::BOLD));
+            let p_w = Paragraph::new(badge_text).style(
+                Style::default()
+                    .bg(app.theme.badge_bg)
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            );
             f.render_widget(p_w, badge_rect);
         }
         _ => {}
@@ -261,7 +290,9 @@ fn render_list_row(
     for tl in title_lines {
         details_lines.push(Line::from(Span::styled(
             tl,
-            Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
         )));
     }
 

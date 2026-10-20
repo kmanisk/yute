@@ -20,24 +20,24 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         24u16
     };
 
-    let left_width = if area.width >= 90 {
-        22u16
-    } else {
-        16u16
-    };
+    let left_width = if area.width >= 90 { 22u16 } else { 16u16 };
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Length(left_width),   // Left: App title / section
-            Constraint::Min(20),              // Center: search box
-            Constraint::Length(right_width),  // Right: YouTube badge + Account
+            Constraint::Length(left_width),  // Left: App title / section
+            Constraint::Min(20),             // Center: search box
+            Constraint::Length(right_width), // Right: YouTube badge + Account
         ])
         .split(area);
 
     // Left: hamburger icon / app branding & section title
     let hamburger = if is_nerd {
-        if app.sidebar_expanded { "󰍜 " } else { " " }
+        if app.sidebar_expanded {
+            "󰍜 "
+        } else {
+            " "
+        }
     } else if app.sidebar_expanded {
         "[=] "
     } else {
@@ -62,8 +62,16 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     let logo_spans = vec![
         Span::styled(hamburger, Style::default().fg(app.theme.text_secondary)),
-        Span::styled("ytui ", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("· {section_name}"), Style::default().fg(app.theme.text)),
+        Span::styled(
+            "ytui ",
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("· {section_name}"),
+            Style::default().fg(app.theme.text),
+        ),
     ];
     let logo_lines = if area.height >= 3 {
         vec![Line::from(""), Line::from(logo_spans)]
@@ -86,42 +94,70 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
         if app.search_query.is_empty() {
             vec![
                 Span::styled(search_icon, Style::default().fg(app.theme.accent)),
-                Span::styled("█", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
-                Span::styled(" Type to search... (Enter to submit, Esc to cancel)", Style::default().fg(app.theme.text_secondary)),
+                Span::styled(
+                    "█",
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " Type to search... (Enter to submit, Esc to cancel)",
+                    Style::default().fg(app.theme.text_secondary),
+                ),
             ]
         } else {
             vec![
                 Span::styled(search_icon, Style::default().fg(app.theme.accent)),
-                Span::styled(format!(" {}", app.search_query), Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
-                Span::styled("█", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!(" {}", app.search_query),
+                    Style::default()
+                        .fg(app.theme.text)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "█",
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]
         }
     } else if app.screen == Screen::Search && !app.search_query.is_empty() {
         let total = app.filtered_items().len();
         vec![
             Span::styled(search_icon, Style::default().fg(app.theme.accent)),
-            Span::styled(format!(" Results for '{}' · {}", app.search_query, total), Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!(" Results for '{}' · {}", app.search_query, total),
+                Style::default()
+                    .fg(app.theme.text)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]
     } else if app.search_query.is_empty() {
         vec![
             Span::styled(search_icon, Style::default().fg(app.theme.text_secondary)),
-            Span::styled(" Search (/ to search)...", Style::default().fg(app.theme.text_secondary)),
+            Span::styled(
+                " Search (/ to search)...",
+                Style::default().fg(app.theme.text_secondary),
+            ),
         ]
     } else {
         vec![
             Span::styled(search_icon, Style::default().fg(app.theme.text_secondary)),
-            Span::styled(format!(" {}", app.search_query), Style::default().fg(app.theme.text)),
+            Span::styled(
+                format!(" {}", app.search_query),
+                Style::default().fg(app.theme.text),
+            ),
         ]
     };
 
-    let search_pill = Paragraph::new(Line::from(search_spans))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_set(ratatui::symbols::border::ROUNDED)
-                .border_style(Style::default().fg(search_border_color))
-                .style(Style::default().bg(app.theme.bg)),
-        );
+    let search_pill = Paragraph::new(Line::from(search_spans)).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_set(ratatui::symbols::border::ROUNDED)
+            .border_style(Style::default().fg(search_border_color))
+            .style(Style::default().bg(app.theme.bg)),
+    );
     f.render_widget(search_pill, chunks[1]);
 
     // Right: Loading indicator + YouTube badge with unclipped ▶ + account
@@ -134,7 +170,10 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     let mut right_spans = Vec::new();
     if app.is_loading && !spinner_str.is_empty() {
-        right_spans.push(Span::styled(format!("{spinner_str} Loading... "), Style::default().fg(app.theme.accent)));
+        right_spans.push(Span::styled(
+            format!("{spinner_str} Loading... "),
+            Style::default().fg(app.theme.accent),
+        ));
     }
 
     // Wide glyphs measured with unicode-width and given trailing space so ▶ is never clipped

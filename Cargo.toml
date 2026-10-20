@@ -2,8 +2,9 @@
 members = [
     "crates/ytui-core",
     "crates/ytui",
+    "crates/ytui-gui",
 ]
-default-members = ["crates/ytui"]
+default-members = ["crates/ytui", "crates/ytui-gui"]
 resolver = "2"
 
 [profile.release]

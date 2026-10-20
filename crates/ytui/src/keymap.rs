@@ -106,11 +106,7 @@ impl KeymapState {
         Self::default()
     }
 
-    pub fn handle_key(
-        &mut self,
-        key: KeyEvent,
-        in_watch: bool,
-    ) -> Option<(Action, usize)> {
+    pub fn handle_key(&mut self, key: KeyEvent, in_watch: bool) -> Option<(Action, usize)> {
         let code = key.code;
         let mods = key.modifiers;
 
@@ -174,7 +170,9 @@ impl KeymapState {
         // Watch mode bindings
         if in_watch {
             match code {
-                KeyCode::Char(' ') | KeyCode::Char('k') | KeyCode::Char('K') => return Some((Action::PauseResume, 1)),
+                KeyCode::Char(' ') | KeyCode::Char('k') | KeyCode::Char('K') => {
+                    return Some((Action::PauseResume, 1))
+                }
                 KeyCode::Char('h') => return Some((Action::SeekBack5, count)),
                 KeyCode::Char('l') => return Some((Action::SeekForward5, count)),
                 KeyCode::Char('H') => return Some((Action::SeekBack30, count)),
@@ -206,7 +204,9 @@ impl KeymapState {
                 KeyCode::Char('.') => return Some((Action::SeekForward5, count)),
                 KeyCode::Char('<') => return Some((Action::SpeedDown, 1)),
                 KeyCode::Char('>') => return Some((Action::SpeedUp, 1)),
-                KeyCode::Char('t') | KeyCode::Char('v') => return Some((Action::CycleSubtitles, 1)),
+                KeyCode::Char('t') | KeyCode::Char('v') => {
+                    return Some((Action::CycleSubtitles, 1))
+                }
                 KeyCode::Char('d') => return Some((Action::ToggleDescription, 1)),
                 KeyCode::Char('f') => return Some((Action::ToggleFullscreen, 1)),
                 KeyCode::Char('P') => return Some((Action::ToggleAutoplay, 1)),

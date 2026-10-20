@@ -68,7 +68,11 @@ pub fn sanitize_title(title: &str, strip_emoji: bool) -> String {
     trimmed.to_string()
 }
 
-pub fn wrap_and_truncate_title(clean_title: &str, max_width: usize, max_lines: usize) -> Vec<String> {
+pub fn wrap_and_truncate_title(
+    clean_title: &str,
+    max_width: usize,
+    max_lines: usize,
+) -> Vec<String> {
     if max_width == 0 || max_lines == 0 || clean_title.is_empty() {
         return Vec::new();
     }
@@ -215,13 +219,17 @@ pub fn format_meta_line(
         }
         if has_views {
             if let Some(vw) = views_str {
-                if w > 0 { w += 3; } // " · "
+                if w > 0 {
+                    w += 3;
+                } // " · "
                 w += vw.width();
             }
         }
         if has_pub {
             if let Some(pb) = pub_str {
-                if w > 0 { w += 3; } // " · "
+                if w > 0 {
+                    w += 3;
+                } // " · "
                 w += pb.width();
             }
         }

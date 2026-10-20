@@ -10,10 +10,26 @@ fn create_mock_app() -> App {
     let mut app = App::new(Config::default(), picker);
 
     app.chips = vec![
-        Chip { title: "All".to_string(), token: None, active: true },
-        Chip { title: "Gaming".to_string(), token: None, active: false },
-        Chip { title: "Linux".to_string(), token: None, active: false },
-        Chip { title: "Music".to_string(), token: None, active: false },
+        Chip {
+            title: "All".to_string(),
+            token: None,
+            active: true,
+        },
+        Chip {
+            title: "Gaming".to_string(),
+            token: None,
+            active: false,
+        },
+        Chip {
+            title: "Linux".to_string(),
+            token: None,
+            active: false,
+        },
+        Chip {
+            title: "Music".to_string(),
+            token: None,
+            active: false,
+        },
     ];
 
     for i in 1..=12 {
@@ -28,7 +44,11 @@ fn create_mock_app() -> App {
             published: Some("3 days ago".to_string()),
             thumb_url: String::new(),
             progress_pct: if i == 1 { Some(65) } else { None },
-            live: if i == 2 { LiveState::Live } else { LiveState::None },
+            live: if i == 2 {
+                LiveState::Live
+            } else {
+                LiveState::None
+            },
             badges: Vec::new(),
             resume_time_sec: None,
         }));
@@ -91,7 +111,10 @@ fn test_collapsed_sidebar_shows_queue_at_80x24() {
             break;
         }
     }
-    assert!(found_queue, "Queue [gq] must be visible in collapsed sidebar on 80x24 terminal");
+    assert!(
+        found_queue,
+        "Queue [gq] must be visible in collapsed sidebar on 80x24 terminal"
+    );
 }
 
 #[test]
@@ -104,7 +127,11 @@ fn test_capital_letter_navigation_keymaps() {
     let check_key = |keymap: &mut KeymapState, c: char, expected: Action| {
         let key = KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT);
         let res = keymap.handle_key(key, false);
-        assert_eq!(res, Some((expected, 1)), "Key '{c}' should map to {expected:?}");
+        assert_eq!(
+            res,
+            Some((expected, 1)),
+            "Key '{c}' should map to {expected:?}"
+        );
     };
 
     // Shift+H and Shift+L navigate back/forward in browser history
@@ -125,7 +152,11 @@ fn test_capital_letter_navigation_keymaps() {
 
         let key2 = KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         let res2 = keymap.handle_key(key2, false);
-        assert_eq!(res2, Some((expected, 1)), "Key 'g{c}' should map to {expected:?}");
+        assert_eq!(
+            res2,
+            Some((expected, 1)),
+            "Key 'g{c}' should map to {expected:?}"
+        );
     };
 
     check_g_prefix('h', Action::NavHome);
@@ -145,13 +176,17 @@ fn test_thumbnail_cache_key_canonicalization() {
     use ytui::media::thumbs::cache_key_for_url;
 
     let url1 = "https://i.ytimg.com/vi/xnP7qKxwzjg/hqdefault.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLB7K3yljM3gHdl2Dv3MFIzcVIS0_Q";
-    let url2 = "https://i.ytimg.com/vi/xnP7qKxwzjg/hqdefault.jpg?sqp=different_token&rs=different_salt";
+    let url2 =
+        "https://i.ytimg.com/vi/xnP7qKxwzjg/hqdefault.jpg?sqp=different_token&rs=different_salt";
     let key1 = cache_key_for_url(url1);
     let key2 = cache_key_for_url(url2);
 
     assert_eq!(key1, "yt_xnP7qKxwzjg");
     assert_eq!(key2, "yt_xnP7qKxwzjg");
-    assert_eq!(key1, key2, "Canonical cache keys must match regardless of transient query parameters");
+    assert_eq!(
+        key1, key2,
+        "Canonical cache keys must match regardless of transient query parameters"
+    );
 }
 
 #[test]
@@ -223,13 +258,19 @@ fn test_nav_settings_keymap() {
     let mut keymap = KeymapState::new();
 
     let key_shift_o = KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT);
-    assert_eq!(keymap.handle_key(key_shift_o, false), Some((Action::NavSettings, 1)));
+    assert_eq!(
+        keymap.handle_key(key_shift_o, false),
+        Some((Action::NavSettings, 1))
+    );
 
     let key_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
     assert_eq!(keymap.handle_key(key_g, false), None);
 
     let key_o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
-    assert_eq!(keymap.handle_key(key_o, false), Some((Action::NavSettings, 1)));
+    assert_eq!(
+        keymap.handle_key(key_o, false),
+        Some((Action::NavSettings, 1))
+    );
 }
 
 #[test]
@@ -247,16 +288,29 @@ fn test_3x3_grid_dimensions() {
 
     // Verify cards from 3 separate rows are visible (3x3 grid)
     let full_text: String = (0..30)
-        .map(|y| (0..120).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .map(|y| {
+            (0..120)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
     // First row should have item 1
-    assert!(full_text.contains("Channel 1"), "Row 0 card must be visible");
+    assert!(
+        full_text.contains("Channel 1"),
+        "Row 0 card must be visible"
+    );
     // Second row should have item 4 (since num_cols = 3)
-    assert!(full_text.contains("Channel 4"), "Row 1 card must be visible");
+    assert!(
+        full_text.contains("Channel 4"),
+        "Row 1 card must be visible"
+    );
     // Third row should have item 7 (since num_cols = 3)
-    assert!(full_text.contains("Channel 7"), "Row 2 card must be visible in 3x3 grid");
+    assert!(
+        full_text.contains("Channel 7"),
+        "Row 2 card must be visible in 3x3 grid"
+    );
 }
 
 #[test]
@@ -306,7 +360,10 @@ fn test_header_shows_account_and_ascii_logo() {
     }
 
     assert!(found_logo, "Header must render ASCII YouTube logo");
-    assert!(found_account, "Header must render user account pill with initial and name at top-right");
+    assert!(
+        found_account,
+        "Header must render user account pill with initial and name at top-right"
+    );
 }
 
 #[test]
@@ -362,9 +419,16 @@ fn test_theme_system_integration() {
     use ytui::theme::Theme;
 
     let sys = Theme::system_theme();
-    assert!(sys.is_some(), "System theme should be successfully loaded from ~/.local/state/theme/colors.sh");
+    assert!(
+        sys.is_some(),
+        "System theme should be successfully loaded from ~/.local/state/theme/colors.sh"
+    );
     let theme = sys.unwrap();
-    assert_eq!(theme.bg, ratatui::style::Color::Reset, "System theme bg must be Color::Reset to merge with terminal");
+    assert_eq!(
+        theme.bg,
+        ratatui::style::Color::Reset,
+        "System theme bg must be Color::Reset to merge with terminal"
+    );
 }
 
 #[test]
@@ -378,8 +442,14 @@ fn test_confirming_quit_modal() {
 
     // Pressing nav_back at root home screen must set confirming_quit to true instead of immediate quitting
     app.nav_back();
-    assert!(app.confirming_quit, "nav_back on root home screen must trigger confirming_quit");
-    assert!(!app.should_quit, "nav_back on root home screen must NOT immediately quit");
+    assert!(
+        app.confirming_quit,
+        "nav_back on root home screen must trigger confirming_quit"
+    );
+    assert!(
+        !app.should_quit,
+        "nav_back on root home screen must NOT immediately quit"
+    );
 
     // Rendering draw with confirming_quit = true must succeed
     let backend = TestBackend::new(80, 24);
@@ -414,7 +484,11 @@ fn test_nav_history_stack_back_and_forward() {
     };
 
     // 1. Initial Home screen state
-    app.items = vec![make_vid("h1", "Home 1"), make_vid("h2", "Home 2"), make_vid("h3", "Home 3")];
+    app.items = vec![
+        make_vid("h1", "Home 1"),
+        make_vid("h2", "Home 2"),
+        make_vid("h3", "Home 3"),
+    ];
     app.selected_index = 2;
 
     // 2. Navigate to Search screen
@@ -550,7 +624,13 @@ fn test_oauth_save_token_and_auth_file_0600_permissions() {
     use std::fs;
     use ytui::backend::auth::AuthContext;
 
-    let dir = std::env::temp_dir().join(format!("ytui_test_auth_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let dir = std::env::temp_dir().join(format!(
+        "ytui_test_auth_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     let _ = fs::create_dir_all(&dir);
     let auth_file = dir.join("auth.json");
 
@@ -578,8 +658,14 @@ fn test_oauth_save_token_and_auth_file_0600_permissions() {
     let mut reload_ctx = AuthContext::default();
     let load_res = reload_ctx.load_auth_file(&auth_file);
     assert!(load_res.is_ok());
-    assert_eq!(reload_ctx.access_token.as_deref(), Some("test_access_token_123"));
-    assert_eq!(reload_ctx.refresh_token.as_deref(), Some("test_refresh_token_456"));
+    assert_eq!(
+        reload_ctx.access_token.as_deref(),
+        Some("test_access_token_123")
+    );
+    assert_eq!(
+        reload_ctx.refresh_token.as_deref(),
+        Some("test_refresh_token_456")
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
@@ -643,7 +729,14 @@ fn test_meta_line_formatting_priority() {
     let style = Style::default();
 
     // Full width fits all components: channel, verified mark, views, age
-    let full = format_meta_line("Valve", true, Some("1.2M views"), Some("3 days ago"), 50, style);
+    let full = format_meta_line(
+        "Valve",
+        true,
+        Some("1.2M views"),
+        Some("3 days ago"),
+        50,
+        style,
+    );
     let full_text: String = full.into_iter().map(|s| s.content.to_string()).collect();
     assert_eq!(full_text, "Valve [v] · 1.2M views · 3 days ago");
 
@@ -653,7 +746,14 @@ fn test_meta_line_formatting_priority() {
     assert_eq!(shorts_text, "500K views");
 
     // Medium width drops published age first before dropping views
-    let medium = format_meta_line("VeryLongChannelNameHere", false, Some("10K views"), Some("5 hours ago"), 28, style);
+    let medium = format_meta_line(
+        "VeryLongChannelNameHere",
+        false,
+        Some("10K views"),
+        Some("5 hours ago"),
+        28,
+        style,
+    );
     let med_text: String = medium.into_iter().map(|s| s.content.to_string()).collect();
     assert!(med_text.contains("10K views"));
     assert!(!med_text.contains("5 hours ago"));
@@ -673,10 +773,16 @@ fn test_concord_pane_focus_cycling() {
     let mut keymap = KeymapState::new();
 
     let tab = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
-    assert_eq!(keymap.handle_key(tab, false), Some((Action::CycleFocusForward, 1)));
+    assert_eq!(
+        keymap.handle_key(tab, false),
+        Some((Action::CycleFocusForward, 1))
+    );
 
     let backtab = KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT);
-    assert_eq!(keymap.handle_key(backtab, false), Some((Action::CycleFocusBackward, 1)));
+    assert_eq!(
+        keymap.handle_key(backtab, false),
+        Some((Action::CycleFocusBackward, 1))
+    );
 
     let mut app = create_mock_app();
     app.focus = Focus::Sidebar;
@@ -738,22 +844,41 @@ fn test_loading_skeleton_and_badges_render() {
     let buffer = terminal.backend().buffer();
 
     let full_text: String = (0..30)
-        .map(|y| (0..120).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+        .map(|y| {
+            (0..120)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n");
 
     // Must render dim skeleton blocks '▒' without ugly "[Thumb loading...]" text
-    assert!(full_text.contains('▒'), "Loading skeleton must use '▒' block characters");
-    assert!(!full_text.contains("[Thumb loading...]"), "Must not render raw placeholder text");
+    assert!(
+        full_text.contains('▒'),
+        "Loading skeleton must use '▒' block characters"
+    );
+    assert!(
+        !full_text.contains("[Thumb loading...]"),
+        "Must not render raw placeholder text"
+    );
 
     // Item 1 has progress bar (since progress_pct is Some(65))
-    assert!(full_text.contains("[==="), "Progress bar must be visible on partially watched video");
+    assert!(
+        full_text.contains("[==="),
+        "Progress bar must be visible on partially watched video"
+    );
 
     // Item 2 has LIVE badge (live: LiveState::Live)
-    assert!(full_text.contains(" LIVE "), "Live badge must be rendered for active livestreams");
+    assert!(
+        full_text.contains(" LIVE "),
+        "Live badge must be rendered for active livestreams"
+    );
 
     // Duration badge on video 1 (11:30)
-    assert!(full_text.contains("11:30"), "Duration chip must be rendered on video card");
+    assert!(
+        full_text.contains("11:30"),
+        "Duration chip must be rendered on video card"
+    );
 }
 
 #[test]
@@ -833,10 +958,7 @@ fn test_watch_smarttube_keybindings_and_actions() {
 
     // Angle bracket '>' increases speed
     let key_gt = KeyEvent::new(KeyCode::Char('>'), KeyModifiers::NONE);
-    assert_eq!(
-        keymap.handle_key(key_gt, true),
-        Some((Action::SpeedUp, 1))
-    );
+    assert_eq!(keymap.handle_key(key_gt, true), Some((Action::SpeedUp, 1)));
 }
 
 #[test]
@@ -887,6 +1009,3 @@ fn test_auth_encryption_and_migration() {
 
     let _ = fs::remove_dir_all(&tmp_dir);
 }
-
-
-

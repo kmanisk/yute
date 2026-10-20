@@ -2,6 +2,7 @@ pub mod ipc;
 pub mod mpvconf;
 pub mod queue;
 pub mod tracking;
+pub mod traits;
 
 use crate::backend::models::VideoCard;
 use crate::config::Config;
@@ -91,7 +92,10 @@ impl Player {
 
         self.current_video = Some(video);
 
-        let resume_sec = self.current_video.as_ref().and_then(|v| v.resolved_resume_sec());
+        let resume_sec = self
+            .current_video
+            .as_ref()
+            .and_then(|v| v.resolved_resume_sec());
 
         // If window player is already running, switch video via IPC loadfile replace
         if (active_mode == PlaybackMode::Window || active_mode == PlaybackMode::Auto)
@@ -162,7 +166,10 @@ impl Player {
         } else {
             // Dedicated ytui profile mode
             cmd.arg(format!("--config-dir={}", self.profile.dir.display()))
-                .arg(format!("--ytdl-format={}", cfg.playback.resolved_ytdl_format()))
+                .arg(format!(
+                    "--ytdl-format={}",
+                    cfg.playback.resolved_ytdl_format()
+                ))
                 .arg(format!("--hwdec={hwdec}"))
                 .arg("--vo=gpu-next")
                 .arg("--cache=yes")
@@ -177,7 +184,10 @@ impl Player {
             }
         }
 
-        let resume_sec = self.current_video.as_ref().and_then(|v| v.resolved_resume_sec());
+        let resume_sec = self
+            .current_video
+            .as_ref()
+            .and_then(|v| v.resolved_resume_sec());
         if let Some(start) = resume_sec {
             cmd.arg(format!("--start={start}"));
         }
@@ -185,7 +195,9 @@ impl Player {
         let cookies_path = crate::config::resolve_path(&cfg.backend.cookies_file);
         if cookies_path.exists() {
             let has_auth = std::fs::read_to_string(&cookies_path)
-                .map(|s| s.contains("LOGIN_INFO") || s.contains("SAPISID") || s.contains("__Secure"))
+                .map(|s| {
+                    s.contains("LOGIN_INFO") || s.contains("SAPISID") || s.contains("__Secure")
+                })
                 .unwrap_or(false);
             if has_auth {
                 cmd.arg(format!(
@@ -233,7 +245,10 @@ impl Player {
 
         let term = std::env::var("TERM").unwrap_or_default();
         let term_prog = std::env::var("TERM_PROGRAM").unwrap_or_default();
-        if term.contains("kitty") || term_prog.contains("kitty") || std::env::var("KITTY_PID").is_ok() {
+        if term.contains("kitty")
+            || term_prog.contains("kitty")
+            || std::env::var("KITTY_PID").is_ok()
+        {
             vo_arg = "--vo=kitty".to_string();
             extra_vo = vec!["--vo-kitty-use-shm=yes".to_string()];
         } else if term.contains("alacritty") {
@@ -263,7 +278,10 @@ impl Player {
             .arg("--ytdl=yes")
             .arg("--ytdl-raw-options-append=no-playlist=");
 
-        let resume_sec = self.current_video.as_ref().and_then(|v| v.resolved_resume_sec());
+        let resume_sec = self
+            .current_video
+            .as_ref()
+            .and_then(|v| v.resolved_resume_sec());
         if let Some(start) = resume_sec {
             cmd.arg(format!("--start={start}"));
         }

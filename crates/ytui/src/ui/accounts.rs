@@ -68,18 +68,29 @@ pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
         let badge = if is_active { " [ACTIVE]" } else { "" };
 
         lines.push(Line::from(vec![
-            Span::styled(format!("{pointer} {radio} "), if is_cursor { Style::default().fg(app.theme.accent) } else { Style::default().fg(app.theme.text_secondary) }),
-            Span::styled(format!("[{}] {:<18} {:<20}{}", acc.initial, acc.name, acc.handle, badge), style),
+            Span::styled(
+                format!("{pointer} {radio} "),
+                if is_cursor {
+                    Style::default().fg(app.theme.accent)
+                } else {
+                    Style::default().fg(app.theme.text_secondary)
+                },
+            ),
+            Span::styled(
+                format!(
+                    "[{}] {:<18} {:<20}{}",
+                    acc.initial, acc.name, acc.handle, badge
+                ),
+                style,
+            ),
         ]));
         lines.push(Line::from(""));
     }
 
-    lines.push(Line::from(vec![
-        Span::styled(
-            "  [j/k] Navigate   [Enter/Space] Switch Account   [q/Esc] Back",
-            Style::default().fg(app.theme.text_secondary),
-        ),
-    ]));
+    lines.push(Line::from(vec![Span::styled(
+        "  [j/k] Navigate   [Enter/Space] Switch Account   [q/Esc] Back",
+        Style::default().fg(app.theme.text_secondary),
+    )]));
 
     let p = Paragraph::new(lines).alignment(Alignment::Left);
     f.render_widget(p, inner);

@@ -37,7 +37,10 @@ pub fn render_chips(f: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::styled(format!(" {} ", filter.label()), style));
     }
 
-    spans.push(Span::styled("  [f] Cycle", Style::default().fg(app.theme.text_secondary)));
+    spans.push(Span::styled(
+        "  [f] Cycle",
+        Style::default().fg(app.theme.text_secondary),
+    ));
 
     let p = Paragraph::new(Line::from(spans));
     f.render_widget(p, area);

@@ -22,7 +22,12 @@ pub fn render_cmdline(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().bg(app.theme.surface));
 
     let p = Paragraph::new(Line::from(vec![
-        Span::styled(":", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            ":",
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(&app.cmd_input, Style::default().fg(app.theme.text)),
         Span::styled("█", Style::default().fg(app.theme.accent)),
     ]))

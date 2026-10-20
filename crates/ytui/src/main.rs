@@ -10,6 +10,8 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use futures_util::StreamExt;
+use ratatui::backend::CrosstermBackend;
+use ratatui::Terminal;
 use std::io::stdout;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,11 +27,12 @@ use ytui::player::ipc::IpcCommand;
 use ytui::player::mpvconf::MpvProfile;
 use ytui::player::PlaybackMode;
 use ytui::ui;
-use ratatui::backend::CrosstermBackend;
-use ratatui::Terminal;
 
 #[derive(Parser, Debug)]
-#[command(name = "ytui", about = "Fast, keyboard-driven YouTube terminal client in Rust")]
+#[command(
+    name = "ytui",
+    about = "Fast, keyboard-driven YouTube terminal client in Rust"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -103,7 +106,12 @@ async fn main() -> anyhow::Result<()> {
     // Setup panic hook to cleanly restore terminal
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        let _ = execute!(stdout(), PopKeyboardEnhancementFlags, LeaveAlternateScreen, crossterm::cursor::Show);
+        let _ = execute!(
+            stdout(),
+            PopKeyboardEnhancementFlags,
+            LeaveAlternateScreen,
+            crossterm::cursor::Show
+        );
         let _ = disable_raw_mode();
         orig_hook(panic_info);
     }));
@@ -196,7 +204,9 @@ fn trigger_home_fetch(app: &App, tx: Sender<AppEvent>, chip_token: Option<String
 fn trigger_search_fetch(app: &App, tx: Sender<AppEvent>, query: String) {
     let backend = Arc::clone(&app.backend);
     tokio::spawn(async move {
-        let res = backend.search(&query, &SearchFilters::default(), None).await;
+        let res = backend
+            .search(&query, &SearchFilters::default(), None)
+            .await;
         let _ = tx.send(AppEvent::FeedLoaded(res)).await;
     });
 }
@@ -222,7 +232,11 @@ async fn handle_key_event(
                 app.player.stop();
                 app.should_quit = true;
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Char('q') | KeyCode::Char('Q') | KeyCode::Esc => {
+            KeyCode::Char('n')
+            | KeyCode::Char('N')
+            | KeyCode::Char('q')
+            | KeyCode::Char('Q')
+            | KeyCode::Esc => {
                 app.confirming_quit = false;
             }
             _ => {}
@@ -275,22 +289,37 @@ async fn handle_key_event(
             KeyCode::Backspace => {
                 app.search_query.pop();
             }
-            KeyCode::Char('u') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('u')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 app.search_query.clear();
             }
-            KeyCode::Char('w') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('w')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 if let Some(idx) = app.search_query.trim_end().rfind(' ') {
                     app.search_query.truncate(idx + 1);
                 } else {
                     app.search_query.clear();
                 }
             }
-            KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('c')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 app.focus = Focus::Content;
             }
             KeyCode::Char(c) => {
-                if !key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
+                if !key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT)
+                {
                     app.search_query.push(c);
                 }
             }
@@ -311,7 +340,8 @@ async fn handle_key_event(
                     app.settings_index = app.settings_index.saturating_sub(1);
                 }
                 Action::Down => {
-                    app.settings_index = (app.settings_index + 1).min(ui::settings::SETTINGS_ITEMS.len().saturating_sub(1));
+                    app.settings_index = (app.settings_index + 1)
+                        .min(ui::settings::SETTINGS_ITEMS.len().saturating_sub(1));
                 }
                 Action::Left => {
                     ui::settings::cycle_setting(app, false);
@@ -379,7 +409,8 @@ async fn handle_key_event(
                     app.accounts_cursor = app.accounts_cursor.saturating_sub(1);
                 }
                 Action::Down => {
-                    app.accounts_cursor = (app.accounts_cursor + 1).min(app.accounts.len().saturating_sub(1));
+                    app.accounts_cursor =
+                        (app.accounts_cursor + 1).min(app.accounts.len().saturating_sub(1));
                 }
                 Action::PlayDefault | Action::Right => {
                     app.switch_account(app.accounts_cursor);
@@ -481,13 +512,19 @@ async fn handle_key_event(
             Action::Down => {
                 if app.screen == Screen::Watch {
                     if app.watch_right_mode == ytui::app::WatchRightMode::Comments {
-                        let total_comments = app.watch_data.as_ref().map(|w| w.comments.len()).unwrap_or(0);
+                        let total_comments = app
+                            .watch_data
+                            .as_ref()
+                            .map(|w| w.comments.len())
+                            .unwrap_or(0);
                         if total_comments > 0 {
-                            app.comments_cursor = (app.comments_cursor + 1).min(total_comments.saturating_sub(1));
+                            app.comments_cursor =
+                                (app.comments_cursor + 1).min(total_comments.saturating_sub(1));
                         }
                     }
                 } else if app.focus == Focus::Sidebar {
-                    app.sidebar_index = (app.sidebar_index + 1).min(ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1));
+                    app.sidebar_index = (app.sidebar_index + 1)
+                        .min(ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1));
                 } else {
                     let total = app.filtered_items().len();
                     if total > 0 {
@@ -681,19 +718,29 @@ async fn handle_key_event(
             Action::NavQueue => {
                 app.set_screen(Screen::Queue);
                 app.sidebar_index = 7;
-                app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
+                app.items = app
+                    .player
+                    .queue
+                    .items()
+                    .iter()
+                    .cloned()
+                    .map(Card::Video)
+                    .collect();
                 app.status_text = format!("Queue: {} items", app.items.len());
             }
             Action::NavSettings => {
                 app.set_screen(Screen::Settings);
                 app.sidebar_index = 8;
-                app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
+                app.status_text =
+                    "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
             }
             Action::NavAccounts => {
                 app.set_screen(Screen::Accounts);
                 app.sidebar_index = 9;
                 app.accounts_cursor = app.active_account_index;
-                app.status_text = "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
+                app.status_text =
+                    "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back"
+                        .to_string();
             }
             Action::PlayDefault => {
                 if app.focus == Focus::Sidebar {
@@ -764,14 +811,20 @@ async fn handle_key_event(
                     let vid = current.id.clone();
                     let backend = app.backend.clone();
                     let tx_cloned = tx.clone();
-                    let is_liked = app.watch_data.as_ref().and_then(|w| w.is_liked).unwrap_or(false);
+                    let is_liked = app
+                        .watch_data
+                        .as_ref()
+                        .and_then(|w| w.is_liked)
+                        .unwrap_or(false);
                     if let Some(ref mut wd) = app.watch_data {
                         if is_liked {
                             wd.is_liked = Some(false);
                             app.status_text = "Removing like...".to_string();
                             tokio::spawn(async move {
                                 let _ = backend.remove_rating(&vid).await;
-                                let _ = tx_cloned.send(AppEvent::StatusMessage("Removed rating".to_string())).await;
+                                let _ = tx_cloned
+                                    .send(AppEvent::StatusMessage("Removed rating".to_string()))
+                                    .await;
                             });
                         } else {
                             wd.is_liked = Some(true);
@@ -779,7 +832,9 @@ async fn handle_key_event(
                             app.status_text = "Liking video...".to_string();
                             tokio::spawn(async move {
                                 let _ = backend.like_video(&vid).await;
-                                let _ = tx_cloned.send(AppEvent::StatusMessage("Liked video".to_string())).await;
+                                let _ = tx_cloned
+                                    .send(AppEvent::StatusMessage("Liked video".to_string()))
+                                    .await;
                             });
                         }
                     }
@@ -790,14 +845,20 @@ async fn handle_key_event(
                     let vid = current.id.clone();
                     let backend = app.backend.clone();
                     let tx_cloned = tx.clone();
-                    let is_disliked = app.watch_data.as_ref().and_then(|w| w.is_disliked).unwrap_or(false);
+                    let is_disliked = app
+                        .watch_data
+                        .as_ref()
+                        .and_then(|w| w.is_disliked)
+                        .unwrap_or(false);
                     if let Some(ref mut wd) = app.watch_data {
                         if is_disliked {
                             wd.is_disliked = Some(false);
                             app.status_text = "Removing dislike...".to_string();
                             tokio::spawn(async move {
                                 let _ = backend.remove_rating(&vid).await;
-                                let _ = tx_cloned.send(AppEvent::StatusMessage("Removed rating".to_string())).await;
+                                let _ = tx_cloned
+                                    .send(AppEvent::StatusMessage("Removed rating".to_string()))
+                                    .await;
                             });
                         } else {
                             wd.is_disliked = Some(true);
@@ -805,34 +866,55 @@ async fn handle_key_event(
                             app.status_text = "Disliking video...".to_string();
                             tokio::spawn(async move {
                                 let _ = backend.dislike_video(&vid).await;
-                                let _ = tx_cloned.send(AppEvent::StatusMessage("Disliked video".to_string())).await;
+                                let _ = tx_cloned
+                                    .send(AppEvent::StatusMessage("Disliked video".to_string()))
+                                    .await;
                             });
                         }
                     }
                 }
             }
             Action::ToggleSubscribe => {
-                let channel_id = app.watch_data.as_ref()
+                let channel_id = app
+                    .watch_data
+                    .as_ref()
                     .and_then(|w| w.video.channel_id.clone())
-                    .or_else(|| app.player.current_video.as_ref().and_then(|v| v.channel_id.clone()));
+                    .or_else(|| {
+                        app.player
+                            .current_video
+                            .as_ref()
+                            .and_then(|v| v.channel_id.clone())
+                    });
                 if let Some(cid) = channel_id {
                     let backend = app.backend.clone();
                     let tx_cloned = tx.clone();
-                    let is_sub = app.watch_data.as_ref().and_then(|w| w.is_subscribed).unwrap_or(false);
+                    let is_sub = app
+                        .watch_data
+                        .as_ref()
+                        .and_then(|w| w.is_subscribed)
+                        .unwrap_or(false);
                     if let Some(ref mut wd) = app.watch_data {
                         if is_sub {
                             wd.is_subscribed = Some(false);
                             app.status_text = "Unsubscribing from channel...".to_string();
                             tokio::spawn(async move {
                                 let _ = backend.unsubscribe_channel(&cid).await;
-                                let _ = tx_cloned.send(AppEvent::StatusMessage("Unsubscribed from channel".to_string())).await;
+                                let _ = tx_cloned
+                                    .send(AppEvent::StatusMessage(
+                                        "Unsubscribed from channel".to_string(),
+                                    ))
+                                    .await;
                             });
                         } else {
                             wd.is_subscribed = Some(true);
                             app.status_text = "Subscribing to channel...".to_string();
                             tokio::spawn(async move {
                                 let _ = backend.subscribe_channel(&cid).await;
-                                let _ = tx_cloned.send(AppEvent::StatusMessage("Subscribed to channel".to_string())).await;
+                                let _ = tx_cloned
+                                    .send(AppEvent::StatusMessage(
+                                        "Subscribed to channel".to_string(),
+                                    ))
+                                    .await;
                             });
                         }
                     }
@@ -954,19 +1036,28 @@ fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
         }
         7 => {
             app.set_screen(Screen::Queue);
-            app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
+            app.items = app
+                .player
+                .queue
+                .items()
+                .iter()
+                .cloned()
+                .map(Card::Video)
+                .collect();
             app.status_text = format!("Queue: {} items", app.items.len());
         }
         8 => {
             app.set_screen(Screen::Settings);
             app.sidebar_index = 8;
-            app.status_text = "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
+            app.status_text =
+                "Settings: [j/k] Navigate  [h/l/Enter] Change  [q/Esc] Back".to_string();
         }
         9 => {
             app.set_screen(Screen::Accounts);
             app.sidebar_index = 9;
             app.accounts_cursor = app.active_account_index;
-            app.status_text = "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
+            app.status_text =
+                "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
         }
         _ => {}
     }
@@ -1116,7 +1207,8 @@ fn execute_command(app: &mut App, tx: Sender<AppEvent>) {
         app.set_screen(Screen::Accounts);
         app.sidebar_index = 9;
         app.accounts_cursor = app.active_account_index;
-        app.status_text = "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
+        app.status_text =
+            "Accounts: [j/k] Navigate  [Enter/Space] Switch Account  [q/Esc] Back".to_string();
     } else if cmd == "login" || cmd == "auth" {
         trigger_oauth_device_flow(app, tx);
     } else if cmd == "cache clear" {
@@ -1149,7 +1241,11 @@ fn handle_app_event(app: &mut App, event: AppEvent, _tx: Sender<AppEvent>) {
                     };
                     if !cache_key.is_empty() && !page.items.is_empty() {
                         let final_key = if !app.account_handle.is_empty() {
-                            format!("{}_{}", app.account_handle.trim_start_matches('@'), cache_key)
+                            format!(
+                                "{}_{}",
+                                app.account_handle.trim_start_matches('@'),
+                                cache_key
+                            )
                         } else {
                             cache_key.to_string()
                         };
@@ -1172,20 +1268,18 @@ fn handle_app_event(app: &mut App, event: AppEvent, _tx: Sender<AppEvent>) {
                 app.watch_data = Some(wd);
             }
         }
-        AppEvent::CommentsLoaded(res) => {
-            match res {
-                Ok(batch) => {
-                    if let Some(ref mut wd) = app.watch_data {
-                        wd.comments = batch.comments;
-                        wd.comments_token = batch.continuation;
-                    }
-                    app.status_text = "Loaded comments".to_string();
+        AppEvent::CommentsLoaded(res) => match res {
+            Ok(batch) => {
+                if let Some(ref mut wd) = app.watch_data {
+                    wd.comments = batch.comments;
+                    wd.comments_token = batch.continuation;
                 }
-                Err(err) => {
-                    app.status_text = format!("Failed to load comments: {err}");
-                }
+                app.status_text = "Loaded comments".to_string();
             }
-        }
+            Err(err) => {
+                app.status_text = format!("Failed to load comments: {err}");
+            }
+        },
         AppEvent::StatusMessage(msg) => {
             app.status_text = msg;
         }
@@ -1310,7 +1404,14 @@ fn ensure_screen_loaded(app: &mut App, tx: Sender<AppEvent>) {
             app.status_text = format!("Loaded {} local videos", app.items.len());
         }
         Screen::Queue => {
-            app.items = app.player.queue.items().iter().cloned().map(Card::Video).collect();
+            app.items = app
+                .player
+                .queue
+                .items()
+                .iter()
+                .cloned()
+                .map(Card::Video)
+                .collect();
             app.status_text = format!("Queue: {} items", app.items.len());
         }
         _ => {}
@@ -1327,7 +1428,9 @@ fn trigger_oauth_device_flow(app: &mut App, tx: Sender<AppEvent>) {
             Ok(c) => c,
             Err(e) => {
                 let _ = tx
-                    .send(AppEvent::StatusMessage(format!("Failed to request device code: {e}")))
+                    .send(AppEvent::StatusMessage(format!(
+                        "Failed to request device code: {e}"
+                    )))
                     .await;
                 return;
             }
@@ -1347,12 +1450,19 @@ fn trigger_oauth_device_flow(app: &mut App, tx: Sender<AppEvent>) {
             tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
             if start.elapsed() > max_wait {
                 let _ = tx
-                    .send(AppEvent::StatusMessage("OAuth device code expired. Run :login again.".to_string()))
+                    .send(AppEvent::StatusMessage(
+                        "OAuth device code expired. Run :login again.".to_string(),
+                    ))
                     .await;
                 break;
             }
 
-            match ytui::backend::auth::AuthContext::poll_device_token(&client, &code_res.device_code).await {
+            match ytui::backend::auth::AuthContext::poll_device_token(
+                &client,
+                &code_res.device_code,
+            )
+            .await
+            {
                 Ok(Some(tok)) => {
                     let access_token = tok.access_token.unwrap_or_default();
                     let refresh_token = tok.refresh_token.unwrap_or_default();
@@ -1384,7 +1494,9 @@ fn trigger_oauth_device_flow(app: &mut App, tx: Sender<AppEvent>) {
                         "Logged in user".to_string()
                     };
                     let _ = tx
-                        .send(AppEvent::StatusMessage(format!("Logged in successfully as {display_name}")))
+                        .send(AppEvent::StatusMessage(format!(
+                            "Logged in successfully as {display_name}"
+                        )))
                         .await;
                     let _ = tx.send(AppEvent::AccountLoaded(Ok((name, handle)))).await;
 
@@ -1405,9 +1517,9 @@ fn trigger_oauth_device_flow(app: &mut App, tx: Sender<AppEvent>) {
 }
 
 async fn run_login() -> anyhow::Result<()> {
-    use ytui::backend::auth::AuthContext;
     use std::time::Duration;
     use tokio::time::sleep;
+    use ytui::backend::auth::AuthContext;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
@@ -1438,7 +1550,9 @@ async fn run_login() -> anyhow::Result<()> {
 
         match AuthContext::poll_device_token(&client, &device_code.device_code).await {
             Ok(Some(token_res)) => {
-                if let (Some(access), Some(refresh)) = (token_res.access_token, token_res.refresh_token) {
+                if let (Some(access), Some(refresh)) =
+                    (token_res.access_token, token_res.refresh_token)
+                {
                     let mut auth = AuthContext::default();
                     auth.save_token_and_account(
                         access,
@@ -1476,12 +1590,12 @@ async fn run_login() -> anyhow::Result<()> {
 }
 
 async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
+    use serde_json::json;
+    use std::fs;
+    use std::io::Write;
     use ytui::backend::auth::AuthContext;
     use ytui::backend::innertube::InnerTubeBackend;
     use ytui::config::resolve_path;
-    use std::fs;
-    use serde_json::json;
-    use std::io::Write;
 
     let debug_dir = resolve_path("~/.cache/ytui/debug");
     let _ = fs::create_dir_all(&debug_dir);
@@ -1497,7 +1611,14 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
     println!("==================================================");
     println!("     TVHTML5 Milestone 0 Raw Dumps Spike");
     println!("==================================================");
-    println!("Auth mode: {}", if is_authed { "OAuth Bearer Token" } else { "Unauthenticated / Guest" });
+    println!(
+        "Auth mode: {}",
+        if is_authed {
+            "OAuth Bearer Token"
+        } else {
+            "Unauthenticated / Guest"
+        }
+    );
     println!("Output directory: {}\n", debug_dir.display());
 
     // 1. Home / Browse (FEwhat_to_watch)
@@ -1507,7 +1628,11 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
     let home_val = backend.post_endpoint("browse", home_body).await?;
     let home_path = debug_dir.join("tv_browse_home.json");
     fs::write(&home_path, serde_json::to_string_pretty(&home_val)?)?;
-    println!("OK ({} bytes written to {})", fs::metadata(&home_path)?.len(), home_path.file_name().unwrap().to_string_lossy());
+    println!(
+        "OK ({} bytes written to {})",
+        fs::metadata(&home_path)?.len(),
+        home_path.file_name().unwrap().to_string_lossy()
+    );
 
     // 2. Search
     print!("Fetching TVHTML5 search ('{}')... ", query);
@@ -1516,7 +1641,11 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
     let search_val = backend.post_endpoint("search", search_body).await?;
     let search_path = debug_dir.join("tv_search.json");
     fs::write(&search_path, serde_json::to_string_pretty(&search_val)?)?;
-    println!("OK ({} bytes written to {})", fs::metadata(&search_path)?.len(), search_path.file_name().unwrap().to_string_lossy());
+    println!(
+        "OK ({} bytes written to {})",
+        fs::metadata(&search_path)?.len(),
+        search_path.file_name().unwrap().to_string_lossy()
+    );
 
     // Extract first video id from home or search for next & player
     let mut sample_video_id = "dQw4w9WgXcQ".to_string();
@@ -1537,29 +1666,52 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
     let next_val = backend.post_endpoint("next", next_body).await?;
     let next_path = debug_dir.join("tv_next.json");
     fs::write(&next_path, serde_json::to_string_pretty(&next_val)?)?;
-    println!("OK ({} bytes written to {})", fs::metadata(&next_path)?.len(), next_path.file_name().unwrap().to_string_lossy());
+    println!(
+        "OK ({} bytes written to {})",
+        fs::metadata(&next_path)?.len(),
+        next_path.file_name().unwrap().to_string_lossy()
+    );
 
     // 4. Player endpoint (for playback tracking inspection)
-    print!("Fetching TVHTML5 player (videoId: '{}')... ", sample_video_id);
+    print!(
+        "Fetching TVHTML5 player (videoId: '{}')... ",
+        sample_video_id
+    );
     let _ = std::io::stdout().flush();
     let player_body = backend.make_body(json!({ "videoId": sample_video_id }));
     let player_val = backend.post_endpoint("player", player_body).await?;
     let player_path = debug_dir.join("tv_player.json");
     fs::write(&player_path, serde_json::to_string_pretty(&player_val)?)?;
-    println!("OK ({} bytes written to {})", fs::metadata(&player_path)?.len(), player_path.file_name().unwrap().to_string_lossy());
+    println!(
+        "OK ({} bytes written to {})",
+        fs::metadata(&player_path)?.len(),
+        player_path.file_name().unwrap().to_string_lossy()
+    );
 
     println!("\n==================================================");
     println!("                  Dump Analysis");
     println!("==================================================");
 
     // Analyze visitorData
-    let vis = home_val.pointer("/responseContext/visitorData").and_then(|v| v.as_str()).unwrap_or("(none)");
+    let vis = home_val
+        .pointer("/responseContext/visitorData")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(none)");
     println!("visitorData: {}", vis);
 
     // Analyze Home Renderers
     let home_str = serde_json::to_string(&home_val)?;
     let mut detected_renderers = Vec::new();
-    for r in &["tileRenderer", "lockupViewModel", "gridVideoRenderer", "videoRenderer", "compactVideoRenderer", "reelItemRenderer", "shelfRenderer", "pivotBarRenderer"] {
+    for r in &[
+        "tileRenderer",
+        "lockupViewModel",
+        "gridVideoRenderer",
+        "videoRenderer",
+        "compactVideoRenderer",
+        "reelItemRenderer",
+        "shelfRenderer",
+        "pivotBarRenderer",
+    ] {
         if home_str.contains(r) {
             detected_renderers.push(*r);
         }
@@ -1570,7 +1722,15 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
     // Analyze Search Renderers
     let search_str = serde_json::to_string(&search_val)?;
     let mut search_renderers = Vec::new();
-    for r in &["tileRenderer", "lockupViewModel", "gridVideoRenderer", "videoRenderer", "compactVideoRenderer", "reelItemRenderer", "shelfRenderer"] {
+    for r in &[
+        "tileRenderer",
+        "lockupViewModel",
+        "gridVideoRenderer",
+        "videoRenderer",
+        "compactVideoRenderer",
+        "reelItemRenderer",
+        "shelfRenderer",
+    ] {
         if search_str.contains(r) {
             search_renderers.push(*r);
         }
@@ -1580,12 +1740,18 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
     println!("Search renderers detected: {:?}", search_renderers);
 
     // Analyze Playback Tracking
-    let pb_url = player_val.pointer("/playbackTracking/videostatsPlaybackUrl/baseUrl").and_then(|v| v.as_str());
-    let wt_url = player_val.pointer("/playbackTracking/videostatsWatchtimeUrl/baseUrl").and_then(|v| v.as_str());
+    let pb_url = player_val
+        .pointer("/playbackTracking/videostatsPlaybackUrl/baseUrl")
+        .and_then(|v| v.as_str());
+    let wt_url = player_val
+        .pointer("/playbackTracking/videostatsWatchtimeUrl/baseUrl")
+        .and_then(|v| v.as_str());
     println!("Playback tracking URL: {}", pb_url.unwrap_or("(none)"));
     println!("Watchtime tracking URL: {}", wt_url.unwrap_or("(none)"));
 
-    println!("\nAll raw dumps successfully saved to: {}", debug_dir.display());
+    println!(
+        "\nAll raw dumps successfully saved to: {}",
+        debug_dir.display()
+    );
     Ok(())
 }
-

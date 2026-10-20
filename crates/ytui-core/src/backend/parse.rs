@@ -31,7 +31,11 @@ pub fn extract_text(val: &Value) -> String {
         }
     }
     if let Some(parts) = val.get("metadataParts").and_then(|p| p.as_array()) {
-        let texts: Vec<String> = parts.iter().map(extract_text).filter(|s| !s.is_empty()).collect();
+        let texts: Vec<String> = parts
+            .iter()
+            .map(extract_text)
+            .filter(|s| !s.is_empty())
+            .collect();
         let res = texts.join(" • ").trim().to_string();
         if !res.is_empty() {
             return res;
@@ -61,7 +65,9 @@ pub fn extract_best_thumbnail(val: &Value) -> String {
             return u;
         }
     }
-    if let Some(primary) = val.pointer("/contentImage/collectionThumbnailViewModel/primaryThumbnail/thumbnailViewModel/image") {
+    if let Some(primary) = val.pointer(
+        "/contentImage/collectionThumbnailViewModel/primaryThumbnail/thumbnailViewModel/image",
+    ) {
         let u = extract_best_thumbnail(primary);
         if !u.is_empty() {
             return u;
@@ -85,7 +91,11 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
 
     let mut channel = String::new();
     let mut channel_id = None;
-    if let Some(byline) = v.get("ownerText").or_else(|| v.get("shortBylineText")).or_else(|| v.get("longBylineText")) {
+    if let Some(byline) = v
+        .get("ownerText")
+        .or_else(|| v.get("shortBylineText"))
+        .or_else(|| v.get("longBylineText"))
+    {
         channel = extract_text(byline);
         if let Some(runs) = byline.get("runs").and_then(|r| r.as_array()) {
             if let Some(first) = runs.first() {
@@ -102,7 +112,8 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
     let mut verified = false;
     if let Some(badges) = v.get("ownerBadges").and_then(|b| b.as_array()) {
         for b in badges {
-            let style = b.get("metadataBadgeRenderer")
+            let style = b
+                .get("metadataBadgeRenderer")
                 .and_then(|r| r.get("style"))
                 .and_then(|s| s.as_str())
                 .unwrap_or("");
@@ -113,14 +124,24 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
         }
     }
 
-    let duration = v.get("lengthText").map(extract_text).filter(|s| !s.is_empty());
-    let views = v.get("shortViewCountText")
+    let duration = v
+        .get("lengthText")
+        .map(extract_text)
+        .filter(|s| !s.is_empty());
+    let views = v
+        .get("shortViewCountText")
         .or_else(|| v.get("viewCountText"))
         .map(extract_text)
         .filter(|s| !s.is_empty());
-    let published = v.get("publishedTimeText").map(extract_text).filter(|s| !s.is_empty());
+    let published = v
+        .get("publishedTimeText")
+        .map(extract_text)
+        .filter(|s| !s.is_empty());
 
-    let mut thumb_url = v.get("thumbnail").map(extract_best_thumbnail).unwrap_or_default();
+    let mut thumb_url = v
+        .get("thumbnail")
+        .map(extract_best_thumbnail)
+        .unwrap_or_default();
     if thumb_url.is_empty() {
         thumb_url = format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg");
     }
@@ -129,7 +150,10 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
     if let Some(overlays) = v.get("thumbnailOverlays").and_then(|o| o.as_array()) {
         for ov in overlays {
             if let Some(resume) = ov.get("thumbnailOverlayResumePlaybackRenderer") {
-                if let Some(pct) = resume.get("percentDurationWatched").and_then(|p| p.as_u64()) {
+                if let Some(pct) = resume
+                    .get("percentDurationWatched")
+                    .and_then(|p| p.as_u64())
+                {
                     progress_pct = Some(pct.min(100) as u8);
                 }
             }
@@ -149,7 +173,8 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
 
     if let Some(b_list) = v.get("badges").and_then(|b| b.as_array()) {
         for b in b_list {
-            let label = b.get("metadataBadgeRenderer")
+            let label = b
+                .get("metadataBadgeRenderer")
                 .and_then(|r| r.get("label").or_else(|| r.get("style")))
                 .map(extract_text)
                 .unwrap_or_default();
@@ -163,7 +188,8 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
         }
     }
 
-    let resume_time_sec = v.pointer("/navigationEndpoint/watchEndpoint/startTimeSeconds")
+    let resume_time_sec = v
+        .pointer("/navigationEndpoint/watchEndpoint/startTimeSeconds")
         .or_else(|| v.pointer("/onTap/innertubeCommand/watchEndpoint/startTimeSeconds"))
         .and_then(|s| s.as_u64());
 
@@ -246,15 +272,18 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
     }
 
     let content_type = v.get("contentType").and_then(|s| s.as_str()).unwrap_or("");
-    let is_mix = id.starts_with("RD") || title.to_lowercase().contains("mix") || content_type.contains("MIX");
+    let is_mix = id.starts_with("RD")
+        || title.to_lowercase().contains("mix")
+        || content_type.contains("MIX");
     if content_type.contains("PLAYLIST") || id.starts_with("PL") || id.starts_with("RD") || is_mix {
-        let channel_name = if is_mix && (channel.is_empty() || channel.eq_ignore_ascii_case("playlist")) {
-            "YouTube".to_string()
-        } else if channel.is_empty() {
-            "YouTube".to_string()
-        } else {
-            channel
-        };
+        let channel_name =
+            if is_mix && (channel.is_empty() || channel.eq_ignore_ascii_case("playlist")) {
+                "YouTube".to_string()
+            } else if channel.is_empty() {
+                "YouTube".to_string()
+            } else {
+                channel
+            };
         let video_count = if is_mix {
             Some("Mix".to_string())
         } else {
@@ -287,10 +316,16 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
         }
 
         let mut progress_pct = None;
-        if let Some(overlays) = v.pointer("/contentImage/thumbnailViewModel/overlays").and_then(|o| o.as_array()) {
+        if let Some(overlays) = v
+            .pointer("/contentImage/thumbnailViewModel/overlays")
+            .and_then(|o| o.as_array())
+        {
             for ov in overlays {
                 if let Some(resume) = ov.get("thumbnailOverlayResumePlaybackRenderer") {
-                    if let Some(pct) = resume.get("percentDurationWatched").and_then(|p| p.as_u64()) {
+                    if let Some(pct) = resume
+                        .get("percentDurationWatched")
+                        .and_then(|p| p.as_u64())
+                    {
                         progress_pct = Some(pct.min(100) as u8);
                     }
                 }
@@ -310,7 +345,11 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
             verified: false,
             duration,
             views: stats.first().cloned(),
-            published: if stats.len() > 1 { Some(stats[1].clone()) } else { None },
+            published: if stats.len() > 1 {
+                Some(stats[1].clone())
+            } else {
+                None
+            },
             thumb_url,
             progress_pct,
             live: LiveState::None,
@@ -346,7 +385,10 @@ pub fn parse_shorts_lockup_view_model(v: &Value) -> Option<Card> {
         .map(extract_text)
         .filter(|s| !s.is_empty());
 
-    let mut thumb_url = v.get("thumbnail").map(extract_best_thumbnail).unwrap_or_default();
+    let mut thumb_url = v
+        .get("thumbnail")
+        .map(extract_best_thumbnail)
+        .unwrap_or_default();
     if thumb_url.is_empty() {
         thumb_url = format!("https://i.ytimg.com/vi/{id}/frame0.jpg");
     }
@@ -372,11 +414,20 @@ pub fn parse_reel_item_renderer(v: &Value) -> Option<Card> {
     let id = v
         .get("videoId")
         .and_then(|s| s.as_str())
-        .or_else(|| v.pointer("/navigationEndpoint/reelWatchEndpoint/videoId").and_then(|s| s.as_str()))?
+        .or_else(|| {
+            v.pointer("/navigationEndpoint/reelWatchEndpoint/videoId")
+                .and_then(|s| s.as_str())
+        })?
         .to_string();
 
-    let title = v.get("headline").map(extract_text).unwrap_or_else(|| "Short".to_string());
-    let views = v.get("viewCountText").map(extract_text).filter(|s| !s.is_empty());
+    let title = v
+        .get("headline")
+        .map(extract_text)
+        .unwrap_or_else(|| "Short".to_string());
+    let views = v
+        .get("viewCountText")
+        .map(extract_text)
+        .filter(|s| !s.is_empty());
     let channel = v
         .get("shortBylineText")
         .or_else(|| v.get("longBylineText"))
@@ -384,7 +435,10 @@ pub fn parse_reel_item_renderer(v: &Value) -> Option<Card> {
         .filter(|s| s != "YouTube Shorts")
         .unwrap_or_default();
 
-    let mut thumb_url = v.get("thumbnail").map(extract_best_thumbnail).unwrap_or_default();
+    let mut thumb_url = v
+        .get("thumbnail")
+        .map(extract_best_thumbnail)
+        .unwrap_or_default();
     if thumb_url.is_empty() {
         thumb_url = format!("https://i.ytimg.com/vi/{id}/frame0.jpg");
     }
@@ -409,20 +463,24 @@ pub fn parse_reel_item_renderer(v: &Value) -> Option<Card> {
 pub fn parse_playlist_renderer(v: &Value) -> Option<PlaylistCard> {
     let id = v.get("playlistId").and_then(|s| s.as_str())?.to_string();
     let title = extract_text(v.get("title")?);
-    let channel = v.get("shortBylineText")
+    let channel = v
+        .get("shortBylineText")
         .or_else(|| v.get("longBylineText"))
         .map(extract_text)
         .unwrap_or_default();
-    let video_count = v.get("videoCountText")
+    let video_count = v
+        .get("videoCountText")
         .or_else(|| v.get("videoCount"))
         .map(extract_text);
-    let thumb_url = v.get("thumbnails")
+    let thumb_url = v
+        .get("thumbnails")
         .or_else(|| v.get("thumbnail"))
         .map(extract_best_thumbnail)
         .unwrap_or_default();
     let is_mix = id.starts_with("RD") || title.to_lowercase().contains("mix");
 
-    let first_video_id = v.pointer("/navigationEndpoint/watchEndpoint/videoId")
+    let first_video_id = v
+        .pointer("/navigationEndpoint/watchEndpoint/videoId")
         .and_then(|s| s.as_str())
         .map(|s| s.to_string());
 
@@ -449,13 +507,19 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
         .or_else(|| v.pointer("/menu/menuRenderer/items/0/menuNavigationItemRenderer/navigationEndpoint/watchEndpoint/playlistId"))
         .and_then(|s| s.as_str());
 
-    let channel_id = v.pointer("/onSelectCommand/browseEndpoint/browseId")
+    let channel_id = v
+        .pointer("/onSelectCommand/browseEndpoint/browseId")
         .and_then(|s| s.as_str());
 
     let content_type = v.get("contentType").and_then(|s| s.as_str()).unwrap_or("");
-    let is_shorts = v.get("style").and_then(|s| s.as_str()).map(|s| s.contains("SHORTS")).unwrap_or(false);
+    let is_shorts = v
+        .get("style")
+        .and_then(|s| s.as_str())
+        .map(|s| s.contains("SHORTS"))
+        .unwrap_or(false);
 
-    let title = v.pointer("/metadata/tileMetadataRenderer/title")
+    let title = v
+        .pointer("/metadata/tileMetadataRenderer/title")
         .or_else(|| v.pointer("/header/tileHeaderRenderer/title"))
         .or_else(|| v.pointer("/header/trackTileHeaderRenderer/title"))
         .map(extract_text)
@@ -464,12 +528,14 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
         return None;
     }
 
-    let thumb_url = v.pointer("/header/tileHeaderRenderer/thumbnail")
+    let thumb_url = v
+        .pointer("/header/tileHeaderRenderer/thumbnail")
         .or_else(|| v.pointer("/header/trackTileHeaderRenderer/thumbnail"))
         .map(extract_best_thumbnail)
         .unwrap_or_default();
 
-    if content_type == "TILE_CONTENT_TYPE_PLAYLIST" || (playlist_id.is_some() && video_id.is_none()) {
+    if content_type == "TILE_CONTENT_TYPE_PLAYLIST" || (playlist_id.is_some() && video_id.is_none())
+    {
         let p_id = playlist_id.unwrap_or("").to_string();
         let channel = v.pointer("/metadata/tileMetadataRenderer/lines/0/lineRenderer/items/0/lineItemRenderer/badge/metadataBadgeRenderer/label")
             .or_else(|| v.pointer("/metadata/tileMetadataRenderer/userName"))
@@ -487,7 +553,9 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
         }));
     }
 
-    if content_type == "TILE_CONTENT_TYPE_CHANNEL" || (channel_id.is_some() && video_id.is_none() && playlist_id.is_none()) {
+    if content_type == "TILE_CONTENT_TYPE_CHANNEL"
+        || (channel_id.is_some() && video_id.is_none() && playlist_id.is_none())
+    {
         let c_id = channel_id.unwrap_or("").to_string();
         let subscribers = v.pointer("/metadata/tileMetadataRenderer/lines/0/lineRenderer/items/0/lineItemRenderer/badge/metadataBadgeRenderer/label")
             .map(extract_text);
@@ -496,16 +564,26 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             title,
             handle: None,
             subscribers,
-            avatar_url: if thumb_url.is_empty() { None } else { Some(thumb_url) },
+            avatar_url: if thumb_url.is_empty() {
+                None
+            } else {
+                Some(thumb_url)
+            },
             verified: false,
         }));
     }
 
     if let Some(vid) = video_id {
         let mut meta_items = Vec::new();
-        if let Some(lines) = v.pointer("/metadata/tileMetadataRenderer/lines").and_then(|l| l.as_array()) {
+        if let Some(lines) = v
+            .pointer("/metadata/tileMetadataRenderer/lines")
+            .and_then(|l| l.as_array())
+        {
             for line in lines {
-                if let Some(items) = line.pointer("/lineRenderer/items").and_then(|i| i.as_array()) {
+                if let Some(items) = line
+                    .pointer("/lineRenderer/items")
+                    .and_then(|i| i.as_array())
+                {
                     for item in items {
                         if let Some(text_val) = item.pointer("/lineItemRenderer/text") {
                             let t = extract_text(text_val);
@@ -518,7 +596,8 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             }
         }
 
-        let channel = v.pointer("/metadata/tileMetadataRenderer/userName")
+        let channel = v
+            .pointer("/metadata/tileMetadataRenderer/userName")
             .map(extract_text)
             .filter(|s| !s.is_empty())
             .or_else(|| meta_items.first().cloned())
@@ -526,15 +605,35 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
 
         let mut views = None;
         let mut published = None;
-        let start_idx = if v.pointer("/metadata/tileMetadataRenderer/userName").is_some() { 0 } else { 1 };
+        let start_idx = if v
+            .pointer("/metadata/tileMetadataRenderer/userName")
+            .is_some()
+        {
+            0
+        } else {
+            1
+        };
         for item in meta_items.iter().skip(start_idx) {
-            if item.contains("view") || item.contains("watching") || item.ends_with('M') || item.ends_with('K') || item.ends_with('B') {
+            if item.contains("view")
+                || item.contains("watching")
+                || item.ends_with('M')
+                || item.ends_with('K')
+                || item.ends_with('B')
+            {
                 if views.is_none() {
                     views = Some(item.clone());
                     continue;
                 }
             }
-            if item.contains("ago") || item.contains("Streamed") || item.contains("Premier") || item.contains("year") || item.contains("month") || item.contains("day") || item.contains("hour") || item.contains("minute") {
+            if item.contains("ago")
+                || item.contains("Streamed")
+                || item.contains("Premier")
+                || item.contains("year")
+                || item.contains("month")
+                || item.contains("day")
+                || item.contains("hour")
+                || item.contains("minute")
+            {
                 if published.is_none() {
                     published = Some(item.clone());
                     continue;
@@ -553,17 +652,24 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             .filter(|s| !s.is_empty());
 
         let mut progress_pct = None;
-        if let Some(overlays) = v.pointer("/header/tileHeaderRenderer/thumbnailOverlays").and_then(|o| o.as_array()) {
+        if let Some(overlays) = v
+            .pointer("/header/tileHeaderRenderer/thumbnailOverlays")
+            .and_then(|o| o.as_array())
+        {
             for ov in overlays {
                 if let Some(resume) = ov.get("thumbnailOverlayResumePlaybackRenderer") {
-                    if let Some(pct) = resume.get("percentDurationWatched").and_then(|p| p.as_u64()) {
+                    if let Some(pct) = resume
+                        .get("percentDurationWatched")
+                        .and_then(|p| p.as_u64())
+                    {
                         progress_pct = Some(pct.min(100) as u8);
                     }
                 }
             }
         }
 
-        let resume_time_sec = v.pointer("/onTap/innertubeCommand/watchEndpoint/startTimeSeconds")
+        let resume_time_sec = v
+            .pointer("/onTap/innertubeCommand/watchEndpoint/startTimeSeconds")
             .and_then(|s| s.as_u64());
 
         let mut badges = Vec::new();
@@ -645,10 +751,12 @@ pub fn parse_card(val: &Value) -> Option<Card> {
     if let Some(crr) = val.get("compactRadioRenderer") {
         return parse_playlist_renderer(crr).map(Card::Playlist);
     }
-    if let Some(cr) = val.get("channelRenderer")
+    if let Some(cr) = val
+        .get("channelRenderer")
         .or_else(|| val.get("gridChannelRenderer"))
         .or_else(|| val.get("pivotChannelRenderer"))
-        .or_else(|| val.get("compactChannelRenderer")) {
+        .or_else(|| val.get("compactChannelRenderer"))
+    {
         let id = cr.get("channelId").and_then(|s| s.as_str())?.to_string();
         let title = extract_text(cr.get("title")?);
         let subscribers = cr.get("subscriberCountText").map(extract_text);
@@ -685,11 +793,21 @@ pub fn parse_chips(val: &Value) -> Vec<Chip> {
                     if title.is_empty() {
                         continue;
                     }
-                    let active = chip_rnd.get("isSelected").and_then(|b| b.as_bool()).unwrap_or(false);
-                    let token = chip_rnd.pointer("/navigationEndpoint/continuationEndpoint/continuationCommand/token")
+                    let active = chip_rnd
+                        .get("isSelected")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false);
+                    let token = chip_rnd
+                        .pointer(
+                            "/navigationEndpoint/continuationEndpoint/continuationCommand/token",
+                        )
                         .and_then(|t| t.as_str())
                         .map(|s| s.to_string());
-                    chips.push(Chip { title, token, active });
+                    chips.push(Chip {
+                        title,
+                        token,
+                        active,
+                    });
                 }
             }
         }
@@ -700,7 +818,9 @@ pub fn parse_chips(val: &Value) -> Vec<Chip> {
 pub fn parse_continuation(val: &Value) -> Option<String> {
     if let Some(token) = val
         .pointer("/continuationEndpoint/continuationCommand/token")
-        .or_else(|| val.pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token"))
+        .or_else(|| {
+            val.pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
+        })
         .and_then(|t| t.as_str())
     {
         return Some(token.to_string());
@@ -762,7 +882,9 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
     let mut chat_token = None;
 
     // Look for current video info in videoDetails or primary info
-    if let Some(primary) = val.pointer("/contents/twoColumnWatchNextResults/results/results/contents/0/videoPrimaryInfoRenderer") {
+    if let Some(primary) = val.pointer(
+        "/contents/twoColumnWatchNextResults/results/results/contents/0/videoPrimaryInfoRenderer",
+    ) {
         let title = extract_text(primary.get("title").unwrap_or(&Value::Null));
         let views = primary.get("viewCount").map(extract_text);
         let published = primary.get("dateText").map(extract_text);
@@ -783,14 +905,20 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
         });
     }
 
-    if let Some(secondary) = val.pointer("/contents/twoColumnWatchNextResults/results/results/contents/1/videoSecondaryInfoRenderer") {
+    if let Some(secondary) = val.pointer(
+        "/contents/twoColumnWatchNextResults/results/results/contents/1/videoSecondaryInfoRenderer",
+    ) {
         if let Some(ref mut v) = video {
             let channel = extract_text(secondary.get("owner").unwrap_or(&Value::Null));
             if !channel.is_empty() {
                 v.channel = channel;
             }
         }
-        let desc = secondary.get("description").or_else(|| secondary.get("attributedDescription")).map(extract_text).unwrap_or_default();
+        let desc = secondary
+            .get("description")
+            .or_else(|| secondary.get("attributedDescription"))
+            .map(extract_text)
+            .unwrap_or_default();
         if !desc.is_empty() {
             description = desc;
         }
@@ -798,15 +926,35 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
 
     // If videoDetails is directly present (from /next response)
     if let Some(details) = val.get("videoDetails") {
-        let id = details.get("videoId").and_then(|s| s.as_str()).unwrap_or("").to_string();
-        let title = details.get("title").and_then(|s| s.as_str()).unwrap_or("").to_string();
-        let channel = details.get("author").and_then(|s| s.as_str()).unwrap_or("").to_string();
-        let channel_id = details.get("channelId").and_then(|s| s.as_str()).map(|s| s.to_string());
-        let desc = details.get("shortDescription").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let id = details
+            .get("videoId")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let title = details
+            .get("title")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let channel = details
+            .get("author")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let channel_id = details
+            .get("channelId")
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
+        let desc = details
+            .get("shortDescription")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
         if !desc.is_empty() {
             description = desc;
         }
-        let length_seconds: u32 = details.get("lengthSeconds")
+        let length_seconds: u32 = details
+            .get("lengthSeconds")
             .and_then(|s| s.as_str())
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
@@ -817,11 +965,18 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
         } else {
             None
         };
-        let views = details.get("viewCount").and_then(|s| s.as_str()).map(|s| format!("{s} views"));
-        let thumb_url = details.get("thumbnail")
+        let views = details
+            .get("viewCount")
+            .and_then(|s| s.as_str())
+            .map(|s| format!("{s} views"));
+        let thumb_url = details
+            .get("thumbnail")
             .map(extract_best_thumbnail)
             .unwrap_or_else(|| format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg"));
-        let is_live = details.get("isLiveContent").and_then(|b| b.as_bool()).unwrap_or(false);
+        let is_live = details
+            .get("isLiveContent")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false);
 
         video = Some(VideoCard {
             id,
@@ -834,7 +989,11 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
             published: None,
             thumb_url,
             progress_pct: None,
-            live: if is_live { LiveState::Live } else { LiveState::None },
+            live: if is_live {
+                LiveState::Live
+            } else {
+                LiveState::None
+            },
             badges: Vec::new(),
             resume_time_sec: None,
         });
@@ -913,13 +1072,24 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
         for p in panels {
             let panel = p.get("engagementPanelSectionListRenderer");
             if let Some(p_rend) = panel {
-                if p_rend.get("panelIdentifier").and_then(|s| s.as_str()) == Some("comment-item-section") {
-                    if let Some(conts) = p_rend.pointer("/content/sectionListRenderer/contents").and_then(|c| c.as_array()) {
+                if p_rend.get("panelIdentifier").and_then(|s| s.as_str())
+                    == Some("comment-item-section")
+                {
+                    if let Some(conts) = p_rend
+                        .pointer("/content/sectionListRenderer/contents")
+                        .and_then(|c| c.as_array())
+                    {
                         for c in conts {
-                            if let Some(conts_arr) = c.pointer("/itemSectionRenderer/continuations").and_then(|a| a.as_array()) {
+                            if let Some(conts_arr) = c
+                                .pointer("/itemSectionRenderer/continuations")
+                                .and_then(|a| a.as_array())
+                            {
                                 for cd in conts_arr {
-                                    if let Some(tok) = cd.pointer("/reloadContinuationData/continuation")
-                                        .or_else(|| cd.pointer("/nextContinuationData/continuation"))
+                                    if let Some(tok) = cd
+                                        .pointer("/reloadContinuationData/continuation")
+                                        .or_else(|| {
+                                            cd.pointer("/nextContinuationData/continuation")
+                                        })
                                         .and_then(|s| s.as_str())
                                     {
                                         comments_token = Some(tok.to_string());
@@ -955,9 +1125,15 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
     // Look for like status
     let mut is_liked = None;
     let mut is_disliked = None;
-    if let Some(mutations) = val.pointer("/frameworkUpdates/entityBatchUpdate/mutations").and_then(|m| m.as_array()) {
+    if let Some(mutations) = val
+        .pointer("/frameworkUpdates/entityBatchUpdate/mutations")
+        .and_then(|m| m.as_array())
+    {
         for mut_item in mutations {
-            if let Some(status) = mut_item.pointer("/payload/likeStatusEntity/likeStatus").and_then(|s| s.as_str()) {
+            if let Some(status) = mut_item
+                .pointer("/payload/likeStatusEntity/likeStatus")
+                .and_then(|s| s.as_str())
+            {
                 match status {
                     "LIKE" => {
                         is_liked = Some(true);
@@ -1015,7 +1191,10 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
     let mut continuation = None;
     let mut total_count = None;
 
-    if let Some(cnt) = val.pointer("/header/commentsHeaderRenderer/countText").map(extract_text) {
+    if let Some(cnt) = val
+        .pointer("/header/commentsHeaderRenderer/countText")
+        .map(extract_text)
+    {
         if !cnt.is_empty() {
             total_count = Some(cnt);
         }
@@ -1030,13 +1209,20 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
                 if let Some(ctr) = item.get("commentThreadRenderer") {
                     let cr = ctr.pointer("/comment/commentRenderer");
                     if let Some(cr) = cr {
-                        let id = cr.get("commentId").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                        let id = cr
+                            .get("commentId")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let author = cr.get("authorText").map(extract_text).unwrap_or_default();
                         let author_thumb = cr.get("authorThumbnail").map(extract_best_thumbnail);
                         let text = cr.get("contentText").map(extract_text).unwrap_or_default();
                         let published = cr.get("publishedTimeText").map(extract_text);
                         let likes = cr.get("voteCount").map(extract_text);
-                        let reply_count = cr.get("replyCount").and_then(|c| c.as_u64()).map(|c| c as u32);
+                        let reply_count = cr
+                            .get("replyCount")
+                            .and_then(|c| c.as_u64())
+                            .map(|c| c as u32);
                         if !author.is_empty() && !text.is_empty() {
                             comments.push(CommentItem {
                                 id,
@@ -1055,7 +1241,10 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
 
         if let Some(conts) = sec.get("continuations").and_then(|c| c.as_array()) {
             for c in conts {
-                if let Some(tok) = c.pointer("/nextContinuationData/continuation").and_then(|s| s.as_str()) {
+                if let Some(tok) = c
+                    .pointer("/nextContinuationData/continuation")
+                    .and_then(|s| s.as_str())
+                {
                     continuation = Some(tok.to_string());
                     break;
                 }

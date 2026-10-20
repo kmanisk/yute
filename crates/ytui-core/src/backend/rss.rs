@@ -77,7 +77,10 @@ impl RssBackend {
                 let ch_clone = ch.clone();
                 let client = self.client.clone();
                 tasks.push(tokio::spawn(async move {
-                    let backend = RssBackend { client, channels: Vec::new() };
+                    let backend = RssBackend {
+                        client,
+                        channels: Vec::new(),
+                    };
                     backend.fetch_channel_feed(&ch_clone).await
                 }));
             }

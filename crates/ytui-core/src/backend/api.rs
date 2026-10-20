@@ -81,7 +81,12 @@ impl ApiBackend {
         (self.api_key.clone(), None)
     }
 
-    async fn api_get(&self, endpoint: &str, query_params: &[(&str, &str)], quota_cost: u64) -> Result<Value> {
+    async fn api_get(
+        &self,
+        endpoint: &str,
+        query_params: &[(&str, &str)],
+        quota_cost: u64,
+    ) -> Result<Value> {
         let (key_opt, token_opt) = self.get_auth_param().await;
         let url = format!("{YOUTUBE_API_BASE}/{endpoint}");
         let mut req = self.client.get(&url);
@@ -99,7 +104,10 @@ impl ApiBackend {
 
         req = req.query(&all_params);
 
-        let resp = req.send().await.with_context(|| format!("API request to {endpoint} failed"))?;
+        let resp = req
+            .send()
+            .await
+            .with_context(|| format!("API request to {endpoint} failed"))?;
         let status = resp.status();
         if !status.is_success() {
             return Err(anyhow!("YouTube API returned HTTP {status} for {endpoint}"));
@@ -123,19 +131,35 @@ impl Backend for ApiBackend {
 
     async fn subscriptions(&self) -> Result<FeedPage> {
         // Requires OAuth subscriptions.list
-        let val = self.api_get("subscriptions", &[
-            ("part", "snippet"),
-            ("mine", "true"),
-            ("maxResults", "50"),
-        ], 1).await?;
+        let val = self
+            .api_get(
+                "subscriptions",
+                &[("part", "snippet"), ("mine", "true"), ("maxResults", "50")],
+                1,
+            )
+            .await?;
 
         let mut items = Vec::new();
         if let Some(list) = val.get("items").and_then(|i| i.as_array()) {
             for item in list {
                 let snippet = item.get("snippet");
-                let ch_id = snippet.and_then(|s| s.get("resourceId")).and_then(|r| r.get("channelId")).and_then(|id| id.as_str()).unwrap_or("").to_string();
-                let title = snippet.and_then(|s| s.get("title")).and_then(|t| t.as_str()).unwrap_or("").to_string();
-                let avatar = snippet.and_then(|s| s.get("thumbnails")).and_then(|t| t.get("default")).and_then(|d| d.get("url")).and_then(|u| u.as_str()).map(|s| s.to_string());
+                let ch_id = snippet
+                    .and_then(|s| s.get("resourceId"))
+                    .and_then(|r| r.get("channelId"))
+                    .and_then(|id| id.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let title = snippet
+                    .and_then(|s| s.get("title"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let avatar = snippet
+                    .and_then(|s| s.get("thumbnails"))
+                    .and_then(|t| t.get("default"))
+                    .and_then(|d| d.get("url"))
+                    .and_then(|u| u.as_str())
+                    .map(|s| s.to_string());
                 items.push(Card::Channel(crate::backend::models::ChannelCard {
                     id: ch_id,
                     title,
@@ -150,7 +174,10 @@ impl Backend for ApiBackend {
         Ok(FeedPage {
             chips: Vec::new(),
             items,
-            continuation: val.get("nextPageToken").and_then(|t| t.as_str()).map(|s| s.to_string()),
+            continuation: val
+                .get("nextPageToken")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string()),
         })
     }
 
@@ -163,21 +190,48 @@ impl Backend for ApiBackend {
     }
 
     async fn playlists(&self) -> Result<FeedPage> {
-        let val = self.api_get("playlists", &[
-            ("part", "snippet,contentDetails"),
-            ("mine", "true"),
-            ("maxResults", "50"),
-        ], 1).await?;
+        let val = self
+            .api_get(
+                "playlists",
+                &[
+                    ("part", "snippet,contentDetails"),
+                    ("mine", "true"),
+                    ("maxResults", "50"),
+                ],
+                1,
+            )
+            .await?;
 
         let mut items = Vec::new();
         if let Some(list) = val.get("items").and_then(|i| i.as_array()) {
             for item in list {
-                let id = item.get("id").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                let id = item
+                    .get("id")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let snippet = item.get("snippet");
-                let title = snippet.and_then(|s| s.get("title")).and_then(|t| t.as_str()).unwrap_or("").to_string();
-                let channel = snippet.and_then(|s| s.get("channelTitle")).and_then(|c| c.as_str()).unwrap_or("").to_string();
-                let thumb_url = snippet.and_then(|s| s.get("thumbnails")).and_then(|t| t.get("medium")).and_then(|m| m.get("url")).and_then(|u| u.as_str()).unwrap_or("").to_string();
-                let video_count = item.get("contentDetails").and_then(|c| c.get("itemCount")).map(|cnt| cnt.to_string());
+                let title = snippet
+                    .and_then(|s| s.get("title"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let channel = snippet
+                    .and_then(|s| s.get("channelTitle"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let thumb_url = snippet
+                    .and_then(|s| s.get("thumbnails"))
+                    .and_then(|t| t.get("medium"))
+                    .and_then(|m| m.get("url"))
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let video_count = item
+                    .get("contentDetails")
+                    .and_then(|c| c.get("itemCount"))
+                    .map(|cnt| cnt.to_string());
 
                 items.push(Card::Playlist(crate::backend::models::PlaylistCard {
                     id,
@@ -194,25 +248,53 @@ impl Backend for ApiBackend {
         Ok(FeedPage {
             chips: Vec::new(),
             items,
-            continuation: val.get("nextPageToken").and_then(|t| t.as_str()).map(|s| s.to_string()),
+            continuation: val
+                .get("nextPageToken")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string()),
         })
     }
 
     async fn playlist(&self, id: &str) -> Result<FeedPage> {
-        let val = self.api_get("playlistItems", &[
-            ("part", "snippet,contentDetails"),
-            ("playlistId", id),
-            ("maxResults", "50"),
-        ], 1).await?;
+        let val = self
+            .api_get(
+                "playlistItems",
+                &[
+                    ("part", "snippet,contentDetails"),
+                    ("playlistId", id),
+                    ("maxResults", "50"),
+                ],
+                1,
+            )
+            .await?;
 
         let mut items = Vec::new();
         if let Some(list) = val.get("items").and_then(|i| i.as_array()) {
             for item in list {
                 let snippet = item.get("snippet");
-                let vid_id = snippet.and_then(|s| s.get("resourceId")).and_then(|r| r.get("videoId")).and_then(|id| id.as_str()).unwrap_or("").to_string();
-                let title = snippet.and_then(|s| s.get("title")).and_then(|t| t.as_str()).unwrap_or("").to_string();
-                let channel = snippet.and_then(|s| s.get("videoOwnerChannelTitle")).and_then(|c| c.as_str()).unwrap_or("").to_string();
-                let thumb_url = snippet.and_then(|s| s.get("thumbnails")).and_then(|t| t.get("medium")).and_then(|m| m.get("url")).and_then(|u| u.as_str()).unwrap_or("").to_string();
+                let vid_id = snippet
+                    .and_then(|s| s.get("resourceId"))
+                    .and_then(|r| r.get("videoId"))
+                    .and_then(|id| id.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let title = snippet
+                    .and_then(|s| s.get("title"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let channel = snippet
+                    .and_then(|s| s.get("videoOwnerChannelTitle"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let thumb_url = snippet
+                    .and_then(|s| s.get("thumbnails"))
+                    .and_then(|t| t.get("medium"))
+                    .and_then(|m| m.get("url"))
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 if !vid_id.is_empty() {
                     items.push(Card::Video(VideoCard {
@@ -237,11 +319,19 @@ impl Backend for ApiBackend {
         Ok(FeedPage {
             chips: Vec::new(),
             items,
-            continuation: val.get("nextPageToken").and_then(|t| t.as_str()).map(|s| s.to_string()),
+            continuation: val
+                .get("nextPageToken")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string()),
         })
     }
 
-    async fn search(&self, q: &str, _filters: &SearchFilters, token: Option<&str>) -> Result<FeedPage> {
+    async fn search(
+        &self,
+        q: &str,
+        _filters: &SearchFilters,
+        token: Option<&str>,
+    ) -> Result<FeedPage> {
         let mut params = vec![
             ("part", "snippet"),
             ("q", q),
@@ -257,11 +347,30 @@ impl Backend for ApiBackend {
 
         if let Some(list) = val.get("items").and_then(|i| i.as_array()) {
             for item in list {
-                let vid_id = item.get("id").and_then(|id| id.get("videoId")).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let vid_id = item
+                    .get("id")
+                    .and_then(|id| id.get("videoId"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let snippet = item.get("snippet");
-                let title = snippet.and_then(|s| s.get("title")).and_then(|t| t.as_str()).unwrap_or("").to_string();
-                let channel = snippet.and_then(|s| s.get("channelTitle")).and_then(|c| c.as_str()).unwrap_or("").to_string();
-                let thumb_url = snippet.and_then(|s| s.get("thumbnails")).and_then(|t| t.get("medium")).and_then(|m| m.get("url")).and_then(|u| u.as_str()).unwrap_or("").to_string();
+                let title = snippet
+                    .and_then(|s| s.get("title"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let channel = snippet
+                    .and_then(|s| s.get("channelTitle"))
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let thumb_url = snippet
+                    .and_then(|s| s.get("thumbnails"))
+                    .and_then(|t| t.get("medium"))
+                    .and_then(|m| m.get("url"))
+                    .and_then(|u| u.as_str())
+                    .unwrap_or("")
+                    .to_string();
 
                 if !vid_id.is_empty() {
                     items.push(Card::Video(VideoCard {
@@ -286,7 +395,10 @@ impl Backend for ApiBackend {
         Ok(FeedPage {
             chips: Vec::new(),
             items,
-            continuation: val.get("nextPageToken").and_then(|t| t.as_str()).map(|s| s.to_string()),
+            continuation: val
+                .get("nextPageToken")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string()),
         })
     }
 
@@ -295,18 +407,50 @@ impl Backend for ApiBackend {
     }
 
     async fn watch(&self, video_id: &str) -> Result<WatchData> {
-        let val = self.api_get("videos", &[
-            ("part", "snippet,contentDetails,statistics"),
-            ("id", video_id),
-        ], 1).await?;
+        let val = self
+            .api_get(
+                "videos",
+                &[
+                    ("part", "snippet,contentDetails,statistics"),
+                    ("id", video_id),
+                ],
+                1,
+            )
+            .await?;
 
-        let first = val.get("items").and_then(|i| i.as_array()).and_then(|arr| arr.first()).ok_or_else(|| anyhow!("Video not found"))?;
+        let first = val
+            .get("items")
+            .and_then(|i| i.as_array())
+            .and_then(|arr| arr.first())
+            .ok_or_else(|| anyhow!("Video not found"))?;
         let snippet = first.get("snippet");
-        let title = snippet.and_then(|s| s.get("title")).and_then(|t| t.as_str()).unwrap_or("").to_string();
-        let channel = snippet.and_then(|s| s.get("channelTitle")).and_then(|c| c.as_str()).unwrap_or("").to_string();
-        let description = snippet.and_then(|s| s.get("description")).and_then(|d| d.as_str()).unwrap_or("").to_string();
-        let thumb_url = snippet.and_then(|s| s.get("thumbnails")).and_then(|t| t.get("medium")).and_then(|m| m.get("url")).and_then(|u| u.as_str()).unwrap_or("").to_string();
-        let views = first.get("statistics").and_then(|s| s.get("viewCount")).and_then(|v| v.as_str()).map(|cnt| format!("{cnt} views"));
+        let title = snippet
+            .and_then(|s| s.get("title"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string();
+        let channel = snippet
+            .and_then(|s| s.get("channelTitle"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let description = snippet
+            .and_then(|s| s.get("description"))
+            .and_then(|d| d.as_str())
+            .unwrap_or("")
+            .to_string();
+        let thumb_url = snippet
+            .and_then(|s| s.get("thumbnails"))
+            .and_then(|t| t.get("medium"))
+            .and_then(|m| m.get("url"))
+            .and_then(|u| u.as_str())
+            .unwrap_or("")
+            .to_string();
+        let views = first
+            .get("statistics")
+            .and_then(|s| s.get("viewCount"))
+            .and_then(|v| v.as_str())
+            .map(|cnt| format!("{cnt} views"));
 
         let video = VideoCard {
             id: video_id.to_string(),
@@ -342,12 +486,12 @@ impl Backend for ApiBackend {
     }
 
     async fn channel(&self, id: &str, _tab: ChannelTab) -> Result<FeedPage> {
-        let val = self.api_get("channels", &[
-            ("part", "contentDetails"),
-            ("id", id),
-        ], 1).await?;
+        let val = self
+            .api_get("channels", &[("part", "contentDetails"), ("id", id)], 1)
+            .await?;
 
-        let uploads_id = val.pointer("/items/0/contentDetails/relatedPlaylists/uploads")
+        let uploads_id = val
+            .pointer("/items/0/contentDetails/relatedPlaylists/uploads")
             .and_then(|s| s.as_str())
             .ok_or_else(|| anyhow!("Uploads playlist not found for channel"))?;
 

@@ -73,7 +73,10 @@ impl InnerTubeBackend {
             .with_context(|| format!("Failed to parse JSON response from {endpoint}"))?;
 
         // Capture and persist visitorData from responseContext
-        if let Some(vis) = json_val.pointer("/responseContext/visitorData").and_then(|v| v.as_str()) {
+        if let Some(vis) = json_val
+            .pointer("/responseContext/visitorData")
+            .and_then(|v| v.as_str())
+        {
             let mut guard = self.auth.lock().unwrap();
             if guard.visitor_data.as_deref() != Some(vis) {
                 guard.visitor_data = Some(vis.to_string());
@@ -116,9 +119,14 @@ impl Backend for InnerTubeBackend {
 
         let val = self.post_endpoint("browse", body).await?;
         let page = parse_feed_page(&val);
-        if page.items.is_empty() && chip_token.is_none() && self.auth.lock().unwrap().access_token.is_none() {
+        if page.items.is_empty()
+            && chip_token.is_none()
+            && self.auth.lock().unwrap().access_token.is_none()
+        {
             // Unauthenticated guest: feedNudgeRenderer returned 0 items. Fallback to trending search
-            return self.search("trending", &SearchFilters::default(), None).await;
+            return self
+                .search("trending", &SearchFilters::default(), None)
+                .await;
         }
         Ok(page)
     }
@@ -182,7 +190,12 @@ impl Backend for InnerTubeBackend {
         Ok(page)
     }
 
-    async fn search(&self, q: &str, _filters: &SearchFilters, token: Option<&str>) -> Result<FeedPage> {
+    async fn search(
+        &self,
+        q: &str,
+        _filters: &SearchFilters,
+        token: Option<&str>,
+    ) -> Result<FeedPage> {
         let body = if let Some(tok) = token {
             self.make_body(json!({
                 "continuation": tok
@@ -294,13 +307,23 @@ impl Backend for InnerTubeBackend {
         let mut next_token = None;
         let mut poll_interval_ms = 3000;
 
-        if let Some(actions) = val.pointer("/continuationContents/liveChatContinuation/actions").and_then(|a| a.as_array()) {
+        if let Some(actions) = val
+            .pointer("/continuationContents/liveChatContinuation/actions")
+            .and_then(|a| a.as_array())
+        {
             for act in actions {
-                if let Some(renderer) = act.pointer("/addChatItemAction/item/liveChatTextMessageRenderer") {
-                    let id = renderer.get("id").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                if let Some(renderer) =
+                    act.pointer("/addChatItemAction/item/liveChatTextMessageRenderer")
+                {
+                    let id = renderer
+                        .get("id")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let author = extract_text(renderer.get("authorName").unwrap_or(&Value::Null));
                     let message = extract_text(renderer.get("message").unwrap_or(&Value::Null));
-                    let timestamp_usec = renderer.get("timestampUsec")
+                    let timestamp_usec = renderer
+                        .get("timestampUsec")
                         .and_then(|s| s.as_str())
                         .and_then(|s| s.parse().ok())
                         .unwrap_or(0);
@@ -315,7 +338,9 @@ impl Backend for InnerTubeBackend {
             }
         }
 
-        if let Some(cont) = val.pointer("/continuationContents/liveChatContinuation/continuations/0/timedContinuationData") {
+        if let Some(cont) = val.pointer(
+            "/continuationContents/liveChatContinuation/continuations/0/timedContinuationData",
+        ) {
             if let Some(tok) = cont.get("continuation").and_then(|s| s.as_str()) {
                 next_token = Some(tok.to_string());
             }
@@ -431,13 +456,19 @@ impl Backend for InnerTubeBackend {
             let name = h
                 .pointer("/accountName/simpleText")
                 .and_then(|v| v.as_str())
-                .or_else(|| h.pointer("/accountName/runs/0/text").and_then(|v| v.as_str()))
+                .or_else(|| {
+                    h.pointer("/accountName/runs/0/text")
+                        .and_then(|v| v.as_str())
+                })
                 .unwrap_or("")
                 .to_string();
             let handle = h
                 .pointer("/channelHandle/simpleText")
                 .and_then(|v| v.as_str())
-                .or_else(|| h.pointer("/channelHandle/runs/0/text").and_then(|v| v.as_str()))
+                .or_else(|| {
+                    h.pointer("/channelHandle/runs/0/text")
+                        .and_then(|v| v.as_str())
+                })
                 .unwrap_or("")
                 .to_string();
             if !name.is_empty() || !handle.is_empty() {
@@ -455,9 +486,15 @@ impl Backend for InnerTubeBackend {
             }
         }));
         let resp = self.post_endpoint("like/like", body).await?;
-        if let Some(mutations) = resp.pointer("/frameworkUpdates/entityBatchUpdate/mutations").and_then(|m| m.as_array()) {
+        if let Some(mutations) = resp
+            .pointer("/frameworkUpdates/entityBatchUpdate/mutations")
+            .and_then(|m| m.as_array())
+        {
             for m in mutations {
-                if let Some(status) = m.pointer("/payload/likeStatusEntity/likeStatus").and_then(|s| s.as_str()) {
+                if let Some(status) = m
+                    .pointer("/payload/likeStatusEntity/likeStatus")
+                    .and_then(|s| s.as_str())
+                {
                     return Ok(status == "LIKE");
                 }
             }
@@ -472,9 +509,15 @@ impl Backend for InnerTubeBackend {
             }
         }));
         let resp = self.post_endpoint("like/dislike", body).await?;
-        if let Some(mutations) = resp.pointer("/frameworkUpdates/entityBatchUpdate/mutations").and_then(|m| m.as_array()) {
+        if let Some(mutations) = resp
+            .pointer("/frameworkUpdates/entityBatchUpdate/mutations")
+            .and_then(|m| m.as_array())
+        {
             for m in mutations {
-                if let Some(status) = m.pointer("/payload/likeStatusEntity/likeStatus").and_then(|s| s.as_str()) {
+                if let Some(status) = m
+                    .pointer("/payload/likeStatusEntity/likeStatus")
+                    .and_then(|s| s.as_str())
+                {
                     return Ok(status == "DISLIKE");
                 }
             }

@@ -102,11 +102,26 @@ impl Theme {
 
         // Terminal default background (transparent, merges with terminal like btop/cava)
         let bg = Color::Reset;
-        let fg = map.get("THEME_FG").map(|s| hex(s, Color::White)).unwrap_or(Color::White);
-        let accent = map.get("THEME_ACCENT").map(|s| hex(s, Color::Cyan)).unwrap_or(Color::Cyan);
-        let sel = map.get("THEME_SEL").map(|s| hex(s, Color::DarkGray)).unwrap_or(Color::DarkGray);
-        let muted = map.get("THEME_MUTED").map(|s| hex(s, Color::Gray)).unwrap_or(Color::Gray);
-        let red = map.get("THEME_RED").map(|s| hex(s, Color::Red)).unwrap_or(Color::Red);
+        let fg = map
+            .get("THEME_FG")
+            .map(|s| hex(s, Color::White))
+            .unwrap_or(Color::White);
+        let accent = map
+            .get("THEME_ACCENT")
+            .map(|s| hex(s, Color::Cyan))
+            .unwrap_or(Color::Cyan);
+        let sel = map
+            .get("THEME_SEL")
+            .map(|s| hex(s, Color::DarkGray))
+            .unwrap_or(Color::DarkGray);
+        let muted = map
+            .get("THEME_MUTED")
+            .map(|s| hex(s, Color::Gray))
+            .unwrap_or(Color::Gray);
+        let red = map
+            .get("THEME_RED")
+            .map(|s| hex(s, Color::Red))
+            .unwrap_or(Color::Red);
 
         Some(Self {
             bg,

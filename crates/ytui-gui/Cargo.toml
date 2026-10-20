@@ -1,0 +1,25 @@
+[package]
+name = "ytui-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Fast, keyboard-driven Linux YouTube GUI client in Rust with embedded libmpv rendering"
+license = "MIT"
+
+[[bin]]
+name = "ytui-gui"
+path = "src/main.rs"
+
+[dependencies]
+ytui-core = { path = "../ytui-core" }
+gtk4 = "0.11"
+libadwaita = "0.9"
+libmpv2 = "6.0.0"
+libmpv2-sys = "4.0.1"
+libc = "0.2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"

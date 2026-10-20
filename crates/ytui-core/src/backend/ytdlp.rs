@@ -45,7 +45,11 @@ impl YtDlpBackend {
             if let Some(ref p) = self.cookies_path {
                 if p.exists() {
                     let has_auth = std::fs::read_to_string(p)
-                        .map(|s| s.contains("LOGIN_INFO") || s.contains("SAPISID") || s.contains("__Secure"))
+                        .map(|s| {
+                            s.contains("LOGIN_INFO")
+                                || s.contains("SAPISID")
+                                || s.contains("__Secure")
+                        })
                         .unwrap_or(false);
                     if has_auth {
                         cmd.arg("--cookies").arg(p);
@@ -59,7 +63,8 @@ impl YtDlpBackend {
             let home = std::env::var("HOME").unwrap_or_default();
             let brave_origin = PathBuf::from(format!("{home}/.config/BraveSoftware/Brave-Origin"));
             if brave_origin.exists() {
-                cmd.arg("--cookies-from-browser").arg(format!("brave:{}", brave_origin.display()));
+                cmd.arg("--cookies-from-browser")
+                    .arg(format!("brave:{}", brave_origin.display()));
             }
         }
 
@@ -69,8 +74,8 @@ impl YtDlpBackend {
             return Err(anyhow!("yt-dlp error: {stderr}"));
         }
 
-        let val: Value = serde_json::from_slice(&output.stdout)
-            .context("Failed to parse yt-dlp JSON output")?;
+        let val: Value =
+            serde_json::from_slice(&output.stdout).context("Failed to parse yt-dlp JSON output")?;
         Ok(val)
     }
 
@@ -84,19 +89,32 @@ impl YtDlpBackend {
         };
 
         for item in list {
-            let id = item.get("id").and_then(|s| s.as_str()).unwrap_or("").to_string();
-            let title = item.get("title").and_then(|s| s.as_str()).unwrap_or("").to_string();
+            let id = item
+                .get("id")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let title = item
+                .get("title")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
             if id.is_empty() || title.is_empty() {
                 continue;
             }
 
-            let mut thumb_url = item.get("thumbnail")
+            let mut thumb_url = item
+                .get("thumbnail")
                 .and_then(|t| t.as_str())
                 .unwrap_or("")
                 .to_string();
             if thumb_url.is_empty() {
                 if let Some(thumbs) = item.get("thumbnails").and_then(|t| t.as_array()) {
-                    if let Some(first) = thumbs.first().and_then(|t| t.get("url")).and_then(|u| u.as_str()) {
+                    if let Some(first) = thumbs
+                        .first()
+                        .and_then(|t| t.get("url"))
+                        .and_then(|u| u.as_str())
+                    {
                         thumb_url = first.to_string();
                     }
                 }
@@ -106,18 +124,25 @@ impl YtDlpBackend {
             }
 
             let is_mix = id.starts_with("RD") || title.to_lowercase().contains("mix");
-            let is_playlist = id.starts_with("PL") || id == "WL" || id == "LL"
+            let is_playlist = id.starts_with("PL")
+                || id == "WL"
+                || id == "LL"
                 || is_mix
                 || item.get("ie_key").and_then(|k| k.as_str()) == Some("YoutubeTab");
 
             if is_playlist {
                 let default_chan = if is_mix { "YouTube" } else { "Playlist" };
-                let channel = item.get("uploader")
+                let channel = item
+                    .get("uploader")
                     .or_else(|| item.get("channel"))
                     .and_then(|s| s.as_str())
                     .unwrap_or(default_chan)
                     .to_string();
-                let video_count = if is_mix { Some("Mix".to_string()) } else { None };
+                let video_count = if is_mix {
+                    Some("Mix".to_string())
+                } else {
+                    None
+                };
                 cards.push(Card::Playlist(crate::backend::models::PlaylistCard {
                     id,
                     title,
@@ -130,19 +155,24 @@ impl YtDlpBackend {
                 continue;
             }
 
-            let channel = item.get("uploader")
+            let channel = item
+                .get("uploader")
                 .or_else(|| item.get("channel"))
                 .and_then(|s| s.as_str())
                 .unwrap_or("")
                 .to_string();
-            let channel_id = item.get("channel_id").and_then(|s| s.as_str()).map(|s| s.to_string());
+            let channel_id = item
+                .get("channel_id")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
             let duration_sec = item.get("duration").and_then(|d| d.as_u64());
             let duration = duration_sec.map(|sec| {
                 let mins = sec / 60;
                 let s = sec % 60;
                 format!("{mins}:{s:02}")
             });
-            let views = item.get("view_count")
+            let views = item
+                .get("view_count")
                 .and_then(|v| v.as_u64())
                 .map(|cnt| format!("{cnt} views"));
 
@@ -214,7 +244,9 @@ impl Backend for YtDlpBackend {
     }
 
     async fn playlists(&self) -> Result<FeedPage> {
-        let val = self.run_ytdlp("https://www.youtube.com/feed/playlists").await?;
+        let val = self
+            .run_ytdlp("https://www.youtube.com/feed/playlists")
+            .await?;
         let items = self.parse_entries(&val);
         Ok(FeedPage {
             chips: Vec::new(),
@@ -234,7 +266,12 @@ impl Backend for YtDlpBackend {
         })
     }
 
-    async fn search(&self, q: &str, _filters: &SearchFilters, _token: Option<&str>) -> Result<FeedPage> {
+    async fn search(
+        &self,
+        q: &str,
+        _filters: &SearchFilters,
+        _token: Option<&str>,
+    ) -> Result<FeedPage> {
         let target = format!("ytsearch30:{q}");
         let val = self.run_ytdlp(&target).await?;
         let items = self.parse_entries(&val);
@@ -253,18 +290,38 @@ impl Backend for YtDlpBackend {
         let target = format!("https://www.youtube.com/watch?v={video_id}");
         let val = self.run_ytdlp(&target).await?;
 
-        let id = val.get("id").and_then(|s| s.as_str()).unwrap_or(video_id).to_string();
-        let title = val.get("title").and_then(|s| s.as_str()).unwrap_or("").to_string();
-        let channel = val.get("uploader").and_then(|s| s.as_str()).unwrap_or("").to_string();
-        let description = val.get("description").and_then(|s| s.as_str()).unwrap_or("").to_string();
+        let id = val
+            .get("id")
+            .and_then(|s| s.as_str())
+            .unwrap_or(video_id)
+            .to_string();
+        let title = val
+            .get("title")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let channel = val
+            .get("uploader")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
+        let description = val
+            .get("description")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string();
         let duration_sec = val.get("duration").and_then(|d| d.as_u64());
         let duration = duration_sec.map(|sec| {
             let mins = sec / 60;
             let s = sec % 60;
             format!("{mins}:{s:02}")
         });
-        let views = val.get("view_count").and_then(|v| v.as_u64()).map(|cnt| format!("{cnt} views"));
-        let thumb_url = val.get("thumbnail")
+        let views = val
+            .get("view_count")
+            .and_then(|v| v.as_u64())
+            .map(|cnt| format!("{cnt} views"));
+        let thumb_url = val
+            .get("thumbnail")
             .and_then(|t| t.as_str())
             .unwrap_or("")
             .to_string();

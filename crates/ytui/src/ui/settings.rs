@@ -6,13 +6,34 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
-    ("Max Resolution", "Default maximum stream resolution (1080p prevents lag/buffering)"),
-    ("Grid Windows", "Number of card columns displayed (3x3 grid layout)"),
-    ("Hardware Decoding", "GPU video decoding (auto-safe uses NVDEC/VAAPI for zero CPU stutter)"),
-    ("Stream Cache", "Pre-buffer size and readahead to prevent stream pauses"),
-    ("OSD Seekbar", "Clean bottom bar vs center screen overlay box"),
-    ("Use User MPV Config", "Use ~/.config/mpv/mpv.conf or ytui dedicated profile"),
-    ("Autoplay Next", "Automatically queue and play next recommended video"),
+    (
+        "Max Resolution",
+        "Default maximum stream resolution (1080p prevents lag/buffering)",
+    ),
+    (
+        "Grid Windows",
+        "Number of card columns displayed (3x3 grid layout)",
+    ),
+    (
+        "Hardware Decoding",
+        "GPU video decoding (auto-safe uses NVDEC/VAAPI for zero CPU stutter)",
+    ),
+    (
+        "Stream Cache",
+        "Pre-buffer size and readahead to prevent stream pauses",
+    ),
+    (
+        "OSD Seekbar",
+        "Clean bottom bar vs center screen overlay box",
+    ),
+    (
+        "Use User MPV Config",
+        "Use ~/.config/mpv/mpv.conf or ytui dedicated profile",
+    ),
+    (
+        "Autoplay Next",
+        "Automatically queue and play next recommended video",
+    ),
 ];
 
 pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
@@ -31,14 +52,22 @@ pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
 
     // Title header
     let title_p = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled(" Settings & Playback Tuning", Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled(" Configure video resolution, grid windows, and MPV hardware acceleration", Style::default().fg(app.theme.text_secondary)),
-        ]),
+        Line::from(vec![Span::styled(
+            " Settings & Playback Tuning",
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![Span::styled(
+            " Configure video resolution, grid windows, and MPV hardware acceleration",
+            Style::default().fg(app.theme.text_secondary),
+        )]),
     ])
-    .block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(app.theme.border)));
+    .block(
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(Style::default().fg(app.theme.border)),
+    );
     f.render_widget(title_p, chunks[0]);
 
     // Items list
@@ -94,16 +123,35 @@ pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         };
 
         item_lines.push(Line::from(vec![
-            Span::styled(pointer, if is_selected { Style::default().fg(app.theme.accent) } else { Style::default() }),
+            Span::styled(
+                pointer,
+                if is_selected {
+                    Style::default().fg(app.theme.accent)
+                } else {
+                    Style::default()
+                },
+            ),
             Span::styled(format!("{label:<24}"), style),
             Span::styled(" : ", Style::default().fg(app.theme.text_secondary)),
-            Span::styled(format!("[ {val_str} ]"), if is_selected { Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD) } else { Style::default().fg(app.theme.text) }),
+            Span::styled(
+                format!("[ {val_str} ]"),
+                if is_selected {
+                    Style::default()
+                        .fg(app.theme.accent)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.theme.text)
+                },
+            ),
         ]));
 
         if is_selected {
             item_lines.push(Line::from(vec![
                 Span::raw("    "),
-                Span::styled(format!("  - {desc}"), Style::default().fg(app.theme.text_secondary)),
+                Span::styled(
+                    format!("  - {desc}"),
+                    Style::default().fg(app.theme.text_secondary),
+                ),
             ]));
         }
 
@@ -114,13 +162,16 @@ pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(list_p, chunks[1]);
 
     // Footer hints
-    let footer_p = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled(" [j/k] Navigate  [h/l or Enter] Change Value  [q/Esc] Back & Save", Style::default().fg(app.theme.text_secondary)),
-        ]),
-    ])
+    let footer_p = Paragraph::new(vec![Line::from(vec![Span::styled(
+        " [j/k] Navigate  [h/l or Enter] Change Value  [q/Esc] Back & Save",
+        Style::default().fg(app.theme.text_secondary),
+    )])])
     .alignment(Alignment::Center)
-    .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(app.theme.border)));
+    .block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(app.theme.border)),
+    );
     f.render_widget(footer_p, chunks[2]);
 }
 
@@ -145,8 +196,12 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
                 "2160p" => "2160",
                 _ => "1080",
             };
-            app.config.playback.ytdl_format = format!("bestvideo[height<=?{}]+bestaudio/best", height);
-            let _ = app.player.profile.setup_default_configs(None, Some(&app.config.playback.hwdec));
+            app.config.playback.ytdl_format =
+                format!("bestvideo[height<=?{}]+bestaudio/best", height);
+            let _ = app
+                .player
+                .profile
+                .setup_default_configs(None, Some(&app.config.playback.hwdec));
             app.status_text = format!("Max resolution set to {chosen}");
         }
         1 => {
@@ -160,7 +215,14 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
                 (idx + cols.len() - 1) % cols.len()
             };
             app.config.grid.columns = cols[next_idx];
-            app.status_text = format!("Grid columns set to {}", if cols[next_idx] == 0 { "Auto".to_string() } else { format!("{}", cols[next_idx]) });
+            app.status_text = format!(
+                "Grid columns set to {}",
+                if cols[next_idx] == 0 {
+                    "Auto".to_string()
+                } else {
+                    format!("{}", cols[next_idx])
+                }
+            );
         }
         2 => {
             // Hardware acceleration
@@ -182,12 +244,22 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
         4 => {
             // OSD Seekbar
             app.config.playback.osd_bar = !app.config.playback.osd_bar;
-            app.status_text = format!("OSD bar: {}", if app.config.playback.osd_bar { "Center Box" } else { "Bottom OSC Only" });
+            app.status_text = format!(
+                "OSD bar: {}",
+                if app.config.playback.osd_bar {
+                    "Center Box"
+                } else {
+                    "Bottom OSC Only"
+                }
+            );
         }
         5 => {
             // Use User MPV Config
             app.config.playback.use_user_mpv_config = !app.config.playback.use_user_mpv_config;
-            app.status_text = format!("Use user MPV config: {}", app.config.playback.use_user_mpv_config);
+            app.status_text = format!(
+                "Use user MPV config: {}",
+                app.config.playback.use_user_mpv_config
+            );
         }
         6 => {
             // Autoplay

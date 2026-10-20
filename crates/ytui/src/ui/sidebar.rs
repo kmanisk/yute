@@ -60,7 +60,12 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
         // Active item = accent color + bold + "▌" marker
         let marker = if is_current {
-            Span::styled("▌ ", Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD))
+            Span::styled(
+                "▌ ",
+                Style::default()
+                    .fg(app.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            )
         } else if is_cursor {
             Span::styled("> ", Style::default().fg(app.theme.accent))
         } else {
@@ -68,9 +73,13 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let label_style = if is_current {
-            Style::default().fg(app.theme.accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(app.theme.accent)
+                .add_modifier(Modifier::BOLD)
         } else if is_cursor {
-            Style::default().fg(app.theme.text).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(app.theme.text)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(app.theme.text)
         };
@@ -86,7 +95,10 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
             label
         };
 
-        let pad_len = inner.width.saturating_sub(2 + display_label.len() as u16 + 1 + shortcut.len() as u16 + 1) as usize;
+        let pad_len = inner
+            .width
+            .saturating_sub(2 + display_label.len() as u16 + 1 + shortcut.len() as u16 + 1)
+            as usize;
         let padding = " ".repeat(pad_len.max(1));
 
         let item_spans = vec![
