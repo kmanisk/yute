@@ -31,32 +31,50 @@ impl EmbeddedPlayer {
             None
         };
 
+        // libmpv strictly requires LC_NUMERIC to be "C" for parsing floating-point options
+        unsafe {
+            libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
+        }
+
         let mpv = Mpv::with_initializer(|init| {
-            init.set_option("vo", "libmpv")?;
-            init.set_option("hwdec", hwdec)?;
-            init.set_option("hr-seek", "no")?;
-            init.set_option("cache", "yes")?;
-            init.set_option("demuxer-max-bytes", "256MiB")?;
-            init.set_option("demuxer-max-back-bytes", "128MiB")?;
-            init.set_option("demuxer-readahead-secs", "45")?;
-            init.set_option("demuxer-seekable-cache", "yes")?;
-            init.set_option("ytdl-format", max_res.as_str())?;
-            init.set_option("ytdl-raw-options-append", "no-playlist=")?;
-            init.set_option("ytdl-raw-options-append", "concurrent-fragments=4")?;
+            let set_opt = |k: &str, v: &str| {
+                if let Err(e) = init.set_option(k, v) {
+                    eprintln!("Failed to set mpv option '{k}'='{v}': {e:?}");
+                    return Err(e);
+                }
+                Ok(())
+            };
+
+            set_opt("vo", "libmpv")?;
+            set_opt("hwdec", hwdec)?;
+            set_opt("hr-seek", "no")?;
+            set_opt("cache", "yes")?;
+            set_opt("demuxer-max-bytes", "256MiB")?;
+            set_opt("demuxer-max-back-bytes", "128MiB")?;
+            set_opt("demuxer-readahead-secs", "45")?;
+            set_opt("demuxer-seekable-cache", "yes")?;
+            set_opt("ytdl-format", max_res.as_str())?;
+
+            let mut raw_opts = vec![
+                "no-playlist=".to_string(),
+                "concurrent-fragments=4".to_string(),
+            ];
             if let Some(ref cp) = cookies_path {
                 if cp.exists() {
-                    let cookie_arg = format!("cookies={}", cp.display());
-                    init.set_option("ytdl-raw-options-append", cookie_arg.as_str())?;
+                    raw_opts.push(format!("cookies={}", cp.display()));
                     if cfg.playback.mark_watched {
-                        init.set_option("ytdl-raw-options-append", "mark-watched=")?;
+                        raw_opts.push("mark-watched=".to_string());
                     }
                 }
             }
-            init.set_option("sub-auto", "fuzzy")?;
-            init.set_option("sub-visibility", "yes")?;
-            init.set_option("slang", "en,eng,hi,hin")?;
-            init.set_option("keep-open", "yes")?;
-            init.set_option("idle", "yes")?;
+            let ytdl_raw_opts_str = raw_opts.join(",");
+            set_opt("ytdl-raw-options", &ytdl_raw_opts_str)?;
+
+            set_opt("sub-auto", "fuzzy")?;
+            set_opt("sub-visibility", "yes")?;
+            set_opt("slang", "en,eng,hi,hin")?;
+            set_opt("keep-open", "yes")?;
+            set_opt("idle", "yes")?;
             Ok(())
         })
         .context("Failed to initialize libmpv")?;
@@ -118,6 +136,7 @@ impl EmbeddedPlayer {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn play(&self) -> Result<()> {
         self.mpv.set_property("pause", false)?;
         let mut st = self.status.lock().unwrap();
@@ -125,6 +144,7 @@ impl EmbeddedPlayer {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn pause(&self) -> Result<()> {
         self.mpv.set_property("pause", true)?;
         let mut st = self.status.lock().unwrap();

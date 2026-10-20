@@ -38,6 +38,10 @@ fn init_logging() {
 }
 
 fn main() {
+    unsafe {
+        libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
+    }
+
     init_logging();
 
     let cfg = Config::load();
@@ -49,9 +53,19 @@ fn main() {
     let holder = Rc::clone(&gui_holder);
     let cfg_clone = cfg.clone();
     app.connect_activate(move |application| {
-        let gui = GuiApp::new(application, cfg_clone.clone());
-        gui.present();
-        *holder.borrow_mut() = Some(gui);
+        unsafe {
+            libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
+        }
+        match GuiApp::new(application, cfg_clone.clone()) {
+            Ok(gui) => {
+                gui.present();
+                *holder.borrow_mut() = Some(gui);
+            }
+            Err(err) => {
+                eprintln!("Failed to initialize ytui-gui: {err:#}");
+                tracing::error!("Failed to initialize ytui-gui: {err:#}");
+            }
+        }
     });
 
     app.run_with_args(&Vec::<String>::new());

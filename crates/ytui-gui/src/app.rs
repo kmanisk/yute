@@ -27,6 +27,7 @@ pub enum CurrentView {
 
 pub struct AppState {
     pub view: CurrentView,
+    #[allow(dead_code)]
     pub is_loading: bool,
     pub is_fullscreen: bool,
     pub is_theater: bool,
@@ -57,12 +58,12 @@ pub struct GuiApp {
 }
 
 impl GuiApp {
-    pub fn new(app: &Application, cfg: Config) -> Self {
+    pub fn new(app: &Application, cfg: Config) -> anyhow::Result<Self> {
         let auth_path = ytui_core::config::config_dir().join("auth.json");
         let auth = AuthContext::load_from_file(&auth_path).unwrap_or_default();
         let backend: Arc<dyn Backend> = Arc::new(InnerTubeBackend::new(auth));
 
-        let player = Arc::new(EmbeddedPlayer::new(&cfg).expect("Failed to create EmbeddedPlayer"));
+        let player = Arc::new(EmbeddedPlayer::new(&cfg)?);
         let video_area = VideoArea::new(Arc::clone(&player));
 
         let window = ApplicationWindow::builder()
@@ -172,7 +173,7 @@ impl GuiApp {
         gui_app.setup_polling_timer();
         gui_app.load_home_feed();
 
-        gui_app
+        Ok(gui_app)
     }
 
     fn build_ui(&self) {
