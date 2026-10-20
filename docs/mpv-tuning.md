@@ -25,18 +25,19 @@ Settings can also be cycled interactively from the Settings screen (`go` keybind
 
 ## Subtitle Configuration and Rate Limiting
 
-Extracting all subtitle tracks across hundreds of languages can trigger YouTube HTTP 429 rate limits. Subtitle download options in the ytui MPV profile are scoped to priority target languages:
+Extracting all subtitle tracks across hundreds of languages via yt-dlp `write-subs` can trigger YouTube HTTP 429 rate limits and stream segment stalls. Subtitles are handled cleanly via MPV's native subtitle selector and `ytdl_hook`:
 
 ```ini
-sub-auto=all
+sub-auto=fuzzy
 sub-visibility=yes
 slang=en,eng,en-US,en-GB,hi,hin
-ytdl-raw-options-append=sub-langs=en.*,en,hi.*,hi
-ytdl-raw-options-append=write-subs=
-ytdl-raw-options-append=write-auto-subs=
 ```
 
-This ensures both creator manual subtitles and YouTube auto-generated captions are available while avoiding redundant multi-track extraction.
+This ensures required language subtitles are automatically selected without making redundant parallel requests or causing HTTP 429 errors.
+
+## Video Output (`vo`)
+
+The profile uses `vo=gpu-next` (the modern libplacebo rendering engine) rather than the legacy `vo=gpu`. On modern Wayland compositors (such as Sway or i3 with Xwayland), `gpu-next` provides seamless Vulkan video decode presentation (`VK_STD_vulkan_video_codec_av1_decode`) and prevents window swapchain presentation freezes.
 
 ## Stream Cache and Buffering
 

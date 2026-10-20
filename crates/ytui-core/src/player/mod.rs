@@ -158,7 +158,7 @@ impl Player {
             cmd.arg(format!("--config-dir={}", self.profile.dir.display()))
                 .arg(format!("--ytdl-format={}", cfg.playback.resolved_ytdl_format()))
                 .arg(format!("--hwdec={hwdec}"))
-                .arg("--vo=gpu")
+                .arg("--vo=gpu-next")
                 .arg("--cache=yes")
                 .arg("--demuxer-max-bytes=300MiB")
                 .arg("--demuxer-max-back-bytes=150MiB")

@@ -33,7 +33,7 @@ impl MpvProfile {
             "# ytui dedicated mpv configuration\n\
             ytdl-format=bestvideo[height<=?1080][fps<=?60]+bestaudio/best[height<=?1080]/best\n\
             hwdec={hwdec_str}\n\
-            vo=gpu\n\
+            vo=gpu-next\n\
             cache=yes\n\
             demuxer-max-bytes=512MiB\n\
             demuxer-max-back-bytes=256MiB\n\
@@ -44,12 +44,9 @@ impl MpvProfile {
             ytdl-raw-options-append=no-playlist=\n\
             ytdl-raw-options-append=concurrent-fragments=4\n\
             ytdl-raw-options-append=buffer-size=16k\n\
-            sub-auto=all\n\
+            sub-auto=fuzzy\n\
             sub-visibility=yes\n\
             slang=en,eng,en-US,en-GB,hi,hin\n\
-            ytdl-raw-options-append=sub-langs=en.*,en,hi.*,hi\n\
-            ytdl-raw-options-append=write-subs=\n\
-            ytdl-raw-options-append=write-auto-subs=\n\
             osd-bar=no\n\
             keep-open=yes\n\
             force-window=yes\n",
@@ -120,7 +117,7 @@ impl MpvProfile {
 
         let script_opts_dir = self.dir.join("script-opts");
         let _ = fs::create_dir_all(&script_opts_dir);
-        let chat_conf = "auto-load=yes\n\
+        let chat_conf = "auto-load=no\n\
             live-chat-directory=~/.local/share/youtube-live-chats\n\
             yt-dlp-path=yt-dlp\n\
             show-author=yes\n\
