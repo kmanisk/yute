@@ -1,4 +1,5 @@
 mod app;
+pub mod async_runtime;
 mod gl_loader;
 mod player_embedded;
 mod render_context;
@@ -30,7 +31,11 @@ fn init_logging() {
         .append(true)
         .open(log_file_path)
     {
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,ytui_gui=debug,ytui_core=debug"));
+
         tracing_subscriber::fmt()
+            .with_env_filter(filter)
             .with_writer(file)
             .with_ansi(false)
             .init();
@@ -43,6 +48,7 @@ fn main() {
     }
 
     init_logging();
+    let _ = async_runtime::runtime();
 
     let cfg = Config::load();
 
