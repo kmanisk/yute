@@ -64,6 +64,10 @@ impl MpvRenderContext {
         );
     }
 
+    pub unsafe fn update(&self) -> u64 {
+        mpv_render_context_update(self.ctx)
+    }
+
     pub unsafe fn render(&self, fbo: i32, width: i32, height: i32) {
         let mut fbo_data = mpv_opengl_fbo {
             fbo,

@@ -47,17 +47,23 @@ impl EmbeddedPlayer {
 
             set_opt("vo", "libmpv")?;
             set_opt("hwdec", hwdec)?;
-            set_opt("hr-seek", "no")?;
+            set_opt("hr-seek", "yes")?;
             set_opt("cache", "yes")?;
-            set_opt("demuxer-max-bytes", "256MiB")?;
-            set_opt("demuxer-max-back-bytes", "128MiB")?;
-            set_opt("demuxer-readahead-secs", "45")?;
+            set_opt("cache-pause", "no")?;
+            set_opt("demuxer-max-bytes", "512MiB")?;
+            set_opt("demuxer-max-back-bytes", "256MiB")?;
+            set_opt("demuxer-readahead-secs", "60")?;
             set_opt("demuxer-seekable-cache", "yes")?;
+            set_opt("force-seekable", "yes")?;
+            set_opt("network-timeout", "15")?;
+            set_opt("stream-buffer-size", "4MiB")?;
+            set_opt("demuxer-lavf-buffersize", "2097152")?;
+            set_opt("demuxer-lavf-o", "reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")?;
             set_opt("ytdl-format", max_res.as_str())?;
 
             let mut raw_opts = vec![
                 "no-playlist=".to_string(),
-                "concurrent-fragments=4".to_string(),
+                "extractor-args=youtube:player_client=android,web".to_string(),
             ];
             if let Some(ref cp) = cookies_path {
                 if cp.exists() {
@@ -75,6 +81,8 @@ impl EmbeddedPlayer {
             set_opt("slang", "en,eng,hi,hin")?;
             set_opt("keep-open", "yes")?;
             set_opt("idle", "yes")?;
+            set_opt("terminal", "yes")?;
+            set_opt("msg-level", "all=info")?;
             Ok(())
         })
         .context("Failed to initialize libmpv")?;
@@ -102,10 +110,14 @@ impl EmbeddedPlayer {
         let start = start_sec.or_else(|| video.resolved_resume_sec().map(|s| s as f64));
 
         if let Some(st) = start {
-            self.mpv.command(
-                "loadfile",
-                &[&target_url, "replace", "-1", &format!("start={st}")],
-            )?;
+            if st > 0.0 {
+                self.mpv.command(
+                    "loadfile",
+                    &[&target_url, "replace", "0", &format!("start={st}")],
+                )?;
+            } else {
+                self.mpv.command("loadfile", &[&target_url, "replace"])?;
+            }
         } else {
             self.mpv.command("loadfile", &[&target_url, "replace"])?;
         }

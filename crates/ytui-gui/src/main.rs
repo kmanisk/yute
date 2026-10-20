@@ -66,17 +66,47 @@ window {
 }
 
 .yt-card:hover {
-    background-color: #272727;
+    background-color: #222222;
 }
 
-.yt-card:focus, .yt-card:focus-visible {
+.yt-card:focus, .yt-card:focus-visible, .yt-card:selected {
     outline: 2px solid #3ea6ff;
     outline-offset: 2px;
+    background-color: #222222;
+}
+
+.yt-card-compact {
+    background-color: transparent;
+    border-radius: 8px;
+    padding: 4px;
+}
+
+.yt-card-compact:hover {
+    background-color: #222222;
+}
+
+.yt-card-compact:focus, .yt-card-compact:focus-visible, .yt-card-compact:selected {
+    outline: 2px solid #3ea6ff;
+    outline-offset: 2px;
+    background-color: #222222;
 }
 
 .yt-thumb-container {
-    border-radius: 10px;
+    border-radius: 12px;
     background-color: #1a1a1a;
+}
+
+.yt-thumb-container-compact {
+    border-radius: 8px;
+    background-color: #1a1a1a;
+}
+
+.yt-avatar-circle {
+    background: linear-gradient(135deg, #cc0000, #ff4444);
+    color: #ffffff;
+    border-radius: 18px;
+    font-size: 14px;
+    font-weight: bold;
 }
 
 .yt-duration-badge {
@@ -100,12 +130,31 @@ window {
 .yt-title {
     font-size: 14px;
     font-weight: 600;
+    line-height: 1.3;
     color: #f1f1f1;
+}
+
+.yt-title-compact {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.25;
+    color: #f1f1f1;
+}
+
+.yt-channel-name {
+    font-size: 12px;
+    color: #aaaaaa;
+    font-weight: 500;
 }
 
 .yt-meta {
     font-size: 12px;
     color: #aaaaaa;
+}
+
+.yt-video-wrapper {
+    background-color: #000000;
+    border-radius: 12px;
 }
 
 .yt-desc-box {
@@ -144,18 +193,23 @@ fn init_logging() {
     let _ = std::fs::create_dir_all(&cache_dir);
     let log_file_path = cache_dir.join("gui.log");
 
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,ytui_gui=debug,ytui_core=debug"));
+
     if let Ok(file) = std::fs::OpenOptions::new()
         .create(true)
+        .write(true)
         .append(true)
         .open(log_file_path)
     {
-        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,ytui_gui=debug,ytui_core=debug"));
-
         tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_writer(file)
             .with_ansi(false)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
             .init();
     }
 }

@@ -8,9 +8,9 @@ use gtk4::gdk::Key;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Application, ApplicationWindow, Box as GtkBox, Button, Entry, EventControllerKey,
-    FlowBox, Label, Orientation, Paned, PolicyType, Scale, ScrolledWindow, SelectionMode,
-    Stack,
+    Align, Application, ApplicationWindow, AspectFrame, Box as GtkBox, Button, Entry,
+    EventControllerKey, FlowBox, Label, Orientation, Paned, PolicyType, Scale, ScrolledWindow,
+    SelectionMode, Stack,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -129,14 +129,14 @@ impl GuiApp {
         let feed_flow_box = FlowBox::builder()
             .selection_mode(SelectionMode::Single)
             .homogeneous(true)
-            .min_children_per_line(1)
-            .max_children_per_line(6)
-            .column_spacing(16)
-            .row_spacing(18)
+            .min_children_per_line(2)
+            .max_children_per_line(5)
+            .column_spacing(18)
+            .row_spacing(24)
             .margin_top(16)
             .margin_bottom(24)
-            .margin_start(20)
-            .margin_end(20)
+            .margin_start(24)
+            .margin_end(24)
             .build();
 
         let main_stack = Stack::builder().hexpand(true).vexpand(true).build();
@@ -335,9 +335,19 @@ impl GuiApp {
         let video_container = GtkBox::builder()
             .orientation(Orientation::Vertical)
             .hexpand(true)
-            .vexpand(true)
             .build();
-        video_container.append(&self.inner.video_area.widget);
+
+        let video_aspect = AspectFrame::builder()
+            .xalign(0.5)
+            .yalign(0.5)
+            .ratio(16.0 / 9.0)
+            .obey_child(false)
+            .hexpand(true)
+            .height_request(450)
+            .css_classes(["yt-video-wrapper"])
+            .child(&self.inner.video_area.widget)
+            .build();
+        video_container.append(&video_aspect);
 
         // Controls bar under video
         let controls_bar = GtkBox::builder()
@@ -614,9 +624,13 @@ impl GuiApp {
         let stack_ref = self.inner.main_stack.clone();
         let search_ref = self.inner.search_entry.clone();
         let flow_ref = self.inner.feed_flow_box.clone();
+        let cards_store_ref = Rc::clone(&self.inner.current_cards);
+        let related_flow_ref = self.inner.related_flow_box.clone();
+        let related_cards_ref = Rc::clone(&self.inner.related_cards);
         let window_ref = self.inner.window.clone();
         let paned_ref = self.inner.watch_paned.clone();
         let app_shortcuts = self.clone();
+        let last_g_pressed = Rc::new(RefCell::new(None::<std::time::Instant>));
 
         controller.connect_key_pressed(move |_, key, _, modifier| {
             // 1. Focus search bar
@@ -638,6 +652,70 @@ impl GuiApp {
             }
 
             let is_watch_view = state_ref.borrow().view == CurrentView::Watch;
+
+            // In Watch view: check if related_flow_box has focus
+            let in_related = is_watch_view
+                && (related_flow_ref.has_focus()
+                    || related_flow_ref
+                        .selected_children()
+                        .iter()
+                        .any(|c| c.has_focus()));
+
+            if in_related {
+                match key {
+                    Key::j | Key::Down => {
+                        let total = related_cards_ref.borrow().len();
+                        if total > 0 {
+                            let cur_idx = related_flow_ref
+                                .selected_children()
+                                .first()
+                                .map(|c| c.index() as usize)
+                                .unwrap_or(0);
+                            let target = (cur_idx + 1).min(total - 1);
+                            if let Some(child) = related_flow_ref.child_at_index(target as i32) {
+                                related_flow_ref.select_child(&child);
+                                child.grab_focus();
+                            }
+                        }
+                        return glib::Propagation::Stop;
+                    }
+                    Key::k | Key::Up => {
+                        let cur_idx = related_flow_ref
+                            .selected_children()
+                            .first()
+                            .map(|c| c.index() as usize)
+                            .unwrap_or(0);
+                        let target = cur_idx.saturating_sub(1);
+                        if let Some(child) = related_flow_ref.child_at_index(target as i32) {
+                            related_flow_ref.select_child(&child);
+                            child.grab_focus();
+                        }
+                        return glib::Propagation::Stop;
+                    }
+                    Key::Return | Key::KP_Enter => {
+                        if let Some(child) = related_flow_ref.selected_children().first() {
+                            child.activate();
+                        }
+                        return glib::Propagation::Stop;
+                    }
+                    Key::Escape => {
+                        window_ref.grab_focus();
+                        return glib::Propagation::Stop;
+                    }
+                    _ => {}
+                }
+            }
+
+            // Tab toggles focus between player area and related videos in Watch view
+            if key == Key::Tab && is_watch_view {
+                if in_related {
+                    window_ref.grab_focus();
+                } else if let Some(first_rel) = related_flow_ref.child_at_index(0) {
+                    related_flow_ref.select_child(&first_rel);
+                    first_rel.grab_focus();
+                }
+                return glib::Propagation::Stop;
+            }
 
             match key {
                 Key::Escape => {
@@ -700,12 +778,12 @@ impl GuiApp {
                     let _ = player_ref.seek(step, true);
                     glib::Propagation::Stop
                 }
-                Key::Up if is_watch_view => {
+                Key::Up | Key::plus | Key::equal if is_watch_view => {
                     let cur_vol = player_ref.status.lock().unwrap().volume;
                     let _ = player_ref.set_volume((cur_vol + 5.0).min(100.0));
                     glib::Propagation::Stop
                 }
-                Key::Down if is_watch_view => {
+                Key::Down | Key::minus if is_watch_view => {
                     let cur_vol = player_ref.status.lock().unwrap().volume;
                     let _ = player_ref.set_volume((cur_vol - 5.0).max(0.0));
                     glib::Propagation::Stop
@@ -752,7 +830,140 @@ impl GuiApp {
                     let _ = player_ref.cycle_subtitles();
                     glib::Propagation::Stop
                 }
-                // When in browse grid: arrow keys and Enter navigate and activate!
+
+                // Browse Feed Navigation (Vim Keys: j, k, h, l, Enter, gg, G, r)
+                Key::j | Key::Down if !is_watch_view => {
+                    let total = cards_store_ref.borrow().len();
+                    if total > 0 {
+                        let cur_idx = flow_ref
+                            .selected_children()
+                            .first()
+                            .map(|c| c.index() as usize)
+                            .unwrap_or(0);
+                        let w = flow_ref.width();
+                        let min_cols = flow_ref.min_children_per_line() as usize;
+                        let max_cols = flow_ref.max_children_per_line() as usize;
+                        let cols = if w > 0 {
+                            ((w / 340) as usize).clamp(min_cols, max_cols)
+                        } else {
+                            min_cols
+                        };
+                        let target = (cur_idx + cols).min(total.saturating_sub(1));
+                        if let Some(child) = flow_ref.child_at_index(target as i32) {
+                            flow_ref.select_child(&child);
+                            child.grab_focus();
+                        }
+                    }
+                    glib::Propagation::Stop
+                }
+                Key::k | Key::Up if !is_watch_view => {
+                    let total = cards_store_ref.borrow().len();
+                    if total > 0 {
+                        let cur_idx = flow_ref
+                            .selected_children()
+                            .first()
+                            .map(|c| c.index() as usize)
+                            .unwrap_or(0);
+                        let w = flow_ref.width();
+                        let min_cols = flow_ref.min_children_per_line() as usize;
+                        let max_cols = flow_ref.max_children_per_line() as usize;
+                        let cols = if w > 0 {
+                            ((w / 340) as usize).clamp(min_cols, max_cols)
+                        } else {
+                            min_cols
+                        };
+                        let target = cur_idx.saturating_sub(cols);
+                        if let Some(child) = flow_ref.child_at_index(target as i32) {
+                            flow_ref.select_child(&child);
+                            child.grab_focus();
+                        }
+                    }
+                    glib::Propagation::Stop
+                }
+                Key::h | Key::Left if !is_watch_view => {
+                    let total = cards_store_ref.borrow().len();
+                    if total > 0 {
+                        let cur_idx = flow_ref
+                            .selected_children()
+                            .first()
+                            .map(|c| c.index() as usize)
+                            .unwrap_or(0);
+                        let target = cur_idx.saturating_sub(1);
+                        if let Some(child) = flow_ref.child_at_index(target as i32) {
+                            flow_ref.select_child(&child);
+                            child.grab_focus();
+                        }
+                    }
+                    glib::Propagation::Stop
+                }
+                Key::l | Key::Right if !is_watch_view => {
+                    let total = cards_store_ref.borrow().len();
+                    if total > 0 {
+                        let cur_idx = flow_ref
+                            .selected_children()
+                            .first()
+                            .map(|c| c.index() as usize)
+                            .unwrap_or(0);
+                        let target = (cur_idx + 1).min(total.saturating_sub(1));
+                        if let Some(child) = flow_ref.child_at_index(target as i32) {
+                            flow_ref.select_child(&child);
+                            child.grab_focus();
+                        }
+                    }
+                    glib::Propagation::Stop
+                }
+                Key::Return | Key::KP_Enter if !is_watch_view => {
+                    if let Some(child) = flow_ref.selected_children().first() {
+                        child.activate();
+                    }
+                    glib::Propagation::Stop
+                }
+                Key::g if !is_watch_view => {
+                    let now = std::time::Instant::now();
+                    let mut g_lock = last_g_pressed.borrow_mut();
+                    let is_double_g = if let Some(t) = *g_lock {
+                        now.duration_since(t).as_millis() < 500
+                    } else {
+                        false
+                    };
+                    if is_double_g {
+                        *g_lock = None;
+                        if let Some(child) = flow_ref.child_at_index(0) {
+                            flow_ref.select_child(&child);
+                            child.grab_focus();
+                        }
+                    } else {
+                        *g_lock = Some(now);
+                    }
+                    glib::Propagation::Stop
+                }
+                Key::G if !is_watch_view => {
+                    let total = cards_store_ref.borrow().len();
+                    if total > 0 {
+                        let last_idx = (total - 1) as i32;
+                        if let Some(child) = flow_ref.child_at_index(last_idx) {
+                            flow_ref.select_child(&child);
+                            child.grab_focus();
+                        }
+                    }
+                    glib::Propagation::Stop
+                }
+                Key::r if !is_watch_view => {
+                    match state_ref.borrow().view {
+                        CurrentView::Home => app_shortcuts.load_home_feed(),
+                        CurrentView::Subscriptions => app_shortcuts.load_subscriptions(),
+                        CurrentView::History => app_shortcuts.load_history(),
+                        CurrentView::Playlists => app_shortcuts.load_playlists(),
+                        CurrentView::Search => {
+                            let text = search_ref.text();
+                            if !text.is_empty() {
+                                app_shortcuts.search_query(&text);
+                            }
+                        }
+                        _ => {}
+                    }
+                    glib::Propagation::Stop
+                }
                 _ => glib::Propagation::Proceed,
             }
         });
@@ -1065,6 +1276,13 @@ impl GuiApp {
 
         // Start playback immediately in embedded libmpv
         let _ = self.inner.player.load_video(v.clone(), None);
+
+        // Update YouTube watch history
+        let b_mark = Arc::clone(&self.inner.backend);
+        let vid_mark = v.id.clone();
+        crate::async_runtime::runtime().spawn(async move {
+            let _ = b_mark.mark_watched(&vid_mark).await;
+        });
 
         let b = Arc::clone(&self.inner.backend);
         let p = Arc::clone(&self.inner.player);

@@ -21,6 +21,7 @@ impl VideoArea {
         gl_area.set_has_stencil_buffer(false);
         gl_area.set_hexpand(true);
         gl_area.set_vexpand(true);
+        gl_area.set_size_request(640, 360);
         gl_area.set_auto_render(false);
 
         let render_context = Rc::new(RefCell::new(None));
@@ -29,6 +30,10 @@ impl VideoArea {
         let rc_unrealize = Rc::clone(&render_context);
 
         let player_realize = Arc::clone(&player);
+
+        gl_area.connect_resize(move |area, _, _| {
+            area.queue_render();
+        });
 
         gl_area.connect_realize(move |area| {
             area.make_current();
@@ -64,6 +69,7 @@ impl VideoArea {
 
         gl_area.connect_render(move |area, _| {
             area.make_current();
+            area.attach_buffers();
             let fbo = unsafe { gl_loader::query_bound_framebuffer() };
             let scale = area.scale_factor();
             let width = (area.width() * scale).max(1);
@@ -71,6 +77,7 @@ impl VideoArea {
 
             if let Some(ref ctx) = *rc_render.borrow() {
                 unsafe {
+                    ctx.update();
                     ctx.render(fbo, width, height);
                     ctx.report_swap();
                 }
