@@ -7,12 +7,25 @@ Designed for performance, responsive Vim keybindings, Sixel and Kitty terminal g
 
 ## Highlights
 
-- YouTube-exact UI layout: Top bar, feed filter chips, 3-column thumbnail card grid, collapsible guide sidebar, and Up Next column.
+- Modular workspace architecture: Headless `ytui-core` engine decoupled from the `ytui` Ratatui presentation layer.
+- YouTube-exact UI layout: Top bar, feed filter chips, responsive thumbnail card grid, collapsible guide sidebar, and Up Next column.
 - Dynamic terminal graphics: Automatically negotiates terminal capabilities using `ratatui-image`. Supports DEC Sixel graphics on `foot`, Kitty graphics protocol on `kitty` and `ghostty`, and Unicode half-blocks on standard terminals.
-- Native personalization without official API quota: InnerTube `FEwhat_to_watch` browse client with cookie authentication (`SAPISIDHASH`), feed continuation tokens, history, and subscriptions.
-- Isolated MPV player: Communicates over Unix domain sockets with JSON IPC. Supports both external window playback and inline terminal handoff without linking `libmpv`.
+- TVHTML5 InnerTube client: Zero official API quota limits. Emulates the TV client identity with continuation pagination, visitorData reuse, channel tabs, and comments.
+- TV OAuth device-code login: Sign in securely with `ytui login` (enter code at `google.com/device`). Tokens stored encrypted at rest with AES-256-GCM and strict `0600` permissions.
+- Real-time watch history sync: Periodic watchtime pings query real MPV `time-pos` every 30 seconds and on playback finish, synchronizing exact resume positions across SmartTube, mobile, and web.
+- Configurable GPU decoding: Hardware acceleration configurable (`hwdec = "auto-safe"`, `"no"`, `"vaapi"`, `"nvdec-copy"`), saving battery in hybrid mode and delivering zero CPU load in direct MUX mode.
+- Isolated MPV player: Communicates over Unix domain sockets with JSON IPC. Supports external window playback, inline terminal handoff, auto-loaded subtitles, and live stream chat without linking `libmpv`.
 - Script integration: Dedicated profile support for `sponsorblock_minimal`, `reload`, `quality-menu`, and `youtube-chat`. Run `ytui setup-mpv` to install verified scripts.
 - Zero daemon overhead: Pure single-process event loop driven by Tokio and Crossterm, running at near-zero CPU while idle.
+
+---
+
+## Documentation
+
+Detailed technical references are located in the `docs/` directory:
+
+- [Architecture Guide](docs/architecture.md): Workspace crates, data flow, parser mechanics, and player IPC.
+- [MPV Tuning and Hardware Decoding](docs/mpv-tuning.md): GPU decoding guidelines, buffer sizing, and rate-limiting prevention for subtitles.
 
 ---
 
@@ -38,8 +51,15 @@ cargo build --release
 install -Dm755 target/release/ytui ~/.local/bin/ytui
 ```
 
+### Sign In
+To link your YouTube account and synchronize subscriptions and history:
+```bash
+ytui login
+```
+Visit `google.com/device` or `youtube.com/activate` and enter the code shown in the terminal.
+
 ### Install MPV Plugins
-To populate the dedicated MPV profile with SponsorBlock and reload plugins:
+To populate the dedicated MPV profile with SponsorBlock, live chat, and reload plugins:
 ```bash
 ytui setup-mpv
 ```
@@ -65,20 +85,24 @@ stop_mpv_on_quit = true
 
 [backend]
 order = ['innertube', 'ytdlp']
+auth = 'tv_oauth'          # tv_oauth | cookies | guest
 cookies_file = '~/.config/ytui/cookies.txt'
 client_version = ''
 hl = 'en'
 gl = 'IN'
 
 [grid]
+columns = 3                # 3 for 3x3 layout | 0 for auto responsive
 min_card_width = 38
-show_shorts = false
+show_shorts = true
 sidebar_expanded = false
 
 [playback]
 default_mode = 'window'    # window | inline | auto
 use_user_mpv_config = false
-ytdl_format = 'bestvideo[height<=1080]+bestaudio/best'
+hwdec = 'auto-safe'        # auto-safe | no | vaapi | nvdec-copy
+max_resolution = '1080p'   # 1080p | 720p | 480p | 1440p | 2160p
+osd_bar = false
 mark_watched = true
 autoplay = true
 

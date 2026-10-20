@@ -1,0 +1,543 @@
+use crate::backend::auth::AuthContext;
+use crate::backend::models::{
+    ChannelTab, ChatBatch, ChatMessage, CommentsBatch, FeedPage, SearchFilters, WatchData,
+};
+use crate::backend::parse::{extract_text, parse_comments, parse_feed_page, parse_watch_data};
+use crate::backend::Backend;
+use anyhow::{anyhow, Context, Result};
+use async_trait::async_trait;
+use reqwest::Client;
+use serde_json::{json, Value};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+const INNERTUBE_BASE: &str = "https://www.youtube.com/youtubei/v1";
+
+fn build_optimized_client() -> Client {
+    Client::builder()
+        .timeout(Duration::from_secs(10))
+        .tcp_nodelay(true)
+        .tcp_keepalive(Duration::from_secs(60))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_max_idle_per_host(10)
+        .http2_keep_alive_interval(Duration::from_secs(15))
+        .http2_keep_alive_timeout(Duration::from_secs(5))
+        .http2_keep_alive_while_idle(true)
+        .brotli(true)
+        .gzip(true)
+        .build()
+        .unwrap_or_default()
+}
+
+pub struct InnerTubeBackend {
+    client: Client,
+    pub auth: Arc<Mutex<AuthContext>>,
+}
+
+impl InnerTubeBackend {
+    pub fn new(auth: AuthContext) -> Self {
+        Self {
+            client: build_optimized_client(),
+            auth: Arc::new(Mutex::new(auth)),
+        }
+    }
+
+    pub fn from_arc(auth: Arc<Mutex<AuthContext>>) -> Self {
+        Self {
+            client: build_optimized_client(),
+            auth,
+        }
+    }
+
+    pub async fn post_endpoint(&self, endpoint: &str, body: Value) -> Result<Value> {
+        let url = format!("{INNERTUBE_BASE}/{endpoint}");
+        let headers = self.auth.lock().unwrap().build_headers();
+
+        let resp = self
+            .client
+            .post(&url)
+            .headers(headers)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("InnerTube request to {endpoint} failed"))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(anyhow!("InnerTube returned HTTP {status} for {endpoint}"));
+        }
+
+        let json_val: Value = resp
+            .json()
+            .await
+            .with_context(|| format!("Failed to parse JSON response from {endpoint}"))?;
+
+        // Capture and persist visitorData from responseContext
+        if let Some(vis) = json_val.pointer("/responseContext/visitorData").and_then(|v| v.as_str()) {
+            let mut guard = self.auth.lock().unwrap();
+            if guard.visitor_data.as_deref() != Some(vis) {
+                guard.visitor_data = Some(vis.to_string());
+                if let Some(ref p) = guard.auth_file_path.clone() {
+                    let _ = guard.save_auth_file(p);
+                }
+            }
+        }
+
+        Ok(json_val)
+    }
+
+    pub fn make_body(&self, extra: Value) -> Value {
+        let client_ctx = self.auth.lock().unwrap().build_client_context();
+        let mut base = json!({
+            "context": client_ctx
+        });
+
+        if let (Some(base_map), Some(extra_map)) = (base.as_object_mut(), extra.as_object()) {
+            for (k, v) in extra_map {
+                base_map.insert(k.clone(), v.clone());
+            }
+        }
+        base
+    }
+}
+
+#[async_trait]
+impl Backend for InnerTubeBackend {
+    async fn home(&self, chip_token: Option<&str>) -> Result<FeedPage> {
+        let body = if let Some(token) = chip_token {
+            self.make_body(json!({
+                "continuation": token
+            }))
+        } else {
+            self.make_body(json!({
+                "browseId": "FEwhat_to_watch"
+            }))
+        };
+
+        let val = self.post_endpoint("browse", body).await?;
+        let page = parse_feed_page(&val);
+        if page.items.is_empty() && chip_token.is_none() && self.auth.lock().unwrap().access_token.is_none() {
+            // Unauthenticated guest: feedNudgeRenderer returned 0 items. Fallback to trending search
+            return self.search("trending", &SearchFilters::default(), None).await;
+        }
+        Ok(page)
+    }
+
+    async fn continue_feed(&self, token: &str) -> Result<FeedPage> {
+        let body = self.make_body(json!({
+            "continuation": token
+        }));
+        let val = self.post_endpoint("browse", body).await?;
+        let page = parse_feed_page(&val);
+        Ok(page)
+    }
+
+    async fn subscriptions(&self) -> Result<FeedPage> {
+        let body = self.make_body(json!({
+            "browseId": "FEsubscriptions"
+        }));
+        let val = self.post_endpoint("browse", body).await?;
+        let page = parse_feed_page(&val);
+        Ok(page)
+    }
+
+    async fn history(&self) -> Result<FeedPage> {
+        let body = self.make_body(json!({
+            "browseId": "FEhistory"
+        }));
+        let val = self.post_endpoint("browse", body).await?;
+        let page = parse_feed_page(&val);
+        Ok(page)
+    }
+
+    async fn watch_later(&self) -> Result<FeedPage> {
+        let body = self.make_body(json!({
+            "browseId": "VLWL"
+        }));
+        let val = self.post_endpoint("browse", body).await?;
+        let page = parse_feed_page(&val);
+        Ok(page)
+    }
+
+    async fn playlists(&self) -> Result<FeedPage> {
+        let body = self.make_body(json!({
+            "browseId": "FElibrary"
+        }));
+        let val = self.post_endpoint("browse", body).await?;
+        let page = parse_feed_page(&val);
+        Ok(page)
+    }
+
+    async fn playlist(&self, id: &str) -> Result<FeedPage> {
+        let browse_id = if id.starts_with("VL") {
+            id.to_string()
+        } else {
+            format!("VL{id}")
+        };
+        let body = self.make_body(json!({
+            "browseId": browse_id
+        }));
+        let val = self.post_endpoint("browse", body).await?;
+        let page = parse_feed_page(&val);
+        Ok(page)
+    }
+
+    async fn search(&self, q: &str, _filters: &SearchFilters, token: Option<&str>) -> Result<FeedPage> {
+        let body = if let Some(tok) = token {
+            self.make_body(json!({
+                "continuation": tok
+            }))
+        } else {
+            self.make_body(json!({
+                "query": q
+            }))
+        };
+
+        let val = self.post_endpoint("search", body).await?;
+        let mut page = parse_feed_page(&val);
+
+        if token.is_none() {
+            if let Some(ref cont_token) = page.continuation {
+                let cont_body = self.make_body(json!({
+                    "continuation": cont_token
+                }));
+                if let Ok(next_val) = self.post_endpoint("search", cont_body).await {
+                    let next_page = parse_feed_page(&next_val);
+                    page.items.extend(next_page.items);
+                    page.continuation = next_page.continuation;
+                }
+            }
+        }
+
+        Ok(page)
+    }
+
+    async fn suggest(&self, q: &str) -> Result<Vec<String>> {
+        let url = format!(
+            "https://suggestqueries-clients6.youtube.com/complete/search?client=youtube&ds=yt&q={}",
+            urlencoding::encode(q)
+        );
+
+        let resp = self.client.get(&url).send().await?;
+        let text = resp.text().await?;
+
+        // Format is typically: window.google.ac.h(["query",[["sugg1",0,[...]],["sugg2",0]]])
+        // Or pure JSON if client=youtube-reduced
+        let mut results = Vec::new();
+        if let Some(start) = text.find('(') {
+            if let Some(end) = text.rfind(')') {
+                let json_slice = &text[start + 1..end];
+                if let Ok(v) = serde_json::from_str::<Value>(json_slice) {
+                    if let Some(suggestions) = v.get(1).and_then(|s| s.as_array()) {
+                        for item in suggestions {
+                            if let Some(s) = item.get(0).and_then(|t| t.as_str()) {
+                                results.push(s.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    async fn watch(&self, video_id: &str) -> Result<WatchData> {
+        let body = self.make_body(json!({
+            "videoId": video_id
+        }));
+        let val = self.post_endpoint("next", body).await?;
+        let mut watch_data = parse_watch_data(&val)?;
+
+        if watch_data.video.id.is_empty() {
+            watch_data.video.id = video_id.to_string();
+        }
+
+        // Fetch Return YouTube Dislike (RYD) statistics
+        if let Ok((likes, dislikes, rating)) = self.fetch_ryd_votes(video_id).await {
+            watch_data.likes = Some(format_metric(likes));
+            watch_data.dislikes = Some(format_metric(dislikes));
+            watch_data.rating = Some(rating);
+        }
+
+        // Prefetch initial comments batch if token exists
+        if let Some(ref c_tok) = watch_data.comments_token.clone() {
+            if let Ok(batch) = self.fetch_comments(c_tok).await {
+                watch_data.comments = batch.comments;
+                watch_data.comments_token = batch.continuation;
+            }
+        }
+
+        Ok(watch_data)
+    }
+
+    async fn channel(&self, id: &str, tab: ChannelTab) -> Result<FeedPage> {
+        let tab_param = match tab {
+            ChannelTab::Videos => "videos",
+            ChannelTab::Live => "streams",
+            ChannelTab::Playlists => "playlists",
+        };
+        let body = self.make_body(json!({
+            "browseId": id,
+            "params": tab_param
+        }));
+        let val = self.post_endpoint("browse", body).await?;
+        Ok(parse_feed_page(&val))
+    }
+
+    async fn live_chat(&self, token: &str) -> Result<ChatBatch> {
+        let body = self.make_body(json!({
+            "continuation": token
+        }));
+        let val = self.post_endpoint("live_chat/get_live_chat", body).await?;
+
+        let mut messages = Vec::new();
+        let mut next_token = None;
+        let mut poll_interval_ms = 3000;
+
+        if let Some(actions) = val.pointer("/continuationContents/liveChatContinuation/actions").and_then(|a| a.as_array()) {
+            for act in actions {
+                if let Some(renderer) = act.pointer("/addChatItemAction/item/liveChatTextMessageRenderer") {
+                    let id = renderer.get("id").and_then(|s| s.as_str()).unwrap_or("").to_string();
+                    let author = extract_text(renderer.get("authorName").unwrap_or(&Value::Null));
+                    let message = extract_text(renderer.get("message").unwrap_or(&Value::Null));
+                    let timestamp_usec = renderer.get("timestampUsec")
+                        .and_then(|s| s.as_str())
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    messages.push(ChatMessage {
+                        id,
+                        author,
+                        author_badges: Vec::new(),
+                        message,
+                        timestamp_usec,
+                    });
+                }
+            }
+        }
+
+        if let Some(cont) = val.pointer("/continuationContents/liveChatContinuation/continuations/0/timedContinuationData") {
+            if let Some(tok) = cont.get("continuation").and_then(|s| s.as_str()) {
+                next_token = Some(tok.to_string());
+            }
+            if let Some(ms) = cont.get("timeoutMs").and_then(|t| t.as_u64()) {
+                poll_interval_ms = ms;
+            }
+        }
+
+        Ok(ChatBatch {
+            messages,
+            next_token,
+            poll_interval_ms,
+        })
+    }
+
+    async fn ping_playback(&self, id: &str, cpn: &str) -> Result<()> {
+        let token = {
+            let guard = self.auth.lock().unwrap();
+            guard.access_token.clone()
+        };
+
+        if let Some(tok) = token {
+            let playback_url = format!(
+                "https://www.youtube.com/api/stats/playback?ns=yt&ver=2&docid={id}&cpn={cpn}"
+            );
+            let _ = self
+                .client
+                .get(&playback_url)
+                .header("Authorization", format!("Bearer {tok}"))
+                .header("User-Agent", "Mozilla/5.0")
+                .send()
+                .await;
+        }
+
+        Ok(())
+    }
+
+    async fn ping_watchtime(
+        &self,
+        id: &str,
+        cpn: &str,
+        st: f64,
+        et: f64,
+        cmt: f64,
+        is_final: bool,
+    ) -> Result<()> {
+        let token = {
+            let guard = self.auth.lock().unwrap();
+            guard.access_token.clone()
+        };
+
+        if let Some(tok) = token {
+            let final_flag = if is_final { "&final=1" } else { "" };
+            let watchtime_url = format!(
+                "https://www.youtube.com/api/stats/watchtime?ns=yt&ver=2&docid={id}&cpn={cpn}&st={st:.1}&et={et:.1}&cmt={cmt:.1}{final_flag}"
+            );
+            let _ = self
+                .client
+                .get(&watchtime_url)
+                .header("Authorization", format!("Bearer {tok}"))
+                .header("User-Agent", "Mozilla/5.0")
+                .send()
+                .await;
+        }
+
+        Ok(())
+    }
+
+    async fn mark_watched(&self, id: &str) -> Result<()> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let cpn = format!("{:016x}", now);
+        self.ping_playback(id, &cpn).await?;
+        self.ping_watchtime(id, &cpn, 0.0, 30.0, 30.0, true).await?;
+        Ok(())
+    }
+
+    async fn account_info(&self) -> Result<(String, String)> {
+        // Try TVHTML5 accounts_list
+        let tv_body = self.make_body(json!({
+            "accountReadMask": {
+                "returnOwner": true,
+                "returnBrandAccounts": true,
+                "returnPersonaAccounts": false
+            }
+        }));
+        if let Ok(val) = self.post_endpoint("account/accounts_list", tv_body).await {
+            if let Some(actions) = val.get("actions").and_then(|a| a.as_array()) {
+                for act in actions {
+                    if let Some(items) = act.pointer("/getMultiPageMenuAction/menu/multiPageMenuRenderer/sections/0/accountSectionRenderer/items").and_then(|i| i.as_array()) {
+                        for item in items {
+                            if let Some(acc) = item.get("accountItem") {
+                                let name = acc.pointer("/accountName/simpleText").and_then(|s| s.as_str()).unwrap_or("");
+                                let handle = acc.pointer("/channelHandle/simpleText").and_then(|s| s.as_str()).unwrap_or("");
+                                if !name.is_empty() {
+                                    return Ok((name.to_string(), handle.to_string()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback to account_menu
+        let body = self.make_body(json!({}));
+        let val = self.post_endpoint("account/account_menu", body).await?;
+
+        let header = val.pointer("/actions/0/openPopupAction/popup/multiPageMenuRenderer/header/activeAccountHeaderRenderer");
+        if let Some(h) = header {
+            let name = h
+                .pointer("/accountName/simpleText")
+                .and_then(|v| v.as_str())
+                .or_else(|| h.pointer("/accountName/runs/0/text").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            let handle = h
+                .pointer("/channelHandle/simpleText")
+                .and_then(|v| v.as_str())
+                .or_else(|| h.pointer("/channelHandle/runs/0/text").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            if !name.is_empty() || !handle.is_empty() {
+                return Ok((name, handle));
+            }
+        }
+
+        Err(anyhow!("No active account found in account menu"))
+    }
+
+    async fn like_video(&self, video_id: &str) -> Result<bool> {
+        let body = self.make_body(json!({
+            "target": {
+                "videoId": video_id
+            }
+        }));
+        let resp = self.post_endpoint("like/like", body).await?;
+        if let Some(mutations) = resp.pointer("/frameworkUpdates/entityBatchUpdate/mutations").and_then(|m| m.as_array()) {
+            for m in mutations {
+                if let Some(status) = m.pointer("/payload/likeStatusEntity/likeStatus").and_then(|s| s.as_str()) {
+                    return Ok(status == "LIKE");
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    async fn dislike_video(&self, video_id: &str) -> Result<bool> {
+        let body = self.make_body(json!({
+            "target": {
+                "videoId": video_id
+            }
+        }));
+        let resp = self.post_endpoint("like/dislike", body).await?;
+        if let Some(mutations) = resp.pointer("/frameworkUpdates/entityBatchUpdate/mutations").and_then(|m| m.as_array()) {
+            for m in mutations {
+                if let Some(status) = m.pointer("/payload/likeStatusEntity/likeStatus").and_then(|s| s.as_str()) {
+                    return Ok(status == "DISLIKE");
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    async fn remove_rating(&self, video_id: &str) -> Result<()> {
+        let body = self.make_body(json!({
+            "target": {
+                "videoId": video_id
+            }
+        }));
+        let _ = self.post_endpoint("like/removelike", body).await?;
+        Ok(())
+    }
+
+    async fn subscribe_channel(&self, channel_id: &str) -> Result<()> {
+        let body = self.make_body(json!({
+            "channelIds": [channel_id]
+        }));
+        let _ = self.post_endpoint("subscription/subscribe", body).await?;
+        Ok(())
+    }
+
+    async fn unsubscribe_channel(&self, channel_id: &str) -> Result<()> {
+        let body = self.make_body(json!({
+            "channelIds": [channel_id]
+        }));
+        let _ = self.post_endpoint("subscription/unsubscribe", body).await?;
+        Ok(())
+    }
+
+    async fn fetch_ryd_votes(&self, video_id: &str) -> Result<(u64, u64, f64)> {
+        let url = format!("https://returnyoutubedislikeapi.com/votes?videoId={video_id}");
+        let resp = self.client.get(&url).send().await?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("RYD returned HTTP {}", resp.status()));
+        }
+        let val: Value = resp.json().await?;
+        let likes = val.get("likes").and_then(|v| v.as_u64()).unwrap_or(0);
+        let dislikes = val.get("dislikes").and_then(|v| v.as_u64()).unwrap_or(0);
+        let rating = val.get("rating").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        Ok((likes, dislikes, rating))
+    }
+
+    async fn fetch_comments(&self, continuation: &str) -> Result<CommentsBatch> {
+        let body = self.make_body(json!({
+            "continuation": continuation
+        }));
+        let val = self.post_endpoint("next", body).await?;
+        Ok(parse_comments(&val))
+    }
+}
+
+fn format_metric(n: u64) -> String {
+    if n >= 1_000_000_000 {
+        format!("{:.1}B", n as f64 / 1_000_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
