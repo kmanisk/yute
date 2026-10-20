@@ -1,20 +1,23 @@
 use crate::async_runtime::spawn_task;
 use crate::player_embedded::EmbeddedPlayer;
+use crate::settings_view::SettingsViewWidget;
+use crate::thumbnail_loader::ThumbnailLoader;
 use crate::video_area::VideoArea;
+use crate::video_card::VideoCardWidget;
 use gtk4::gdk::Key;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
     Align, Application, ApplicationWindow, Box as GtkBox, Button, Entry, EventControllerKey,
-    Label, ListBox, ListBoxRow, Orientation, Paned, PolicyType, Scale, ScrolledWindow,
-    SelectionMode, Stack,
+    FlowBox, Label, Orientation, Paned, PolicyType, Scale, ScrolledWindow, SelectionMode,
+    Stack,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use ytui_core::backend::auth::AuthContext;
 use ytui_core::backend::innertube::InnerTubeBackend;
-use ytui_core::backend::models::{parse_duration_to_seconds, Card, LiveState, SearchFilters, VideoCard};
+use ytui_core::backend::models::{parse_duration_to_seconds, Card, SearchFilters, VideoCard, WatchData};
 use ytui_core::backend::ytdlp::YtDlpBackend;
 use ytui_core::backend::{Backend, BackendChain};
 use ytui_core::config::Config;
@@ -24,8 +27,10 @@ pub enum CurrentView {
     Home,
     Subscriptions,
     History,
+    Playlists,
     Search,
     Watch,
+    Settings,
 }
 
 pub struct AppState {
@@ -45,12 +50,13 @@ pub struct GuiAppInner {
     pub player: Arc<EmbeddedPlayer>,
     pub backend: Arc<dyn Backend>,
     pub state: Rc<RefCell<AppState>>,
+    pub thumbnail_loader: ThumbnailLoader,
+    pub config: Rc<RefCell<Config>>,
     #[allow(dead_code)]
     pub video_area: VideoArea,
     // UI elements
     pub main_stack: Stack,
-    pub feed_list_box: ListBox,
-    pub feed_scrolled: ScrolledWindow,
+    pub feed_flow_box: FlowBox,
     pub search_entry: Entry,
     pub status_label: Label,
     pub current_cards: Rc<RefCell<Vec<Card>>>,
@@ -58,11 +64,15 @@ pub struct GuiAppInner {
     pub watch_title: Label,
     pub watch_channel: Label,
     pub watch_meta: Label,
+    pub watch_likes_lbl: Label,
     pub watch_desc_box: GtkBox,
     pub watch_comments_box: GtkBox,
+    pub related_flow_box: FlowBox,
+    pub related_cards: Rc<RefCell<Vec<Card>>>,
     pub time_label: Label,
     pub seek_scale: Scale,
     pub play_pause_btn: Button,
+    pub speed_btn: Button,
     pub watch_paned: Paned,
 }
 
@@ -92,12 +102,14 @@ impl GuiApp {
 
         let player = Arc::new(EmbeddedPlayer::new(&cfg)?);
         let video_area = VideoArea::new(Arc::clone(&player));
+        let thumbnail_loader = ThumbnailLoader::default();
+        let config = Rc::new(RefCell::new(cfg));
 
         let window = ApplicationWindow::builder()
             .application(app)
-            .title("ytui - YouTube Client")
-            .default_width(1280)
-            .default_height(800)
+            .title("ytui - YouTube")
+            .default_width(1360)
+            .default_height(860)
             .build();
 
         let state = Rc::new(RefCell::new(AppState {
@@ -108,25 +120,23 @@ impl GuiApp {
         }));
 
         let search_entry = Entry::builder()
-            .placeholder_text("Search YouTube (Press / or Ctrl+L to focus)...")
+            .placeholder_text("Search YouTube (Press / or Ctrl+L)...")
             .hexpand(true)
             .build();
 
         let status_label = Label::builder().label("Ready").halign(Align::End).build();
 
-        let feed_list_box = ListBox::builder()
+        let feed_flow_box = FlowBox::builder()
             .selection_mode(SelectionMode::Single)
-            .show_separators(true)
-            .can_focus(true)
-            .focusable(true)
-            .build();
-
-        let feed_scrolled = ScrolledWindow::builder()
-            .hscrollbar_policy(PolicyType::Never)
-            .vscrollbar_policy(PolicyType::Automatic)
-            .hexpand(true)
-            .vexpand(true)
-            .child(&feed_list_box)
+            .homogeneous(true)
+            .min_children_per_line(1)
+            .max_children_per_line(6)
+            .column_spacing(16)
+            .row_spacing(18)
+            .margin_top(16)
+            .margin_bottom(24)
+            .margin_start(20)
+            .margin_end(20)
             .build();
 
         let main_stack = Stack::builder().hexpand(true).vexpand(true).build();
@@ -139,7 +149,7 @@ impl GuiApp {
 
         let watch_channel = Label::builder()
             .halign(Align::Start)
-            .css_classes(["dim-label"])
+            .css_classes(["title-4"])
             .build();
 
         let watch_meta = Label::builder()
@@ -147,14 +157,30 @@ impl GuiApp {
             .css_classes(["dim-label"])
             .build();
 
+        let watch_likes_lbl = Label::builder()
+            .label("Likes: -  |  Dislikes: -")
+            .css_classes(["yt-action-pill"])
+            .build();
+
         let watch_desc_box = GtkBox::builder()
             .orientation(Orientation::Vertical)
-            .spacing(4)
+            .spacing(6)
+            .css_classes(["yt-desc-box"])
             .build();
 
         let watch_comments_box = GtkBox::builder()
             .orientation(Orientation::Vertical)
-            .spacing(8)
+            .spacing(10)
+            .css_classes(["yt-comments-box"])
+            .build();
+
+        let related_flow_box = FlowBox::builder()
+            .selection_mode(SelectionMode::Single)
+            .homogeneous(true)
+            .min_children_per_line(1)
+            .max_children_per_line(1)
+            .column_spacing(8)
+            .row_spacing(10)
             .build();
 
         let time_label = Label::builder().label("0:00 / 0:00").build();
@@ -163,6 +189,7 @@ impl GuiApp {
         seek_scale.set_hexpand(true);
 
         let play_pause_btn = Button::with_label("Play");
+        let speed_btn = Button::with_label("1.0x");
 
         let watch_paned = Paned::builder()
             .orientation(Orientation::Horizontal)
@@ -175,21 +202,26 @@ impl GuiApp {
             player,
             backend,
             state,
+            thumbnail_loader,
+            config,
             video_area,
             main_stack,
-            feed_list_box,
-            feed_scrolled,
+            feed_flow_box,
             search_entry,
             status_label,
             current_cards: Rc::new(RefCell::new(Vec::new())),
             watch_title,
             watch_channel,
             watch_meta,
+            watch_likes_lbl,
             watch_desc_box,
             watch_comments_box,
+            related_flow_box,
+            related_cards: Rc::new(RefCell::new(Vec::new())),
             time_label,
             seek_scale,
             play_pause_btn,
+            speed_btn,
             watch_paned,
         });
 
@@ -208,35 +240,96 @@ impl GuiApp {
         // 1. Top Header Bar
         let header_bar = GtkBox::builder()
             .orientation(Orientation::Horizontal)
-            .spacing(8)
-            .margin_top(6)
-            .margin_bottom(6)
-            .margin_start(12)
-            .margin_end(12)
+            .spacing(12)
+            .margin_top(8)
+            .margin_bottom(8)
+            .margin_start(16)
+            .margin_end(16)
             .build();
 
-        let home_btn = Button::with_label("Home");
-        let subs_btn = Button::with_label("Subscriptions");
-        let hist_btn = Button::with_label("History");
+        // Brand Logo
+        let logo_box = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(6)
+            .valign(Align::Center)
+            .build();
+        let logo_badge = Label::builder().label("YT").css_classes(["yt-logo-badge"]).build();
+        let logo_text = Label::builder().label("ytui").css_classes(["yt-logo"]).build();
+        logo_box.append(&logo_badge);
+        logo_box.append(&logo_text);
+        header_bar.append(&logo_box);
 
-        header_bar.append(&home_btn);
-        header_bar.append(&subs_btn);
-        header_bar.append(&hist_btn);
-        header_bar.append(&self.inner.search_entry);
+        // Center Search Container
+        let search_container = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(6)
+            .hexpand(true)
+            .margin_start(40)
+            .margin_end(40)
+            .build();
+
+        search_container.append(&self.inner.search_entry);
+        let search_btn = Button::with_label("Search");
+        search_container.append(&search_btn);
+        header_bar.append(&search_container);
+
+        // Right status and Settings shortcut
         header_bar.append(&self.inner.status_label);
+        let settings_top_btn = Button::with_label("Settings");
+        header_bar.append(&settings_top_btn);
 
         root_box.append(&header_bar);
 
-        // 2. Feed Page Container
-        self.inner.main_stack.add_named(&self.inner.feed_scrolled, Some("feed"));
+        // Main Body Layout: Left Sidebar + Right Content Stack
+        let body_box = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .hexpand(true)
+            .vexpand(true)
+            .build();
 
-        // 3. Watch Page Container
+        // 2. Left Navigation Sidebar
+        let sidebar_box = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(6)
+            .width_request(190)
+            .margin_top(8)
+            .margin_start(8)
+            .margin_end(8)
+            .css_classes(["yt-sidebar"])
+            .build();
+
+        let home_btn = Button::builder().label("  Home").css_classes(["yt-nav-btn"]).halign(Align::Fill).build();
+        let subs_btn = Button::builder().label("  Subscriptions").css_classes(["yt-nav-btn"]).halign(Align::Fill).build();
+        let hist_btn = Button::builder().label("  History").css_classes(["yt-nav-btn"]).halign(Align::Fill).build();
+        let play_btn = Button::builder().label("  Playlists").css_classes(["yt-nav-btn"]).halign(Align::Fill).build();
+        let sett_btn = Button::builder().label("  Settings").css_classes(["yt-nav-btn"]).halign(Align::Fill).build();
+
+        sidebar_box.append(&home_btn);
+        sidebar_box.append(&subs_btn);
+        sidebar_box.append(&hist_btn);
+        sidebar_box.append(&play_btn);
+        sidebar_box.append(&sett_btn);
+
+        body_box.append(&sidebar_box);
+
+        // 3. Browse Feed Page (Responsive FlowBox grid)
+        let feed_scrolled = ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
+            .hexpand(true)
+            .vexpand(true)
+            .child(&self.inner.feed_flow_box)
+            .build();
+
+        self.inner.main_stack.add_named(&feed_scrolled, Some("feed"));
+
+        // 4. Watch Page Container
         let watch_box = GtkBox::builder()
             .orientation(Orientation::Vertical)
             .spacing(6)
-            .margin_start(12)
-            .margin_end(12)
-            .margin_bottom(8)
+            .margin_start(16)
+            .margin_end(16)
+            .margin_bottom(12)
             .build();
 
         let video_container = GtkBox::builder()
@@ -250,11 +343,12 @@ impl GuiApp {
         let controls_bar = GtkBox::builder()
             .orientation(Orientation::Horizontal)
             .spacing(8)
-            .margin_top(4)
+            .margin_top(6)
             .build();
 
         let seek_back_btn = Button::with_label("-5s");
         let seek_fwd_btn = Button::with_label("+5s");
+        let sub_cycle_btn = Button::with_label("CC");
         let fs_btn = Button::with_label("Fullscreen");
         let theater_btn = Button::with_label("Theater");
 
@@ -263,76 +357,109 @@ impl GuiApp {
         controls_bar.append(&seek_fwd_btn);
         controls_bar.append(&self.inner.seek_scale);
         controls_bar.append(&self.inner.time_label);
+        controls_bar.append(&self.inner.speed_btn);
+        controls_bar.append(&sub_cycle_btn);
         controls_bar.append(&theater_btn);
         controls_bar.append(&fs_btn);
 
         video_container.append(&controls_bar);
 
-        // Metadata box
+        // Primary Video Details Section
         let meta_box = GtkBox::builder()
             .orientation(Orientation::Vertical)
-            .spacing(4)
-            .margin_top(6)
+            .spacing(8)
+            .margin_top(8)
             .build();
+
         meta_box.append(&self.inner.watch_title);
-        meta_box.append(&self.inner.watch_channel);
+
+        // Channel + Actions Row
+        let channel_row = GtkBox::builder()
+            .orientation(Orientation::Horizontal)
+            .spacing(12)
+            .build();
+        channel_row.append(&self.inner.watch_channel);
+
+        let subscribe_btn = Button::builder().label("Subscribe").css_classes(["yt-sub-btn"]).build();
+        channel_row.append(&subscribe_btn);
+
+        let spacer = GtkBox::builder().hexpand(true).build();
+        channel_row.append(&spacer);
+
+        channel_row.append(&self.inner.watch_likes_lbl);
+        meta_box.append(&channel_row);
         meta_box.append(&self.inner.watch_meta);
 
-        let left_video_pane = GtkBox::builder()
-            .orientation(Orientation::Vertical)
-            .hexpand(true)
-            .vexpand(true)
-            .build();
-        left_video_pane.append(&video_container);
-        left_video_pane.append(&meta_box);
-
-        // Right details pane (Description + Comments)
-        let right_details_box = GtkBox::builder()
-            .orientation(Orientation::Vertical)
-            .spacing(8)
-            .width_request(400)
-            .margin_start(8)
-            .build();
-
+        // Description Section
         let desc_label_hdr = Label::builder()
             .label("Description")
             .halign(Align::Start)
-            .css_classes(["heading"])
+            .css_classes(["title-4"])
+            .margin_top(8)
             .build();
-        right_details_box.append(&desc_label_hdr);
+        meta_box.append(&desc_label_hdr);
+        meta_box.append(&self.inner.watch_desc_box);
 
-        let desc_scroll = ScrolledWindow::builder()
-            .hscrollbar_policy(PolicyType::Never)
-            .vscrollbar_policy(PolicyType::Automatic)
-            .height_request(240)
-            .child(&self.inner.watch_desc_box)
-            .build();
-        right_details_box.append(&desc_scroll);
-
+        // Comments Section
         let comments_label_hdr = Label::builder()
             .label("Comments")
             .halign(Align::Start)
-            .css_classes(["heading"])
-            .margin_top(8)
+            .css_classes(["title-4"])
+            .margin_top(12)
             .build();
-        right_details_box.append(&comments_label_hdr);
+        meta_box.append(&comments_label_hdr);
+        meta_box.append(&self.inner.watch_comments_box);
 
-        let comments_scroll = ScrolledWindow::builder()
+        let left_video_pane = ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
+            .hexpand(true)
+            .vexpand(true)
+            .child(&{
+                let vbox = GtkBox::builder().orientation(Orientation::Vertical).spacing(8).build();
+                vbox.append(&video_container);
+                vbox.append(&meta_box);
+                vbox
+            })
+            .build();
+
+        // Right details pane (Related Videos)
+        let right_details_box = GtkBox::builder()
+            .orientation(Orientation::Vertical)
+            .spacing(10)
+            .width_request(380)
+            .margin_start(12)
+            .build();
+
+        let related_label_hdr = Label::builder()
+            .label("Related Videos")
+            .halign(Align::Start)
+            .css_classes(["title-4"])
+            .build();
+        right_details_box.append(&related_label_hdr);
+
+        let related_scroll = ScrolledWindow::builder()
             .hscrollbar_policy(PolicyType::Never)
             .vscrollbar_policy(PolicyType::Automatic)
             .vexpand(true)
-            .child(&self.inner.watch_comments_box)
+            .child(&self.inner.related_flow_box)
             .build();
-        right_details_box.append(&comments_scroll);
+        right_details_box.append(&related_scroll);
 
         self.inner.watch_paned.set_start_child(Some(&left_video_pane));
         self.inner.watch_paned.set_end_child(Some(&right_details_box));
-        self.inner.watch_paned.set_position(820);
+        self.inner.watch_paned.set_position(900);
 
         watch_box.append(&self.inner.watch_paned);
         self.inner.main_stack.add_named(&watch_box, Some("watch"));
 
-        root_box.append(&self.inner.main_stack);
+        // 5. Settings Page Container
+        let settings_page = SettingsViewWidget::build(Rc::clone(&self.inner.config));
+        self.inner.main_stack.add_named(&settings_page, Some("settings"));
+
+        body_box.append(&self.inner.main_stack);
+        root_box.append(&body_box);
+
         self.inner.window.set_child(Some(&root_box));
 
         // Connect Navigation Buttons
@@ -351,24 +478,57 @@ impl GuiApp {
             app_hist.load_history();
         });
 
-        let app_search = self.clone();
-        self.inner.search_entry.connect_activate(move |entry| {
-            app_search.search_query(&entry.text());
+        let app_play = self.clone();
+        play_btn.connect_clicked(move |_| {
+            app_play.load_playlists();
         });
 
-        // Connect Row Activated in Feed List
-        let app_row = self.clone();
-        self.inner.feed_list_box.connect_row_activated(move |_, row| {
-            let idx = row.index() as usize;
-            if let Some(item) = app_row.inner.current_cards.borrow().get(idx).cloned() {
+        let app_sett = self.clone();
+        sett_btn.connect_clicked(move |_| {
+            app_sett.open_settings();
+        });
+
+        let app_sett_top = self.clone();
+        settings_top_btn.connect_clicked(move |_| {
+            app_sett_top.open_settings();
+        });
+
+        // Search submit (Enter in entry or Search button click)
+        let app_search1 = self.clone();
+        self.inner.search_entry.connect_activate(move |entry| {
+            app_search1.search_query(&entry.text());
+        });
+
+        let app_search2 = self.clone();
+        let search_ent = self.inner.search_entry.clone();
+        search_btn.connect_clicked(move |_| {
+            app_search2.search_query(&search_ent.text());
+        });
+
+        // Connect Row Activated in Feed Grid
+        let app_flow = self.clone();
+        self.inner.feed_flow_box.connect_child_activated(move |_, child| {
+            let idx = child.index() as usize;
+            if let Some(item) = app_flow.inner.current_cards.borrow().get(idx).cloned() {
                 match item {
                     Card::Video(v) => {
-                        app_row.open_watch_video(v);
+                        app_flow.open_watch_video(v);
                     }
                     Card::Playlist(p) => {
-                        app_row.load_playlist(&p.id);
+                        app_flow.load_playlist(&p.id);
                     }
                     _ => {}
+                }
+            }
+        });
+
+        // Connect Row Activated in Related Videos Grid
+        let app_rel = self.clone();
+        self.inner.related_flow_box.connect_child_activated(move |_, child| {
+            let idx = child.index() as usize;
+            if let Some(item) = app_rel.inner.related_cards.borrow().get(idx).cloned() {
+                if let Card::Video(v) = item {
+                    app_rel.open_watch_video(v);
                 }
             }
         });
@@ -395,6 +555,30 @@ impl GuiApp {
             let _ = p_seek.seek(val, false);
         });
 
+        let p_spd = Arc::clone(&self.inner.player);
+        let spd_lbl = self.inner.speed_btn.clone();
+        self.inner.speed_btn.connect_clicked(move |_| {
+            let cur = p_spd.status.lock().unwrap().speed;
+            let next_spd = if cur >= 2.0 {
+                0.75
+            } else if cur >= 1.5 {
+                2.0
+            } else if cur >= 1.25 {
+                1.5
+            } else if cur >= 1.0 {
+                1.25
+            } else {
+                1.0
+            };
+            let _ = p_spd.set_speed(next_spd);
+            spd_lbl.set_label(&format!("{next_spd:.2}x"));
+        });
+
+        let p_sub = Arc::clone(&self.inner.player);
+        sub_cycle_btn.connect_clicked(move |_| {
+            let _ = p_sub.cycle_subtitles();
+        });
+
         let paned_t = self.inner.watch_paned.clone();
         let state_t = Rc::clone(&self.inner.state);
         theater_btn.connect_clicked(move |_| {
@@ -402,10 +586,10 @@ impl GuiApp {
             st.is_theater = !st.is_theater;
             if st.is_theater {
                 paned_t.set_orientation(Orientation::Vertical);
-                paned_t.set_position(560);
+                paned_t.set_position(600);
             } else {
                 paned_t.set_orientation(Orientation::Horizontal);
-                paned_t.set_position(820);
+                paned_t.set_position(900);
             }
         });
 
@@ -429,7 +613,7 @@ impl GuiApp {
         let player_ref = Arc::clone(&self.inner.player);
         let stack_ref = self.inner.main_stack.clone();
         let search_ref = self.inner.search_entry.clone();
-        let list_ref = self.inner.feed_list_box.clone();
+        let flow_ref = self.inner.feed_flow_box.clone();
         let window_ref = self.inner.window.clone();
         let paned_ref = self.inner.watch_paned.clone();
         let app_shortcuts = self.clone();
@@ -447,7 +631,7 @@ impl GuiApp {
             // 2. In search entry, pass keys through except Escape
             if search_ref.has_focus() {
                 if key == Key::Escape {
-                    list_ref.grab_focus();
+                    flow_ref.grab_focus();
                     return glib::Propagation::Stop;
                 }
                 return glib::Propagation::Proceed;
@@ -463,10 +647,10 @@ impl GuiApp {
                         window_ref.unfullscreen();
                         return glib::Propagation::Stop;
                     }
-                    if st.view == CurrentView::Watch {
+                    if st.view == CurrentView::Watch || st.view == CurrentView::Settings {
                         st.view = CurrentView::Home;
                         stack_ref.set_visible_child_name("feed");
-                        list_ref.grab_focus();
+                        flow_ref.grab_focus();
                         return glib::Propagation::Stop;
                     }
                     glib::Propagation::Proceed
@@ -482,6 +666,14 @@ impl GuiApp {
                 }
                 Key::_3 => {
                     app_shortcuts.load_history();
+                    glib::Propagation::Stop
+                }
+                Key::_4 => {
+                    app_shortcuts.load_playlists();
+                    glib::Propagation::Stop
+                }
+                Key::_5 => {
+                    app_shortcuts.open_settings();
                     glib::Propagation::Stop
                 }
 
@@ -539,10 +731,10 @@ impl GuiApp {
                     st.is_theater = !st.is_theater;
                     if st.is_theater {
                         paned_ref.set_orientation(Orientation::Vertical);
-                        paned_ref.set_position(560);
+                        paned_ref.set_position(600);
                     } else {
                         paned_ref.set_orientation(Orientation::Horizontal);
-                        paned_ref.set_position(820);
+                        paned_ref.set_position(900);
                     }
                     glib::Propagation::Stop
                 }
@@ -560,7 +752,7 @@ impl GuiApp {
                     let _ = player_ref.cycle_subtitles();
                     glib::Propagation::Stop
                 }
-                // When in feed list: let Up, Down, PageUp, PageDown, Enter pass to ListBox!
+                // When in browse grid: arrow keys and Enter navigate and activate!
                 _ => glib::Propagation::Proceed,
             }
         });
@@ -599,133 +791,29 @@ impl GuiApp {
         });
     }
 
-    fn populate_feed(
-        feed_list: &ListBox,
+    fn populate_grid(
+        flow_box: &FlowBox,
         cards_store: &Rc<RefCell<Vec<Card>>>,
         items: Vec<Card>,
+        thumbnail_loader: &ThumbnailLoader,
+        compact: bool,
     ) {
-        while let Some(child) = feed_list.first_child() {
-            feed_list.remove(&child);
+        while let Some(child) = flow_box.first_child() {
+            flow_box.remove(&child);
         }
 
         let mut cards = Vec::new();
 
-        for item in items {
-            let row = ListBoxRow::builder()
-                .activatable(true)
-                .selectable(true)
-                .can_focus(true)
-                .focusable(true)
-                .build();
-
-            let card_box = GtkBox::builder()
-                .orientation(Orientation::Vertical)
-                .spacing(3)
-                .margin_top(8)
-                .margin_bottom(8)
-                .margin_start(16)
-                .margin_end(16)
-                .build();
-
-            match &item {
-                Card::Video(v) => {
-                    let mut prefix = String::new();
-                    if v.badges.iter().any(|b| b.eq_ignore_ascii_case("shorts")) {
-                        prefix.push_str("[SHORTS] ");
-                    }
-                    if v.live == LiveState::Live {
-                        prefix.push_str("[LIVE] ");
-                    }
-
-                    let title_lbl = Label::builder()
-                        .label(&format!("{prefix}{}", v.title))
-                        .wrap(true)
-                        .halign(Align::Start)
-                        .css_classes(["title-4"])
-                        .build();
-
-                    let mut meta = Vec::new();
-                    if !v.channel.is_empty() {
-                        meta.push(v.channel.clone());
-                    }
-                    if let Some(ref dur) = v.duration {
-                        if !dur.is_empty() {
-                            meta.push(dur.clone());
-                        }
-                    }
-                    if let Some(ref views) = v.views {
-                        if !views.is_empty() {
-                            meta.push(views.clone());
-                        }
-                    }
-                    if let Some(ref pub_time) = v.published {
-                        if !pub_time.is_empty() {
-                            meta.push(pub_time.clone());
-                        }
-                    }
-
-                    let meta_lbl = Label::builder()
-                        .label(&meta.join(" • "))
-                        .halign(Align::Start)
-                        .css_classes(["dim-label"])
-                        .build();
-
-                    card_box.append(&title_lbl);
-                    card_box.append(&meta_lbl);
-                }
-                Card::Playlist(p) => {
-                    let title_lbl = Label::builder()
-                        .label(&format!("[PLAYLIST] {}", p.title))
-                        .wrap(true)
-                        .halign(Align::Start)
-                        .css_classes(["title-4"])
-                        .build();
-
-                    let mut meta = Vec::new();
-                    if !p.channel.is_empty() {
-                        meta.push(p.channel.clone());
-                    }
-                    if let Some(ref count) = p.video_count {
-                        meta.push(format!("{count} videos"));
-                    }
-
-                    let meta_lbl = Label::builder()
-                        .label(&meta.join(" • "))
-                        .halign(Align::Start)
-                        .css_classes(["dim-label"])
-                        .build();
-
-                    card_box.append(&title_lbl);
-                    card_box.append(&meta_lbl);
-                }
-                Card::Channel(c) => {
-                    let title_lbl = Label::builder()
-                        .label(&format!("[CHANNEL] {}", c.title))
-                        .wrap(true)
-                        .halign(Align::Start)
-                        .css_classes(["title-4"])
-                        .build();
-
-                    let meta_lbl = Label::builder()
-                        .label(c.subscribers.as_deref().unwrap_or("Channel"))
-                        .halign(Align::Start)
-                        .css_classes(["dim-label"])
-                        .build();
-
-                    card_box.append(&title_lbl);
-                    card_box.append(&meta_lbl);
-                }
-            }
-
-            row.set_child(Some(&card_box));
-            feed_list.append(&row);
-            cards.push(item);
+        for item in &items {
+            let card_widget = VideoCardWidget::build(item, thumbnail_loader, compact);
+            flow_box.insert(&card_widget, -1);
+            cards.push(item.clone());
         }
 
         *cards_store.borrow_mut() = cards;
 
-        if let Some(first_row) = feed_list.row_at_index(0) {
-            feed_list.select_row(Some(&first_row));
+        if let Some(first_child) = flow_box.child_at_index(0) {
+            flow_box.select_child(&first_child);
         }
     }
 
@@ -736,8 +824,9 @@ impl GuiApp {
         self.inner.state.borrow_mut().is_loading = true;
 
         let backend = Arc::clone(&self.inner.backend);
-        let list_box = self.inner.feed_list_box.clone();
+        let flow_box = self.inner.feed_flow_box.clone();
         let cards_store = Rc::clone(&self.inner.current_cards);
+        let loader = self.inner.thumbnail_loader.clone();
         let status = self.inner.status_label.clone();
         let state = Rc::clone(&self.inner.state);
 
@@ -749,9 +838,9 @@ impl GuiApp {
                     Ok(page) => {
                         let count = page.items.len();
                         tracing::info!("Loaded {count} items for home feed");
-                        Self::populate_feed(&list_box, &cards_store, page.items);
+                        Self::populate_grid(&flow_box, &cards_store, page.items, &loader, false);
                         status.set_label(&format!("Home ({count} videos)"));
-                        list_box.grab_focus();
+                        flow_box.grab_focus();
                     }
                     Err(err) => {
                         tracing::error!("Failed to load home feed: {err:#}");
@@ -769,8 +858,9 @@ impl GuiApp {
         self.inner.state.borrow_mut().is_loading = true;
 
         let backend = Arc::clone(&self.inner.backend);
-        let list_box = self.inner.feed_list_box.clone();
+        let flow_box = self.inner.feed_flow_box.clone();
         let cards_store = Rc::clone(&self.inner.current_cards);
+        let loader = self.inner.thumbnail_loader.clone();
         let status = self.inner.status_label.clone();
         let state = Rc::clone(&self.inner.state);
 
@@ -782,9 +872,9 @@ impl GuiApp {
                     Ok(page) => {
                         let count = page.items.len();
                         tracing::info!("Loaded {count} items for subscriptions");
-                        Self::populate_feed(&list_box, &cards_store, page.items);
+                        Self::populate_grid(&flow_box, &cards_store, page.items, &loader, false);
                         status.set_label(&format!("Subscriptions ({count} videos)"));
-                        list_box.grab_focus();
+                        flow_box.grab_focus();
                     }
                     Err(err) => {
                         tracing::error!("Failed to load subscriptions: {err:#}");
@@ -802,8 +892,9 @@ impl GuiApp {
         self.inner.state.borrow_mut().is_loading = true;
 
         let backend = Arc::clone(&self.inner.backend);
-        let list_box = self.inner.feed_list_box.clone();
+        let flow_box = self.inner.feed_flow_box.clone();
         let cards_store = Rc::clone(&self.inner.current_cards);
+        let loader = self.inner.thumbnail_loader.clone();
         let status = self.inner.status_label.clone();
         let state = Rc::clone(&self.inner.state);
 
@@ -815,13 +906,47 @@ impl GuiApp {
                     Ok(page) => {
                         let count = page.items.len();
                         tracing::info!("Loaded {count} items for history");
-                        Self::populate_feed(&list_box, &cards_store, page.items);
+                        Self::populate_grid(&flow_box, &cards_store, page.items, &loader, false);
                         status.set_label(&format!("History ({count} videos)"));
-                        list_box.grab_focus();
+                        flow_box.grab_focus();
                     }
                     Err(err) => {
                         tracing::error!("Failed to load history: {err:#}");
                         status.set_label(&format!("History error: {err}"));
+                    }
+                }
+            },
+        );
+    }
+
+    pub fn load_playlists(&self) {
+        self.inner.state.borrow_mut().view = CurrentView::Playlists;
+        self.inner.main_stack.set_visible_child_name("feed");
+        self.inner.status_label.set_label("Loading Playlists...");
+        self.inner.state.borrow_mut().is_loading = true;
+
+        let backend = Arc::clone(&self.inner.backend);
+        let flow_box = self.inner.feed_flow_box.clone();
+        let cards_store = Rc::clone(&self.inner.current_cards);
+        let loader = self.inner.thumbnail_loader.clone();
+        let status = self.inner.status_label.clone();
+        let state = Rc::clone(&self.inner.state);
+
+        spawn_task(
+            async move { backend.playlists().await },
+            move |result| {
+                state.borrow_mut().is_loading = false;
+                match result {
+                    Ok(page) => {
+                        let count = page.items.len();
+                        tracing::info!("Loaded {count} items for playlists");
+                        Self::populate_grid(&flow_box, &cards_store, page.items, &loader, false);
+                        status.set_label(&format!("Playlists ({count})"));
+                        flow_box.grab_focus();
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to load playlists: {err:#}");
+                        status.set_label(&format!("Playlists error: {err}"));
                     }
                 }
             },
@@ -835,8 +960,9 @@ impl GuiApp {
         self.inner.state.borrow_mut().is_loading = true;
 
         let backend = Arc::clone(&self.inner.backend);
-        let list_box = self.inner.feed_list_box.clone();
+        let flow_box = self.inner.feed_flow_box.clone();
         let cards_store = Rc::clone(&self.inner.current_cards);
+        let loader = self.inner.thumbnail_loader.clone();
         let status = self.inner.status_label.clone();
         let state = Rc::clone(&self.inner.state);
         let pid = playlist_id.to_string();
@@ -850,9 +976,9 @@ impl GuiApp {
                     Ok(page) => {
                         let count = page.items.len();
                         tracing::info!("Loaded {count} items for playlist {pid}");
-                        Self::populate_feed(&list_box, &cards_store, page.items);
+                        Self::populate_grid(&flow_box, &cards_store, page.items, &loader, false);
                         status.set_label(&format!("Playlist ({count} videos)"));
-                        list_box.grab_focus();
+                        flow_box.grab_focus();
                     }
                     Err(err) => {
                         tracing::error!("Failed to load playlist: {err:#}");
@@ -875,8 +1001,9 @@ impl GuiApp {
         self.inner.state.borrow_mut().is_loading = true;
 
         let backend = Arc::clone(&self.inner.backend);
-        let list_box = self.inner.feed_list_box.clone();
+        let flow_box = self.inner.feed_flow_box.clone();
         let cards_store = Rc::clone(&self.inner.current_cards);
+        let loader = self.inner.thumbnail_loader.clone();
         let status = self.inner.status_label.clone();
         let state = Rc::clone(&self.inner.state);
         let query = q_trimmed.clone();
@@ -893,17 +1020,23 @@ impl GuiApp {
                     Ok(page) => {
                         let count = page.items.len();
                         tracing::info!("Loaded {count} results for '{query}'");
-                        Self::populate_feed(&list_box, &cards_store, page.items);
+                        Self::populate_grid(&flow_box, &cards_store, page.items, &loader, false);
                         status.set_label(&format!("Results for '{query}' ({count})"));
-                        list_box.grab_focus();
+                        flow_box.grab_focus();
                     }
                     Err(err) => {
-                        tracing::error!("Failed search for '{q_trimmed}': {err:#}");
+                        tracing::error!("Failed search for '{query}': {err:#}");
                         status.set_label(&format!("Search error: {err}"));
                     }
                 }
             },
         );
+    }
+
+    pub fn open_settings(&self) {
+        self.inner.state.borrow_mut().view = CurrentView::Settings;
+        self.inner.main_stack.set_visible_child_name("settings");
+        self.inner.status_label.set_label("Settings");
     }
 
     pub fn open_watch_video(&self, v: VideoCard) {
@@ -917,15 +1050,20 @@ impl GuiApp {
             v.duration.as_deref().unwrap_or(""),
             v.views.as_deref().unwrap_or("")
         ));
+        self.inner.watch_likes_lbl.set_label("Likes: ...  |  Dislikes: ...");
 
-        // Clear previous description and comments
+        // Clear previous description, comments, related videos
         while let Some(c) = self.inner.watch_desc_box.first_child() {
             self.inner.watch_desc_box.remove(&c);
         }
         while let Some(c) = self.inner.watch_comments_box.first_child() {
             self.inner.watch_comments_box.remove(&c);
         }
+        while let Some(c) = self.inner.related_flow_box.first_child() {
+            self.inner.related_flow_box.remove(&c);
+        }
 
+        // Start playback immediately in embedded libmpv
         let _ = self.inner.player.load_video(v.clone(), None);
 
         let b = Arc::clone(&self.inner.backend);
@@ -934,26 +1072,47 @@ impl GuiApp {
         let v_dur = v.duration.clone();
         let v_vw = v.views.clone();
         let wm = self.inner.watch_meta.clone();
+        let wlikes = self.inner.watch_likes_lbl.clone();
         let wdesc = self.inner.watch_desc_box.clone();
         let wcomm = self.inner.watch_comments_box.clone();
+        let related_flow = self.inner.related_flow_box.clone();
+        let related_store = Rc::clone(&self.inner.related_cards);
+        let loader = self.inner.thumbnail_loader.clone();
 
         spawn_task(
             async move { b.watch(&vid).await },
-            move |result| {
+            move |result: Result<WatchData, anyhow::Error>| {
                 if let Ok(watch_data) = result {
                     let likes = watch_data.likes.as_deref().unwrap_or("-");
                     let dislikes = watch_data.dislikes.as_deref().unwrap_or("-");
                     wm.set_label(&format!(
-                        "{} • {}  |  Likes: {}  Dislikes: {}",
+                        "{} • {}",
                         v_dur.as_deref().unwrap_or(""),
-                        v_vw.as_deref().unwrap_or(""),
-                        likes,
-                        dislikes
+                        v_vw.as_deref().unwrap_or("")
                     ));
+                    wlikes.set_label(&format!("Likes: {likes}  |  Dislikes: {dislikes}"));
 
-                    // Render Description with clickable timestamps
+                    // 1. Render Description with clickable timestamps and chapters
                     while let Some(c) = wdesc.first_child() {
                         wdesc.remove(&c);
+                    }
+
+                    // Chapters header if available
+                    if !watch_data.chapters.is_empty() {
+                        let ch_box = GtkBox::builder().orientation(Orientation::Horizontal).spacing(6).build();
+                        for (sec, title) in &watch_data.chapters {
+                            let ch_btn = Button::builder()
+                                .label(&format!("{sec}s: {title}"))
+                                .css_classes(["flat", "accent"])
+                                .build();
+                            let p_ch = Arc::clone(&p);
+                            let s_pos = *sec as f64;
+                            ch_btn.connect_clicked(move |_| {
+                                let _ = p_ch.seek(s_pos, false);
+                            });
+                            ch_box.append(&ch_btn);
+                        }
+                        wdesc.append(&ch_box);
                     }
 
                     for line in watch_data.description.lines() {
@@ -995,18 +1154,66 @@ impl GuiApp {
                         wdesc.append(&line_box);
                     }
 
-                    // Render Comments
+                    // 2. Render Comments
                     while let Some(c) = wcomm.first_child() {
                         wcomm.remove(&c);
                     }
                     for comment in &watch_data.comments {
-                        let c_lbl = Label::builder()
-                            .label(&format!("{}: {}", comment.author, comment.text))
+                        let c_box = GtkBox::builder()
+                            .orientation(Orientation::Vertical)
+                            .spacing(2)
+                            .margin_top(4)
+                            .margin_bottom(6)
+                            .build();
+
+                        let auth_line = GtkBox::builder().orientation(Orientation::Horizontal).spacing(8).build();
+                        let a_lbl = Label::builder()
+                            .label(&comment.author)
+                            .halign(Align::Start)
+                            .css_classes(["yt-comment-author"])
+                            .build();
+                        auth_line.append(&a_lbl);
+
+                        if let Some(ref pub_time) = comment.published {
+                            let pub_lbl = Label::builder()
+                                .label(pub_time)
+                                .halign(Align::Start)
+                                .css_classes(["yt-meta"])
+                                .build();
+                            auth_line.append(&pub_lbl);
+                        }
+                        c_box.append(&auth_line);
+
+                        let text_lbl = Label::builder()
+                            .label(&comment.text)
                             .wrap(true)
                             .selectable(true)
                             .halign(Align::Start)
+                            .css_classes(["yt-comment-text"])
                             .build();
-                        wcomm.append(&c_lbl);
+                        c_box.append(&text_lbl);
+
+                        if let Some(ref likes) = comment.likes {
+                            let likes_lbl = Label::builder()
+                                .label(&format!("Likes: {likes}"))
+                                .halign(Align::Start)
+                                .css_classes(["yt-meta"])
+                                .build();
+                            c_box.append(&likes_lbl);
+                        }
+
+                        wcomm.append(&c_box);
+                    }
+
+                    // 3. Render Related Videos into right pane
+                    if !watch_data.up_next.is_empty() {
+                        Self::populate_grid(
+                            &related_flow,
+                            &related_store,
+                            watch_data.up_next,
+                            &loader,
+                            true,
+                        );
                     }
                 }
             },

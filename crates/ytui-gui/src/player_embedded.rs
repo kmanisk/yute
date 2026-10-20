@@ -126,7 +126,7 @@ impl EmbeddedPlayer {
         // Fetch SponsorBlock segments asynchronously
         let client = self.sponsor_client.clone();
         let tracker_ref = Arc::clone(&self.sponsor_tracker);
-        tokio::spawn(async move {
+        crate::async_runtime::runtime().spawn(async move {
             if let Ok(segments) = client.fetch_segments(&vid_id).await {
                 let mut guard = tracker_ref.lock().unwrap();
                 *guard = Some(SponsorBlockTracker::new(&vid_id, segments));

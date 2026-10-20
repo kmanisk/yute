@@ -3,16 +3,134 @@ pub mod async_runtime;
 mod gl_loader;
 mod player_embedded;
 mod render_context;
+mod settings_view;
+mod thumbnail_loader;
 mod video_area;
+mod video_card;
 
 use app::GuiApp;
+use gtk4::gdk::Display;
 use gtk4::prelude::*;
-use gtk4::Application;
+use gtk4::{Application, CssProvider, STYLE_PROVIDER_PRIORITY_APPLICATION};
 use std::cell::RefCell;
 use std::rc::Rc;
 use ytui_core::config::Config;
 
 const APP_ID: &str = "io.github.manisk.ytui_gui";
+
+const CSS_THEME: &str = r#"
+window {
+    background-color: #0f0f0f;
+    color: #f1f1f1;
+}
+
+.yt-sidebar {
+    background-color: #0f0f0f;
+    border-right: 1px solid #272727;
+}
+
+.yt-nav-btn {
+    padding: 10px 14px;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 10px;
+    background: transparent;
+    border: none;
+    color: #f1f1f1;
+}
+
+.yt-nav-btn:hover {
+    background-color: #272727;
+}
+
+.yt-logo {
+    font-size: 19px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: #ffffff;
+}
+
+.yt-logo-badge {
+    background-color: #ff0000;
+    color: #ffffff;
+    font-weight: bold;
+    font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.yt-card {
+    background-color: transparent;
+    border-radius: 12px;
+    padding: 6px;
+}
+
+.yt-card:hover {
+    background-color: #272727;
+}
+
+.yt-card:focus, .yt-card:focus-visible {
+    outline: 2px solid #3ea6ff;
+    outline-offset: 2px;
+}
+
+.yt-thumb-container {
+    border-radius: 10px;
+    background-color: #1a1a1a;
+}
+
+.yt-duration-badge {
+    background-color: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.yt-live-badge {
+    background-color: #cc0000;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.yt-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #f1f1f1;
+}
+
+.yt-meta {
+    font-size: 12px;
+    color: #aaaaaa;
+}
+
+.yt-desc-box {
+    background-color: #222222;
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.yt-sub-btn {
+    background-color: #cc0000;
+    color: #ffffff;
+    font-weight: bold;
+    border-radius: 18px;
+    padding: 6px 16px;
+}
+
+.yt-action-pill {
+    background-color: #272727;
+    color: #f1f1f1;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 18px;
+    padding: 6px 14px;
+}
+"#;
 
 fn init_logging() {
     let cache_dir = if let Some(runtime_dir) = std::env::var_os("XDG_CACHE_HOME") {
@@ -42,13 +160,26 @@ fn init_logging() {
     }
 }
 
+fn load_theme() {
+    let provider = CssProvider::new();
+    provider.load_from_data(CSS_THEME);
+    if let Some(display) = Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+    }
+}
+
 fn main() {
     unsafe {
         libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
     }
 
     init_logging();
-    let _ = async_runtime::runtime();
+    let rt = async_runtime::runtime();
+    let _rt_guard = rt.enter();
 
     let cfg = Config::load();
 
@@ -62,6 +193,8 @@ fn main() {
         unsafe {
             libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
         }
+        load_theme();
+
         match GuiApp::new(application, cfg_clone.clone()) {
             Ok(gui) => {
                 gui.present();
