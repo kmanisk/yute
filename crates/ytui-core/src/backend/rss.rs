@@ -61,6 +61,7 @@ impl RssBackend {
                     progress_pct: None,
                     live: LiveState::None,
                     badges: Vec::new(),
+                    resume_time_sec: None,
                 });
             }
         }

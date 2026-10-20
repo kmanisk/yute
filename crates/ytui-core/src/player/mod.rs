@@ -91,14 +91,20 @@ impl Player {
 
         self.current_video = Some(video);
 
+        let resume_sec = self.current_video.as_ref().and_then(|v| v.resolved_resume_sec());
+
         // If window player is already running, switch video via IPC loadfile replace
         if (active_mode == PlaybackMode::Window || active_mode == PlaybackMode::Auto)
             && self.is_alive()
         {
             if let Some(ref ipc) = self.ipc {
-                ipc.send(IpcCommand::LoadFile(target_url));
+                if let Some(start) = resume_sec {
+                    ipc.send(IpcCommand::LoadFileWithStart(target_url, start as f64));
+                } else {
+                    ipc.send(IpcCommand::LoadFile(target_url));
+                }
                 self.status.file_loaded = false;
-                self.status.time_pos = 0.0;
+                self.status.time_pos = resume_sec.unwrap_or(0) as f64;
                 self.status.stall_error = false;
                 return Ok(());
             }
@@ -160,14 +166,20 @@ impl Player {
                 .arg(format!("--hwdec={hwdec}"))
                 .arg("--vo=gpu-next")
                 .arg("--cache=yes")
-                .arg("--demuxer-max-bytes=300MiB")
-                .arg("--demuxer-max-back-bytes=150MiB")
-                .arg("--demuxer-readahead-secs=120")
-                .arg("--force-seekable=yes");
+                .arg("--demuxer-max-bytes=256MiB")
+                .arg("--demuxer-max-back-bytes=128MiB")
+                .arg("--demuxer-readahead-secs=45")
+                .arg("--demuxer-seekable-cache=yes")
+                .arg("--hr-seek=no");
 
             if !cfg.playback.osd_bar {
                 cmd.arg("--osd-bar=no");
             }
+        }
+
+        let resume_sec = self.current_video.as_ref().and_then(|v| v.resolved_resume_sec());
+        if let Some(start) = resume_sec {
+            cmd.arg(format!("--start={start}"));
         }
 
         let cookies_path = crate::config::resolve_path(&cfg.backend.cookies_file);
@@ -239,16 +251,22 @@ impl Player {
         cmd.arg(&vo_arg)
             .arg(format!("--hwdec={hwdec}"))
             .arg("--cache=yes")
-            .arg("--demuxer-max-bytes=300MiB")
-            .arg("--demuxer-max-back-bytes=150MiB")
-            .arg("--demuxer-readahead-secs=120")
-            .arg("--force-seekable=yes")
+            .arg("--demuxer-max-bytes=256MiB")
+            .arg("--demuxer-max-back-bytes=128MiB")
+            .arg("--demuxer-readahead-secs=45")
+            .arg("--demuxer-seekable-cache=yes")
+            .arg("--hr-seek=no")
             .arg(format!(
                 "--ytdl-format=bestvideo[height<={}]+bestaudio/best[height<={}]/best",
                 cfg.inline.max_height, cfg.inline.max_height
             ))
             .arg("--ytdl=yes")
             .arg("--ytdl-raw-options-append=no-playlist=");
+
+        let resume_sec = self.current_video.as_ref().and_then(|v| v.resolved_resume_sec());
+        if let Some(start) = resume_sec {
+            cmd.arg(format!("--start={start}"));
+        }
 
         for extra in &extra_vo {
             cmd.arg(extra);

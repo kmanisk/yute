@@ -21,6 +21,50 @@ pub struct VideoCard {
     pub progress_pct: Option<u8>,
     pub live: LiveState,
     pub badges: Vec<String>,
+    #[serde(default)]
+    pub resume_time_sec: Option<u64>,
+}
+
+impl VideoCard {
+    pub fn resolved_resume_sec(&self) -> Option<u64> {
+        if let Some(sec) = self.resume_time_sec {
+            if sec > 5 {
+                return Some(sec);
+            }
+        }
+        if let Some(pct) = self.progress_pct {
+            if pct > 2 && pct < 95 {
+                if let Some(ref dur) = self.duration {
+                    if let Some(total_sec) = parse_duration_to_seconds(dur) {
+                        let sec = (total_sec as f64 * (pct as f64 / 100.0)) as u64;
+                        if sec > 5 {
+                            return Some(sec);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+pub fn parse_duration_to_seconds(s: &str) -> Option<u64> {
+    let parts: Vec<&str> = s.split(':').collect();
+    match parts.len() {
+        1 => parts[0].trim().parse::<u64>().ok(),
+        2 => {
+            let mins = parts[0].trim().parse::<u64>().ok()?;
+            let secs = parts[1].trim().parse::<u64>().ok()?;
+            Some(mins * 60 + secs)
+        }
+        3 => {
+            let hours = parts[0].trim().parse::<u64>().ok()?;
+            let mins = parts[1].trim().parse::<u64>().ok()?;
+            let secs = parts[2].trim().parse::<u64>().ok()?;
+            Some(hours * 3600 + mins * 60 + secs)
+        }
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,6 +75,8 @@ pub struct PlaylistCard {
     pub video_count: Option<String>,
     pub thumb_url: String,
     pub is_mix: bool,
+    #[serde(default)]
+    pub first_video_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

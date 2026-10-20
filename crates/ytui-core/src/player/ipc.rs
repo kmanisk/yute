@@ -63,6 +63,7 @@ pub struct PlaybackStatus {
 #[allow(dead_code)]
 pub enum IpcCommand {
     LoadFile(String),
+    LoadFileWithStart(String, f64),
     TogglePause,
     Play,
     Pause,
@@ -184,6 +185,16 @@ impl MpvIpc {
                                 last_adv_time = std::time::Instant::now();
                                 log_ipc_event(&format!("Command: loadfile replace {url}"));
                                 json!({ "command": ["loadfile", url, "replace"] })
+                            }
+                            IpcCommand::LoadFileWithStart(url, start) => {
+                                status.file_loaded = false;
+                                status.time_pos = start;
+                                status.cache_duration = 0.0;
+                                status.stall_error = false;
+                                prev_time_pos = -1.0;
+                                last_adv_time = std::time::Instant::now();
+                                log_ipc_event(&format!("Command: loadfile replace {url} start={start}"));
+                                json!({ "command": ["loadfile", url, "replace", -1, format!("start={start}")] })
                             }
                             IpcCommand::TogglePause => json!({ "command": ["cycle", "pause"] }),
                             IpcCommand::Play => json!({ "command": ["set_property", "pause", false] }),

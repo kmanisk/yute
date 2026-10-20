@@ -30,6 +30,7 @@ fn create_mock_app() -> App {
             progress_pct: if i == 1 { Some(65) } else { None },
             live: if i == 2 { LiveState::Live } else { LiveState::None },
             badges: Vec::new(),
+            resume_time_sec: None,
         }));
     }
 
@@ -408,6 +409,7 @@ fn test_nav_history_stack_back_and_forward() {
             progress_pct: None,
             live: LiveState::None,
             badges: Vec::new(),
+            resume_time_sec: None,
         })
     };
 

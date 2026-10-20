@@ -138,6 +138,15 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
 
     let mut live = LiveState::None;
     let mut badges = Vec::new();
+    let is_short = v.pointer("/navigationEndpoint/reelWatchEndpoint").is_some()
+        || v.pointer("/thumbnailOverlays/0/thumbnailOverlayTimeStatusRenderer/icon/iconType")
+            .and_then(|s| s.as_str())
+            .map(|s| s.contains("SHORTS"))
+            .unwrap_or(false);
+    if is_short {
+        badges.push("SHORTS".to_string());
+    }
+
     if let Some(b_list) = v.get("badges").and_then(|b| b.as_array()) {
         for b in b_list {
             let label = b.get("metadataBadgeRenderer")
@@ -148,11 +157,15 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
                 live = LiveState::Live;
             } else if label.to_uppercase().contains("UPCOMING") {
                 live = LiveState::Upcoming;
-            } else if !label.is_empty() {
+            } else if !label.is_empty() && !badges.contains(&label) {
                 badges.push(label);
             }
         }
     }
+
+    let resume_time_sec = v.pointer("/navigationEndpoint/watchEndpoint/startTimeSeconds")
+        .or_else(|| v.pointer("/onTap/innertubeCommand/watchEndpoint/startTimeSeconds"))
+        .and_then(|s| s.as_u64());
 
     Some(VideoCard {
         id,
@@ -167,6 +180,7 @@ pub fn parse_video_renderer(v: &Value) -> Option<VideoCard> {
         progress_pct,
         live,
         badges,
+        resume_time_sec,
     })
 }
 
@@ -246,6 +260,11 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
         } else {
             stats.first().cloned()
         };
+        let first_video_id = v.pointer("/rendererContext/commandContext/onTap/innertubeCommand/watchEndpoint/videoId")
+            .or_else(|| v.pointer("/rendererContext/commandContext/onTap/innertubeCommand/watchPlaylistEndpoint/videoId"))
+            .or_else(|| v.pointer("/onTap/innertubeCommand/watchEndpoint/videoId"))
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
         Some(Card::Playlist(PlaylistCard {
             id,
             title,
@@ -253,8 +272,36 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
             video_count,
             thumb_url,
             is_mix,
+            first_video_id,
         }))
     } else {
+        let mut badges = Vec::new();
+        let is_short = content_type.contains("SHORT")
+            || v.pointer("/contentImage/thumbnailViewModel/overlays/0/thumbnailBottomOverlayViewModel/badges/0/thumbnailBadgeViewModel/icon/sources/0/clientResource/imageName")
+                .and_then(|s| s.as_str())
+                .map(|s| s.contains("SHORTS"))
+                .unwrap_or(false)
+            || v.pointer("/rendererContext/commandContext/onTap/innertubeCommand/reelWatchEndpoint").is_some();
+        if is_short {
+            badges.push("SHORTS".to_string());
+        }
+
+        let mut progress_pct = None;
+        if let Some(overlays) = v.pointer("/contentImage/thumbnailViewModel/overlays").and_then(|o| o.as_array()) {
+            for ov in overlays {
+                if let Some(resume) = ov.get("thumbnailOverlayResumePlaybackRenderer") {
+                    if let Some(pct) = resume.get("percentDurationWatched").and_then(|p| p.as_u64()) {
+                        progress_pct = Some(pct.min(100) as u8);
+                    }
+                }
+            }
+        }
+
+        let resume_time_sec = v.pointer("/rendererContext/commandContext/onTap/innertubeCommand/watchEndpoint/startTimeSeconds")
+            .or_else(|| v.pointer("/rendererContext/commandContext/onLongPress/innertubeCommand/showMenuCommand/menu/menuRenderer/items/0/menuNavigationItemRenderer/navigationEndpoint/watchEndpoint/startTimeSeconds"))
+            .or_else(|| v.pointer("/onTap/innertubeCommand/watchEndpoint/startTimeSeconds"))
+            .and_then(|s| s.as_u64());
+
         Some(Card::Video(VideoCard {
             id,
             title,
@@ -265,9 +312,10 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
             views: stats.first().cloned(),
             published: if stats.len() > 1 { Some(stats[1].clone()) } else { None },
             thumb_url,
-            progress_pct: None,
+            progress_pct,
             live: LiveState::None,
-            badges: Vec::new(),
+            badges,
+            resume_time_sec,
         }))
     }
 }
@@ -316,6 +364,7 @@ pub fn parse_shorts_lockup_view_model(v: &Value) -> Option<Card> {
         progress_pct: None,
         live: LiveState::None,
         badges: vec!["SHORTS".to_string()],
+        resume_time_sec: None,
     }))
 }
 
@@ -353,6 +402,7 @@ pub fn parse_reel_item_renderer(v: &Value) -> Option<Card> {
         progress_pct: None,
         live: LiveState::None,
         badges: vec!["SHORTS".to_string()],
+        resume_time_sec: None,
     }))
 }
 
@@ -372,6 +422,10 @@ pub fn parse_playlist_renderer(v: &Value) -> Option<PlaylistCard> {
         .unwrap_or_default();
     let is_mix = id.starts_with("RD") || title.to_lowercase().contains("mix");
 
+    let first_video_id = v.pointer("/navigationEndpoint/watchEndpoint/videoId")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+
     Some(PlaylistCard {
         id,
         title,
@@ -379,6 +433,7 @@ pub fn parse_playlist_renderer(v: &Value) -> Option<PlaylistCard> {
         video_count,
         thumb_url,
         is_mix,
+        first_video_id,
     })
 }
 
@@ -428,6 +483,7 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             video_count: None,
             thumb_url,
             is_mix,
+            first_video_id: video_id.map(|s| s.to_string()),
         }));
     }
 
@@ -495,6 +551,21 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             .or_else(|| v.pointer("/header/tileHeaderRenderer/badgeText"))
             .map(extract_text)
             .filter(|s| !s.is_empty());
+
+        let mut progress_pct = None;
+        if let Some(overlays) = v.pointer("/header/tileHeaderRenderer/thumbnailOverlays").and_then(|o| o.as_array()) {
+            for ov in overlays {
+                if let Some(resume) = ov.get("thumbnailOverlayResumePlaybackRenderer") {
+                    if let Some(pct) = resume.get("percentDurationWatched").and_then(|p| p.as_u64()) {
+                        progress_pct = Some(pct.min(100) as u8);
+                    }
+                }
+            }
+        }
+
+        let resume_time_sec = v.pointer("/onTap/innertubeCommand/watchEndpoint/startTimeSeconds")
+            .and_then(|s| s.as_u64());
+
         let mut badges = Vec::new();
         if is_shorts {
             badges.push("SHORTS".to_string());
@@ -509,9 +580,10 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             views,
             published,
             thumb_url,
-            progress_pct: None,
+            progress_pct,
             live: LiveState::None,
             badges,
+            resume_time_sec,
         }));
     }
 
@@ -707,6 +779,7 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
             progress_pct: None,
             live: LiveState::None,
             badges: Vec::new(),
+            resume_time_sec: None,
         });
     }
 
@@ -763,6 +836,7 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
             progress_pct: None,
             live: if is_live { LiveState::Live } else { LiveState::None },
             badges: Vec::new(),
+            resume_time_sec: None,
         });
     }
 
@@ -789,7 +863,40 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
                 progress_pct: None,
                 live: LiveState::None,
                 badges: Vec::new(),
+                resume_time_sec: None,
             });
+        }
+    }
+
+    // Look for description in engagementPanels (TVHTML5 structuredDescriptionContentRenderer)
+    if description.is_empty() {
+        if let Some(panels) = val.get("engagementPanels").and_then(|p| p.as_array()) {
+            for p in panels {
+                if let Some(items) = p.pointer("/engagementPanelSectionListRenderer/content/structuredDescriptionContentRenderer/items").and_then(|i| i.as_array()) {
+                    for it in items {
+                        if let Some(body) = it.pointer("/expandableVideoDescriptionBodyRenderer/descriptionBodyText") {
+                            let d = extract_text(body);
+                            if !d.is_empty() {
+                                description = d;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if !description.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+
+    if description.is_empty() {
+        if let Some(vm) = val.pointer("/contents/singleColumnWatchNextResults/results/results/contents/0/itemSectionRenderer/contents/0/videoMetadataRenderer") {
+            if let Some(d) = vm.get("description").or_else(|| vm.get("attributedDescription")).map(extract_text) {
+                if !d.is_empty() {
+                    description = d;
+                }
+            }
         }
     }
 
@@ -883,6 +990,7 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
         progress_pct: None,
         live: LiveState::None,
         badges: Vec::new(),
+        resume_time_sec: None,
     };
 
     Ok(WatchData {

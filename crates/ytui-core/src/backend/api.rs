@@ -186,6 +186,7 @@ impl Backend for ApiBackend {
                     video_count,
                     thumb_url,
                     is_mix: false,
+                    first_video_id: None,
                 }));
             }
         }
@@ -227,6 +228,7 @@ impl Backend for ApiBackend {
                         progress_pct: None,
                         live: LiveState::None,
                         badges: Vec::new(),
+                        resume_time_sec: None,
                     }));
                 }
             }
@@ -275,6 +277,7 @@ impl Backend for ApiBackend {
                         progress_pct: None,
                         live: LiveState::None,
                         badges: Vec::new(),
+                        resume_time_sec: None,
                     }));
                 }
             }
@@ -318,6 +321,7 @@ impl Backend for ApiBackend {
             progress_pct: None,
             live: LiveState::None,
             badges: Vec::new(),
+            resume_time_sec: None,
         };
 
         Ok(WatchData {

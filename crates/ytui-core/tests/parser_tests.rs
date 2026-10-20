@@ -432,4 +432,86 @@ fn test_parse_comments() {
     assert_eq!(batch.continuation.as_deref(), Some("continuation_comments_page_2"));
 }
 
+#[test]
+fn test_resume_time_calculation_and_resolution() {
+    use ytui_core::backend::models::VideoCard;
+
+    let mut vid = VideoCard {
+        id: "test1".to_string(),
+        title: "Test".to_string(),
+        channel: "Chan".to_string(),
+        channel_id: None,
+        verified: false,
+        duration: Some("10:00".to_string()),
+        views: None,
+        published: None,
+        thumb_url: "".to_string(),
+        progress_pct: Some(50),
+        live: LiveState::None,
+        badges: vec![],
+        resume_time_sec: None,
+    };
+
+    // 50% of 10:00 (600s) = 300s
+    assert_eq!(vid.resolved_resume_sec(), Some(300));
+
+    // Explicit resume_time_sec overrides progress_pct calculation
+    vid.resume_time_sec = Some(420);
+    assert_eq!(vid.resolved_resume_sec(), Some(420));
+}
+
+#[test]
+fn test_parse_structured_description_content_renderer() {
+    let raw = serde_json::json!({
+        "engagementPanels": [
+            {
+                "engagementPanelSectionListRenderer": {
+                    "panelIdentifier": "engagement-panel-structured-description",
+                    "content": {
+                        "structuredDescriptionContentRenderer": {
+                            "items": [
+                                {
+                                    "videoDescriptionHeaderRenderer": {
+                                        "title": { "runs": [{ "text": "Header" }] }
+                                    }
+                                },
+                                {
+                                    "expandableVideoDescriptionBodyRenderer": {
+                                        "descriptionBodyText": {
+                                            "runs": [
+                                                { "text": "Detailed tracklist and links\nhttps://example.com" }
+                                            ]
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        ]
+    });
+
+    let watch = parse_watch_data(&raw).expect("watch data parsed");
+    assert_eq!(watch.description, "Detailed tracklist and links\nhttps://example.com");
+}
+
+#[test]
+fn test_shorts_badge_detection() {
+    use ytui_core::backend::parse::parse_video_renderer;
+
+    let raw = serde_json::json!({
+        "videoId": "short123",
+        "title": { "runs": [{ "text": "Crazy Quick Short" }] },
+        "navigationEndpoint": {
+            "reelWatchEndpoint": {
+                "videoId": "short123"
+            }
+        }
+    });
+
+    let card = parse_video_renderer(&raw).expect("parsed video renderer");
+    assert!(card.badges.contains(&"SHORTS".to_string()));
+}
+
 

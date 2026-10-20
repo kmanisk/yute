@@ -35,15 +35,16 @@ impl MpvProfile {
             hwdec={hwdec_str}\n\
             vo=gpu-next\n\
             cache=yes\n\
-            demuxer-max-bytes=512MiB\n\
-            demuxer-max-back-bytes=256MiB\n\
-            demuxer-readahead-secs=300\n\
+            demuxer-max-bytes=256MiB\n\
+            demuxer-max-back-bytes=128MiB\n\
+            demuxer-readahead-secs=45\n\
+            demuxer-seekable-cache=yes\n\
+            hr-seek=no\n\
+            save-position-on-quit=yes\n\
             stream-buffer-size=4MiB\n\
             network-timeout=15\n\
-            force-seekable=yes\n\
             ytdl-raw-options-append=no-playlist=\n\
             ytdl-raw-options-append=concurrent-fragments=4\n\
-            ytdl-raw-options-append=buffer-size=16k\n\
             sub-auto=fuzzy\n\
             sub-visibility=yes\n\
             slang=en,eng,en-US,en-GB,hi,hin\n\

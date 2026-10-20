@@ -52,6 +52,7 @@ pub fn scan_local_videos(dirs: &[String]) -> FeedPage {
             progress_pct: None,
             live: LiveState::None,
             badges: vec!["LOCAL".to_string()],
+            resume_time_sec: None,
         }));
     }
 

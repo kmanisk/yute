@@ -1019,15 +1019,17 @@ fn play_selected_card(app: &mut App, mode: Option<PlaybackMode>, tx: Sender<AppE
         }
         Card::Playlist(p) => {
             if p.is_mix {
-                let seed_id = if p.id.starts_with("RDMM") && p.id.len() >= 15 {
-                    Some(&p.id[4..15])
-                } else if p.id.starts_with("RDAMVM") && p.id.len() >= 17 {
-                    Some(&p.id[6..17])
-                } else if p.id.starts_with("RD") && p.id.len() >= 13 {
-                    Some(&p.id[2..13])
-                } else {
-                    None
-                };
+                let seed_id = p.first_video_id.as_deref().or_else(|| {
+                    if p.id.starts_with("RDMM") && p.id.len() >= 15 {
+                        Some(&p.id[4..15])
+                    } else if p.id.starts_with("RDAMVM") && p.id.len() >= 17 {
+                        Some(&p.id[6..17])
+                    } else if p.id.starts_with("RD") && p.id.len() == 13 {
+                        Some(&p.id[2..13])
+                    } else {
+                        None
+                    }
+                });
 
                 if let Some(vid) = seed_id {
                     let v = VideoCard {
@@ -1043,10 +1045,11 @@ fn play_selected_card(app: &mut App, mode: Option<PlaybackMode>, tx: Sender<AppE
                         progress_pct: None,
                         live: LiveState::None,
                         badges: Vec::new(),
+                        resume_time_sec: None,
                     };
                     app.status_text = format!("Launching mix seed '{}'...", v.title);
                     let _ = app.player.play_video(v, mode, &app.config);
-                    app.watch_tracker = Some(ytui_core::player::tracking::WatchTracker::new(&vid));
+                    app.watch_tracker = Some(ytui_core::player::tracking::WatchTracker::new(vid));
                     if mode != Some(PlaybackMode::Inline) {
                         app.set_screen(Screen::Watch);
                         trigger_watch_fetch(app, tx, vid.to_string());

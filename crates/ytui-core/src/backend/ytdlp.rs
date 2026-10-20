@@ -125,6 +125,7 @@ impl YtDlpBackend {
                     video_count,
                     thumb_url,
                     is_mix,
+                    first_video_id: None,
                 }));
                 continue;
             }
@@ -158,6 +159,7 @@ impl YtDlpBackend {
                 progress_pct: None,
                 live: LiveState::None,
                 badges: Vec::new(),
+                resume_time_sec: None,
             }));
         }
 
@@ -280,6 +282,7 @@ impl Backend for YtDlpBackend {
             progress_pct: None,
             live: LiveState::None,
             badges: Vec::new(),
+            resume_time_sec: None,
         };
 
         Ok(WatchData {
