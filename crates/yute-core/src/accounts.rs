@@ -517,3 +517,21 @@ impl std::fmt::Display for AccountCancelled {
     }
 }
 impl std::error::Error for AccountCancelled {}
+
+#[cfg(test)]
+mod anonymous_tests {
+    use crate::backend::{auth::AuthContext, innertube::InnerTubeBackend, Backend, BackendChain};
+    #[tokio::test]
+    async fn anonymous_libraries_return_without_network_and_have_no_credentials() {
+        let auth = AuthContext::default();
+        assert!(auth.access_token.is_none() && auth.cookie_header.is_none());
+        let chain = BackendChain::new(vec![Box::new(InnerTubeBackend::new(auth))]);
+        assert!(chain.is_anonymous());
+        assert!(chain.subscriptions().await.unwrap().items.is_empty());
+        assert!(chain.history().await.unwrap().items.is_empty());
+        assert!(chain.watch_later().await.unwrap().items.is_empty());
+        assert!(chain.playlists().await.unwrap().items.is_empty());
+        assert!(chain.playlist("LL").await.unwrap().items.is_empty());
+        assert_eq!(crate::config::Config::default().backend.auth, "guest");
+    }
+}

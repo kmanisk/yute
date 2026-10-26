@@ -103,14 +103,10 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             crate::app::Screen::History => "history",
             _ => "results",
         };
-        let msg = if app.is_loading {
+        let msg = if app.anonymous_library() {
+            format!("Sign in to view {route}.\nSign in with :account add")
+        } else if app.is_loading {
             format!("Loading {route}…")
-        } else if matches!(
-            app.screen,
-            crate::app::Screen::Subscriptions | crate::app::Screen::History
-        ) && app.config.backend.auth == "guest"
-        {
-            format!("Sign in to view {route}.\n:login")
         } else if app.status_text.contains("could not") || app.status_text.contains("failed") {
             format!("Could not load {route}.\nr retry · :account")
         } else {

@@ -199,6 +199,13 @@ impl AuthContext {
         self.auth_file_path = Some(auth_path.to_path_buf());
         match auth_mode {
             "guest" => {
+                self.auth_file_path = None;
+                self.visitor_data = None;
+                self.page_id = None;
+                self.account_id = None;
+                self.needs_login = false;
+                self.sapisid = None;
+                self.token_expires_at = None;
                 self.access_token = None;
                 self.refresh_token = None;
                 self.cookies.clear();

@@ -169,6 +169,10 @@ impl InnerTubeBackend {
 
 #[async_trait]
 impl Backend for InnerTubeBackend {
+    fn is_anonymous(&self) -> bool {
+        let auth = self.auth.lock().unwrap();
+        auth.access_token.is_none() && auth.refresh_token.is_none() && auth.cookie_header.is_none()
+    }
     async fn home(&self, chip_token: Option<&str>) -> Result<FeedPage> {
         let body = if let Some(token) = chip_token {
             self.make_body(json!({
@@ -237,6 +241,9 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn subscriptions(&self) -> Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let body = self.make_body(json!({
             "browseId": "FEsubscriptions"
         }));
@@ -246,6 +253,9 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn history(&self) -> Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let body = self.make_body(json!({
             "browseId": "FEhistory"
         }));
@@ -255,6 +265,9 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn watch_later(&self) -> Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let body = self.make_body(json!({
             "browseId": "VLWL"
         }));
@@ -286,6 +299,9 @@ impl Backend for InnerTubeBackend {
         }
     }
     async fn playlists(&self) -> Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let body = self.make_body(json!({
             "browseId": "FElibrary"
         }));
@@ -295,6 +311,9 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn playlist(&self, id: &str) -> Result<FeedPage> {
+        if self.is_anonymous() && matches!(id, "LL" | "WL" | "VLLL" | "VLWL") {
+            return Ok(FeedPage::default());
+        }
         if id.starts_with("RD") {
             let mut body = self.make_body(json!({"playlistId":id,"playlistIndex":0}));
             if let Some(seed) = crate::backend::models::mix_seed_video_id(id) {

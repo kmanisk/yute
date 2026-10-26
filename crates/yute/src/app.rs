@@ -424,6 +424,17 @@ impl App {
         }
     }
 
+    pub fn anonymous_library(&self) -> bool {
+        self.account_store.active_id() == yute_core::accounts::ANONYMOUS
+            && matches!(
+                self.screen,
+                Screen::Subscriptions
+                    | Screen::History
+                    | Screen::Liked
+                    | Screen::WatchLater
+                    | Screen::Playlists
+            )
+    }
     pub fn is_authenticated(&self) -> bool {
         let auth = self.auth.lock().unwrap();
         let now = std::time::SystemTime::now()

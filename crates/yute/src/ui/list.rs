@@ -14,7 +14,9 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
 
     let total_items = app.filtered_items().len();
     if total_items == 0 {
-        let msg = if app.is_loading {
+        let msg = if app.anonymous_library() {
+            "Sign in with :account add to view this library."
+        } else if app.is_loading {
             "Searching..."
         } else {
             "No results. Press '/' to search with new query."

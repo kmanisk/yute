@@ -89,7 +89,7 @@ pub struct BackendConfig {
 }
 
 fn default_auth() -> String {
-    "tv_oauth".to_string()
+    "guest".to_string()
 }
 
 fn default_client() -> String {

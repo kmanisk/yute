@@ -1767,6 +1767,12 @@ fn navigate_to_screen(app: &mut App, screen: Screen, tx: Sender<AppEvent>) {
         return;
     }
     app.set_screen(screen);
+    if app.anonymous_library() {
+        app.items.clear();
+        app.is_loading = false;
+        app.status_text = "Sign in with :account add".into();
+        return;
+    }
     if let Some(index) = ui::sidebar::index_of(screen) {
         app.sidebar_index = index;
     }
@@ -2495,6 +2501,12 @@ fn try_load_feed_cache(app: &mut App, key: &str) {
 }
 
 fn ensure_screen_loaded(app: &mut App, tx: Sender<AppEvent>) {
+    if app.anonymous_library() {
+        app.is_loading = false;
+        app.items.clear();
+        app.status_text = "Sign in with :account add".into();
+        return;
+    }
     if !app.items.is_empty() || app.is_loading {
         return;
     }
@@ -4024,6 +4036,7 @@ mod feed_ui_tests {
     fn guest_cache_and_stale_login_results_cannot_restore_an_old_session() {
         let (mut app, _) = app_and_cards();
         let (tx, _) = channel(2);
+        app.config.backend.auth = "tv_oauth".into();
         let authenticated_key = feed_cache_key(&app, "feed_home");
         app.config.backend.auth = "guest".into();
         assert_ne!(feed_cache_key(&app, "feed_home"), authenticated_key);

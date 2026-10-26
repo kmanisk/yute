@@ -135,3 +135,8 @@ retry on HTTP 401. Revoked tokens mark that account as needing re-login.
 The V2 request shape follows the repository's pinned MediaServiceCore source;
 polling behavior also follows Google's limited-input-device documentation:
 https://developers.google.com/youtube/data/guides/auth/devices
+
+Anonymous is the default on a fresh installation. Subscriptions, Liked, Watch
+Later, library playlists and account History show `Sign in with :account add`
+without issuing authenticated requests. Search, public playlists, Local, Queue
+and external MPV playback remain available.

@@ -499,3 +499,32 @@ fn completion_popup_is_framed_and_keeps_footer_clear() {
         vec!["account Alice"]
     );
 }
+
+#[test]
+fn anonymous_library_empty_states_offer_sign_in_in_grid_and_list() {
+    let mut app = app();
+    app.items.clear();
+    assert!(app.switch_account(0));
+    for screen in [
+        Screen::Subscriptions,
+        Screen::History,
+        Screen::Liked,
+        Screen::WatchLater,
+        Screen::Playlists,
+    ] {
+        app.screen = screen;
+        for width in [60, 120] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+            terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>();
+            assert!(text.contains(":account add"));
+            assert!(!text.contains("could not"));
+        }
+    }
+}

@@ -12,6 +12,9 @@ use models::{ChannelTab, ChatBatch, CommentsBatch, FeedPage, SearchFilters, Watc
 
 #[async_trait]
 pub trait Backend: Send + Sync {
+    fn is_anonymous(&self) -> bool {
+        false
+    }
     async fn home(&self, chip_token: Option<&str>) -> anyhow::Result<FeedPage>;
     async fn home_category(&self, _category: models::HomeCategory) -> anyhow::Result<FeedPage> {
         anyhow::bail!("This YouTube section is unavailable from the current backend")
@@ -109,6 +112,9 @@ impl BackendChain {
 
 #[async_trait]
 impl Backend for BackendChain {
+    fn is_anonymous(&self) -> bool {
+        self.backends.first().is_none_or(|b| b.is_anonymous())
+    }
     async fn home(&self, chip_token: Option<&str>) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
@@ -149,6 +155,9 @@ impl Backend for BackendChain {
     }
 
     async fn subscriptions(&self) -> anyhow::Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
         for b in &self.backends {
@@ -163,6 +172,9 @@ impl Backend for BackendChain {
     }
 
     async fn history(&self) -> anyhow::Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
         for b in &self.backends {
@@ -177,6 +189,9 @@ impl Backend for BackendChain {
     }
 
     async fn watch_later(&self) -> anyhow::Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
         for b in &self.backends {
@@ -205,6 +220,9 @@ impl Backend for BackendChain {
             .await
     }
     async fn playlists(&self) -> anyhow::Result<FeedPage> {
+        if self.is_anonymous() {
+            return Ok(FeedPage::default());
+        }
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
         for b in &self.backends {
@@ -219,6 +237,9 @@ impl Backend for BackendChain {
     }
 
     async fn playlist(&self, id: &str) -> anyhow::Result<FeedPage> {
+        if self.is_anonymous() && matches!(id, "LL" | "WL" | "VLLL" | "VLWL") {
+            return Ok(FeedPage::default());
+        }
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
         for b in &self.backends {
