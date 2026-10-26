@@ -1,10 +1,10 @@
 # Maintainer: Kumar Manisk <mathewmanisk699@gmail.com>
-pkgname=ytui-git
+pkgname=yute-git
 pkgver=0.1.0.r0.g0000000
 pkgrel=1
 pkgdesc="Fast, keyboard-driven YouTube terminal client in Rust with personal recommendations, Sixel/Kitty thumbnails, and MPV playback"
 arch=('x86_64')
-url="https://github.com/manisk/ytui"
+url="https://github.com/kmanisk/yute"
 license=('MIT')
 depends=('gcc-libs' 'glibc' 'mpv' 'yt-dlp')
 optdepends=(
@@ -13,8 +13,8 @@ optdepends=(
     'xclip: X11 clipboard integration'
 )
 makedepends=('cargo' 'git')
-provides=('ytui')
-conflicts=('ytui')
+provides=('yute')
+conflicts=('yute')
 source=("git+file://$(pwd)")
 sha256sums=('SKIP')
 
@@ -36,6 +36,6 @@ check() {
 
 package() {
     cd "$srcdir/$pkgname" 2>/dev/null || cd "$startdir"
-    install -Dm755 target/release/ytui "$pkgdir/usr/bin/ytui"
-    install -Dm644 README.md "$pkgdir/usr/share/doc/ytui/README.md"
+    install -Dm755 target/release/yute "$pkgdir/usr/bin/yute"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/yute/README.md"
 }

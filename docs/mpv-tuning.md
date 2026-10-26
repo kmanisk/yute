@@ -14,7 +14,7 @@ Video decoding accounts for the majority of CPU and GPU power during media playb
    - Forcing NVDEC on the dGPU wakes the dedicated GPU and prevents it from sleeping, consuming battery.
    - Setting `hwdec = "vaapi"` offloads to the Intel UHD Graphics iGPU, or `hwdec = "no"` keeps low-resolution playback on CPU while maintaining dGPU sleep state.
 
-Hardware decoding is configurable in `~/.config/ytui/config.toml`:
+Hardware decoding is configurable in `~/.config/yute/config.toml`:
 
 ```toml
 [playback]
@@ -55,3 +55,19 @@ ytdl-raw-options-append=no-playlist=
 ytdl-raw-options-append=concurrent-fragments=4
 ytdl-raw-options-append=buffer-size=16k
 ```
+
+
+## Yute stream-cache control
+
+The Settings slider now drives dedicated MPV launch arguments and active IPC
+properties: cache-secs, demuxer-readahead-secs and demuxer-max-bytes. Presets are
+5/10/20/40/60 seconds with 32/64/128/192/256 MiB packet budgets; back-cache is bounded
+at 32 MiB. These replace the fixed startup values in the older tuning example
+above for dedicated-profile launches. cache-pause-wait is one second; the full
+readahead horizon is not an initial startup delay. User-profile mode preserves
+that profile's initial buffering configuration. :quality changes active quality
+through file-local MPV load options and preserves position/pause.
+
+See the [MPV cache documentation](https://mpv.io/manual/stable/#cache) for the
+relationship between time and byte limits. Larger buffers cannot eliminate
+YouTube extraction or network latency.

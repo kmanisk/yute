@@ -1,0 +1,29 @@
+[package]
+name = "yute-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Fast, keyboard-driven Linux YouTube GUI client in Rust with embedded libmpv rendering"
+publish = false
+license = "MIT"
+repository = "https://github.com/kmanisk/yute"
+homepage = "https://github.com/kmanisk/yute"
+
+[[bin]]
+name = "yute-gui"
+path = "src/main.rs"
+
+[dependencies]
+yute-core = { version = "0.1.0", path = "../yute-core" }
+gtk4 = "0.11"
+libadwaita = "0.9"
+libmpv2 = "6.0.0"
+libmpv2-sys = "4.0.1"
+libc = "0.2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-util = "0.3"

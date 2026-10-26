@@ -1,0 +1,105 @@
+# Command mode
+
+Press `:` to edit the bottom command row. Enter executes, Esc cancels, Tab completes
+names and queue subcommands, and Up/Down recalls session history. Multiple matches
+appear in a small list above the input. History holds at most 100 successfully
+parsed commands in memory; it is not persisted. Commands never evaluate a shell.
+`?` is keyboard help; `:help` is command help, and `:help search` explains one command.
+
+## Supported commands
+
+| Group | Syntax | Behavior |
+| --- | --- | --- |
+| Navigation | `home`, `subscriptions` (`subs`), `history`, `watch-later` (`wl`), `liked`, `playlists`, `queue`, `local`, `settings`, `account` (`accounts`) | Open the corresponding route. |
+| Search | `search <query>` | YouTube search; preserves the previous route. |
+| Entities | `channel`, `playlist` | Open the selected item's channel ID or selected playlist. Missing identity is reported. |
+| Playback | `play`, `pause`, `toggle`, `stop`, `next`, `prev`, `mute` | External yute-managed MPV only. `next` consumes the next queued video; `prev` uses bounded session playback history. |
+| Seek | `seek +30`, `seek -10`, `seek 1:20`, `seek 1:02:30` | Relative seconds or absolute time, never percentages for colon timestamps. |
+| Volume | `volume 50`, `volume +5`, `volume -5` (`vol`) | Absolute 0–100 or bounded relative change. |
+| Local queue | `queue add`, `queue next`, `queue remove`, `queue clear` | Append/prepend a selected playable video, remove the selected queue instance, or clear the local queue. |
+| Session | `login`, `logout`, `account switch` | Device-code login; confirmed local sign-out; switching explicitly reports unavailable. |
+| Subscription | `subscribe`, `unsubscribe` | Real authenticated requests for the selected channel; reported state changes only after successful results. |
+| Rating | `like`, `unlike` | Authenticated selected-video/current-Watch rating requests. Unconfirmed results are errors. |
+| Browser | `open`, `open channel` | Open the typed entity URL or selected item's channel through `xdg-open`. No embedded browser. |
+| Clipboard | `copy url`, `copy title`, `copy channel` | Native `wl-copy` on Wayland or `xclip` on X11, invoked only by the copy action. |
+| Refresh | `refresh`, `refresh hard` | Network refresh of the current route; hard is an alias, not a disk-cache purge. Normal `r` can retry continuation failures. |
+| Filtering | `filter all/videos/shorts/live/playlists/channels`, `filter <query>`, `filter` | Named types select a tab; other text filters loaded titles. Omit the query to clear the title filter. |
+| Shorts | `shorts on`, `shorts off`, `shorts toggle` | Re-filter and save the visibility preference. Settings also offers Never show, which overrides saved items and explicit Shorts tabs. |
+| Route names | `goto <route>` | Navigate to a canonical route; Tab lists available routes. |
+| Graphics | `set graphics sixel`, `kitty`, `halfblocks`, `none`, `auto` | Save the chosen graphics preference; restart required. |
+| Sidebar | `sidebar`, `sidebar show`, `sidebar hide`, `sidebar toggle` | Toggle or explicitly set visibility; hidden reclaims all width. |
+| Help | `help`, `help <command>`, `keys` | Concise command help; Esc, q or Enter closes it. |
+| Quit | `quit` (`q`), `quit!` (`q!`) | Confirm application quit or quit immediately. Normal-mode q remains Back. |
+
+Prefix commands with `:` in the application. Empty, malformed, unknown and
+non-finite numeric arguments produce status errors rather than launching a process.
+
+## Account and backend limits
+
+Logout is local sign-out, not Google token revocation: it clears active yute
+credentials/visitor state, cancels obsolete login/account results, saves guest mode,
+stops its playback and discards private route history. The encrypted saved login
+file remains available. Guest feeds use a separate cache namespace, and guest
+requests/resolution do not receive yute-supplied cookies. Independently configured
+user MPV/yt-dlp settings remain under the user's control.
+
+The existing credential implementation does not support real UI account switching,
+so selecting/switching a displayed account cannot claim success. Refresh and full
+cross-client history/resume synchronization remain backend follow-up work.
+Subscription/rating commands use existing InnerTube endpoints; they are not locally
+simulated, and live authenticated mutations were not performed during development.
+
+Watch Later add/remove, sorting on unreliable text metadata, persistent command
+history and runtime graphics switching are intentionally not implemented. Manual
+`m` history reporting no longer claims synchronization or fabricates watched time.
+
+## Browsing preferences
+
+```toml
+[content]
+shorts = "never" # "never", "hide" (default), or "show"
+```
+
+This supersedes the legacy `grid.show_shorts` preference. Home, Subscriptions,
+Search and ordinary channel tabs hide Shorts by default, without deleting cached
+items. Explicit Shorts filters/tabs show them. History, playlists, Watch Later,
+Liked, Queue and Local preserve explicit content. `never` overrides all exceptions, including suggestions. `:shorts` explicitly changes and saves this preference without fetching again.
+
+Search and command rows support Left/Right, Home/End, Ctrl+A/E, Ctrl+U/W and
+Unicode-safe editing. Command Up/Down recalls session history. `g` shows a small
+navigation hint after 400 ms; it closes on a second key, Esc or a four-second timeout.
+`gn` returns to Watch without restarting playback.
+
+Shift+J / Shift+K move forward/backward through the content-type tabs in browsing
+views. Lowercase j/k continue moving through cards. Shifted characters remain text
+inside command/search input; Watch uses contextual content navigation, with playback controls left to MPV.
+
+Enter on a Mix loads its current returned video batch, plays the first in external
+MPV, and queues the remainder before any existing queued items. Ordinary playlist
+Enter remains internal navigation. Use `:playlist` on a Mix to browse it without
+starting playback. Mix playback currently uses the returned batch; it does not
+claim endless server-side radio continuation.
+
+
+## Watch and settings update
+
+Normal `q` quits; Esc or Shift+H goes back and Shift+L goes forward. `gq` still opens
+Queue. Alt+E shows and focuses the sidebar, or hides it when it already has focus.
+The header has no permanent sidebar hint, and the footer has no NORMAL label.
+
+Watch: d/c/w focus Description/Comments/Suggestions. Tab or h/l move between
+sections; j/k scroll or select. Enter opens the selected suggestion/link. +/- rate
+the video or focused comment; n starts a comment and r replies. Text input consumes
+normal keys. Real action parameters and authentication are required; absent
+capabilities are reported rather than simulated. Enter posts a draft; Esc cancels.
+Description links are underlined; [/] selects a link and o opens it.
+
+`:quality [480p|720p|1080p|1440p|2160p|best]` reports or changes quality. Numeric
+aliases such as `:quality 720` and `:quality 4k` work. With active MPV this reloads
+once at the current position, preserving pause. `yute --quality 720p` applies a
+session limit at startup. Quality completion offers actual supported presets.
+
+Settings uses compact step selectors/toggles and a stream buffer slider. Buffer
+presets are 5/10/20/40/60 seconds with 32/64/128/192/256 MiB packet budgets. The
+slider updates active MPV properties; dedicated-profile launches use the same
+values. Initial playback does not wait to fill the entire cache horizon.

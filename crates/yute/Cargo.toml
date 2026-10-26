@@ -1,0 +1,37 @@
+[package]
+name = "yute"
+version = "0.1.0"
+edition = "2021"
+description = "Fast, keyboard-driven YouTube terminal client in Rust with personal recommendations, Sixel/Kitty thumbnails, and MPV playback"
+license = "MIT"
+readme = "README.md"
+keywords = ["youtube", "terminal", "tui", "mpv"]
+categories = ["command-line-utilities", "multimedia"]
+include = ["src/**", "tests/**", "README.md", "LICENSE", "Cargo.toml"]
+repository = "https://github.com/kmanisk/yute"
+homepage = "https://github.com/kmanisk/yute"
+
+[[bin]]
+name = "yute"
+path = "src/main.rs"
+
+[lib]
+name = "yute"
+path = "src/lib.rs"
+
+[dependencies]
+yute-core = { version = "0.1.0", path = "../yute-core" }
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "sync", "time", "io-util", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+clap = { version = "4", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-width = "0.2"
+futures-util = "0.3"

@@ -5,10 +5,10 @@
 The codebase is organized as a Cargo workspace:
 
 ```
-ytui/
+yute/
 ├── Cargo.toml                  # Workspace root
 ├── crates/
-│   ├── ytui-core/              # Engine library (zero terminal dependencies)
+│   ├── yute-core/              # Engine library (zero terminal dependencies)
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── backend/        # TVHTML5 client, OAuth, parser, models
@@ -16,7 +16,7 @@ ytui/
 │   │       ├── local.rs        # Local video filesystem scanner
 │   │       ├── media/          # Thumbnail loader and disk cache
 │   │       └── player/         # MPV controller, IPC, watch tracking, queue
-│   └── ytui/                   # Ratatui TUI application
+│   └── yute/                   # Ratatui TUI application
 │       ├── Cargo.toml
 │       └── src/
 │           ├── app.rs          # UI state machine and event router
@@ -30,16 +30,16 @@ ytui/
 └── PKGBUILD                    # Arch Linux package recipe
 ```
 
-## Core Engine (`ytui-core`)
+## Core Engine (`yute-core`)
 
-`ytui-core` provides headless services for consuming YouTube feeds and controlling playback:
+`yute-core` provides headless services for consuming YouTube feeds and controlling playback:
 
 1. **Authentication and Tokens:**
-   - TV OAuth device-code authorization (`ytui login`).
+   - TV OAuth device-code authorization (`yute login`).
    - Tokens stored on disk with strict `0600` permissions.
    - Encrypted at rest via AES-256-GCM.
    - Machine-bound encryption key derived from system hardware identifiers.
-   - Token files (`~/.config/ytui/auth.json`) must remain excluded from dotfile managers such as chezmoi.
+   - Token files (`~/.config/yute/auth.json`) must remain excluded from dotfile managers such as chezmoi.
 
 2. **InnerTube TVHTML5 Client:**
    - Emulates the stable TV client identity (`TVHTML5`).
@@ -57,9 +57,9 @@ ytui/
    - Observes MPV property changes (`time-pos`, `duration`, `pause`, `volume`, `speed`).
    - Dispatches playback commands (`seek`, `cycle pause`, `set volume`, `stats toggle`).
 
-## Terminal Frontend (`ytui`)
+## Terminal Frontend (`yute`)
 
-`ytui` handles layout and user interaction:
+`yute` handles layout and user interaction:
 
 1. **Geometry and Responsive Grid:**
    - Calculates thumbnail rows based on actual font cell pixel dimensions (`font_size`).
@@ -68,5 +68,34 @@ ytui/
    - Renders scrollbar indicators on the right margin with exact row offsets.
 
 2. **Decoupled Graphics Adapter:**
-   - Consumes raw `image::DynamicImage` instances from `ytui-core`.
+   - Consumes raw `image::DynamicImage` instances from `yute-core`.
    - Adapts images to `ratatui_image::protocol::StatefulProtocol` for Kitty, Sixel, or Unicode half-block rendering.
+
+## Typed activation and command mode
+
+The terminal frontend uses `actions::activation(Card)` to return Play, OpenChannel,
+OpenPlaylist or Unavailable. InnerTube renderer types and typed endpoints determine
+Card variants. Titles and row positions do not classify entities. Main's
+`dispatch_open` owns transitions; `start_playback` is the single TUI call site for
+`Player::play_video`. Mixes remain playlists and upcoming streams are not launched.
+
+`commands::REGISTRY` shares canonical names, aliases, syntax, descriptions and parse
+functions with completion and help. Parsed Commands dispatch through application
+controllers, reusing the same navigation/activation/player functions as keybindings.
+History is bounded to 100 entries in memory and records only successfully parsed
+commands. No shell evaluation or persistent command-history file is used.
+
+ChannelPage carries actual header metadata, opaque returned tab endpoints, observed
+subscription state and a feed. Channel route state caches each visited tab's items,
+continuation, selection and scroll. NavState includes the detail route, filters,
+query and view modes. Search draft input is separate from the current route query.
+Full requests and continuations have generations; stale results cannot replace the
+current route. Login/account callbacks additionally have a session generation.
+
+Cover preparation uses cached decoded images and `spawn_blocking` for center crop,
+resize and graphics encoding. A bounded set of exact-size protocols is reused by
+Sixel, Kitty and halfblocks. Graphics overlays retain the first-cell payload and
+restore normal text diffing for badge cells. The request channel is asynchronous,
+so waiting for thumbnails cannot occupy a Tokio worker. There is no thumbnail
+helper process. Settings mutation is separate from persistence in the key handler,
+so renderer tests do not save live user settings.
