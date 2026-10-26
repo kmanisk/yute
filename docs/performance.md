@@ -47,3 +47,21 @@ text preview for clipped trailing rows without emitting cropped graphics payload
 Structural changes erase Kitty placements and the terminal before repainting.
 Geometry tests cover 80x24 through 300x80 with both sidebar states. Real terminal
 fullscreen and Sixel erase behavior still require interactive verification.
+
+## Launch and feed pipeline
+
+The TUI first paints from public account metadata and account-scoped stale feed
+caches. It does not wait for keyring unlock, OAuth refresh, MPV profile creation,
+or a stdin capability query. Account metadata contains only profile/display
+fields, never tokens, cookies or visitor data; it is still private mode 0600.
+Terminal hints choose Kitty, Foot/Sixel, WezTerm/iTerm2 or half-block fallback.
+Cell pixels are queried off-thread with a 40 ms timeout and cached per terminal.
+Unknown terminals can explicitly choose a protocol in Settings. This avoids the
+image crate's detached stdin query thread competing with Crossterm input.
+
+InnerTube and source thumbnails share one pooled rustls HTTP client. Unauthenticated
+HEAD requests pre-warm YouTube and the image host concurrently. MPV profile setup
+is deferred until playback. Subscriptions already used FEsubscriptions, so no
+per-channel fetching was introduced: each first page renders immediately and
+continuations stream one at a time until exhausted, failed or superseded. The
+loaded count grows as pages arrive; no total is fabricated when YouTube omits it.

@@ -3,9 +3,11 @@ use crossterm::event::KeyEvent;
 
 #[allow(dead_code)]
 pub enum AppEvent {
+    AccountResult(u64, Box<AppEvent>),
     Input(KeyEvent),
     Resize(u16, u16),
     Tick,
+    TerminalCells(u16, u16),
     FeedLoaded(u64, anyhow::Result<FeedPage>),
     MixLoaded(u64, anyhow::Result<FeedPage>),
     CardMetadataLoaded(u64, String, Option<crate::backend::models::VideoCard>),

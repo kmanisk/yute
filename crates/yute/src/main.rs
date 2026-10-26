@@ -93,16 +93,8 @@ async fn main() -> anyhow::Result<()> {
         config.playback.max_resolution = quality;
     }
 
-    // Query terminal capabilities for sixel/kitty/halfblocks
-    let mut picker = ratatui_image::picker::Picker::from_query_stdio()
-        .unwrap_or_else(|_| ratatui_image::picker::Picker::halfblocks());
-    use ratatui_image::picker::ProtocolType;
-    match config.general.graphics.as_str() {
-        "sixel" => picker.set_protocol_type(ProtocolType::Sixel),
-        "kitty" => picker.set_protocol_type(ProtocolType::Kitty),
-        "halfblocks" => picker.set_protocol_type(ProtocolType::Halfblocks),
-        _ => {}
-    }
+    // No stdin query before first paint; cached font and terminal hints are enough.
+    let picker = yute::terminal::initial_picker(&config.general.graphics);
 
     // Request unambiguous terminal key events
     enable_raw_mode()?;
@@ -136,11 +128,23 @@ async fn main() -> anyhow::Result<()> {
     let (tx_event, mut rx_event) = channel::<AppEvent>(64);
 
     hydrate_accounts(&app, tx_event.clone());
+    tokio::spawn(yute_core::http::prewarm());
+    tokio::task::spawn_blocking(|| {
+        let _ = yute_core::config::migrate_legacy_config();
+    });
+    let size_tx = tx_event.clone();
+    tokio::spawn(async move {
+        if let Some((width, height)) = yute::terminal::cell_size().await {
+            let _ = size_tx.send(AppEvent::TerminalCells(width, height)).await;
+        }
+    });
 
     // Initial load: load disk cache immediately for fast launch, then fetch fresh
     try_load_feed_cache(&mut app, "feed_home");
     app.is_loading = true;
-    trigger_home_fetch(&mut app, tx_event.clone(), None);
+    if app.account_store.active_id() == yute_core::accounts::ANONYMOUS {
+        trigger_home_fetch(&mut app, tx_event.clone(), None);
+    }
 
     // Prune cache in background to prevent disk bloat
     let cache_clone = app.thumbs.cache().clone();
@@ -148,21 +152,6 @@ async fn main() -> anyhow::Result<()> {
         let _ = cache_clone.prune_thumbnails();
         let _ = cache_clone.prune_feeds(3);
     });
-
-    // Fetch authenticated account profile info in background
-    let backend_acc = Arc::clone(&app.backend);
-    let tx_acc = tx_event.clone();
-    let account_generation = app
-        .auth_generation
-        .load(std::sync::atomic::Ordering::SeqCst);
-    tokio::spawn(async move {
-        let res = backend_acc.account_info().await;
-        let _ = tx_acc
-            .send(AppEvent::AccountLoaded(account_generation, res))
-            .await;
-    });
-
-    refresh_account_profiles(&app, tx_event.clone());
 
     let mut keymap = KeymapState::new();
     let mut reader = EventStream::new();
@@ -301,10 +290,18 @@ fn trigger_search_fetch(app: &mut App, tx: Sender<AppEvent>, query: String) {
 }
 
 fn trigger_watch_fetch(app: &App, tx: Sender<AppEvent>, video_id: String) {
+    let generation = app
+        .auth_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     let backend = Arc::clone(&app.backend);
     tokio::spawn(async move {
         let res = backend.watch(&video_id).await;
-        let _ = tx.send(AppEvent::WatchDataLoaded(video_id, res)).await;
+        let _ = tx
+            .send(AppEvent::AccountResult(
+                generation,
+                Box::new(AppEvent::WatchDataLoaded(video_id, res)),
+            ))
+            .await;
     });
 }
 
@@ -499,16 +496,11 @@ fn handle_command_input(app: &mut App, key: crossterm::event::KeyEvent, tx: Send
 }
 
 async fn refresh_terminal_cells(app: &mut App) {
-    // TIOCGWINSZ never reads stdin; EventStream retains exclusive input ownership.
-    let query = tokio::task::spawn_blocking(crossterm::terminal::window_size);
-    if let Ok(Ok(Ok(size))) = tokio::time::timeout(Duration::from_millis(40), query).await {
-        if size.columns > 0 && size.rows > 0 && size.width > 0 && size.height > 0 {
-            let width = (size.width / size.columns).max(1);
-            let height = (size.height / size.rows).max(1);
-            app.cell_w_px = width as f32;
-            app.cell_h_px = height as f32;
-            app.thumbs.refresh_cell_size(width, height);
-        }
+    if let Some((width, height)) = yute::terminal::cell_size().await {
+        app.cell_w_px = width as f32;
+        app.cell_h_px = height as f32;
+        app.thumbs.refresh_cell_size(width, height);
+        yute::terminal::remember_cells(width, height);
     }
 }
 
@@ -1642,9 +1634,17 @@ fn ensure_comments(app: &mut App, tx: Sender<AppEvent>) {
     let id = watch.video.id.clone();
     let backend = Arc::clone(&app.backend);
     app.comments_loading = true;
+    let account_generation = app
+        .auth_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
     tokio::spawn(async move {
         let result = backend.fetch_comments(&token).await;
-        let _ = tx.send(AppEvent::CommentsLoaded(id, result)).await;
+        let _ = tx
+            .send(AppEvent::AccountResult(
+                account_generation,
+                Box::new(AppEvent::CommentsLoaded(id, result)),
+            ))
+            .await;
     });
 }
 fn compose_comment(app: &mut App, reply: bool) {
@@ -2018,6 +2018,15 @@ fn execute_command(app: &mut App, tx: Sender<AppEvent>) {
 
 fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
     match event {
+        AppEvent::AccountResult(generation, event) => {
+            if generation
+                == app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                handle_app_event(app, *event, tx);
+            }
+        }
         AppEvent::MenuPlaylists(request, result) => {
             let Some(menu) = &mut app.action_menu else {
                 return;
@@ -2392,6 +2401,12 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
         AppEvent::StatusMessage(msg) => {
             app.status_text = msg;
         }
+        AppEvent::TerminalCells(width, height) => {
+            app.cell_w_px = width as f32;
+            app.cell_h_px = height as f32;
+            app.thumbs.refresh_cell_size(width, height);
+            yute::terminal::remember_cells(width, height);
+        }
         AppEvent::CredentialsLoaded(generation, result) => {
             if generation
                 != app
@@ -2525,6 +2540,12 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 app.account_store
                     .import_profiles(profiles, &app.auth.lock().unwrap());
                 app.accounts = app.account_store.profiles.clone();
+                app.active_account_index = app.account_store.active_index();
+                if let Some(profile) = app.accounts.get(app.active_account_index) {
+                    app.account_name = profile.name.clone();
+                    app.account_handle = profile.handle.clone();
+                    app.auth.lock().unwrap().page_id = profile.channel_id.clone();
+                }
                 app.account_store.persist_background();
             }
         }
@@ -2560,7 +2581,7 @@ fn try_load_feed_cache(app: &mut App, key: &str) {
         return;
     }
     let final_key = feed_cache_key(app, key);
-    let ttl_sec = (app.config.cache.home_ttl_min.max(15) as u64) * 60;
+    let ttl_sec = 0; // Stale-while-revalidate: age never prevents first paint.
     let json = app.thumbs.cache().load_feed_cache(&final_key, ttl_sec);
     if let Some(json) = json {
         if let Ok(page) = serde_json::from_str::<yute::backend::models::FeedPage>(&json) {
@@ -2994,7 +3015,7 @@ fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
     if app.is_loading
         || app.is_loading_more
         || app.continuation_failed
-        || app.focus != Focus::Content
+        || (app.focus != Focus::Content && app.screen != Screen::Subscriptions)
         || !matches!(
             app.screen,
             Screen::Home
@@ -3011,13 +3032,14 @@ fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
         return;
     }
     let count = app.filtered_items().len();
-    if app.selected_index + app.rendered_columns * 2 < count {
+    if app.screen != Screen::Subscriptions && app.selected_index + app.rendered_columns * 2 < count
+    {
         return;
     }
     let Some(token) = app.continuation_token.clone() else {
         return;
     };
-    if count < app.rendered_columns * app.rendered_rows {
+    if app.screen != Screen::Subscriptions && count < app.rendered_columns * app.rendered_rows {
         if app.autofill_pages >= 3 {
             return;
         }

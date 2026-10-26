@@ -37,7 +37,7 @@ impl DiskCache {
     #[allow(dead_code)]
     pub fn save_feed_cache(&self, key: &str, content: &str) -> Result<()> {
         let path = self.feeds_dir().join(format!("{key}.json"));
-        fs::write(path, content)?;
+        crate::credentials::atomic_write(&path, content.as_bytes())?;
         Ok(())
     }
 

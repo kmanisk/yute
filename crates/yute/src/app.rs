@@ -296,11 +296,9 @@ impl App {
             }
         }
         // Credentials and keyring access are deferred to a blocking worker.
-        let account_store = yute_core::accounts::Accounts::from_storage(
-            yute_core::credentials::path(),
-            Default::default(),
+        let account_store = yute_core::accounts::Accounts::bootstrap(
             &auth,
-            true,
+            config.general.start_anonymous || config.backend.auth == "guest",
         );
         let auth = std::sync::Arc::new(std::sync::Mutex::new(account_store.current_context()));
         let accounts = account_store.profiles.clone();

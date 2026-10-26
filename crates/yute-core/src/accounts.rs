@@ -63,6 +63,37 @@ impl Accounts {
         accounts.persistent = true;
         accounts
     }
+    pub fn bootstrap(current: &AuthContext, anonymous: bool) -> Self {
+        let mut accounts = Self::from_storage(
+            crate::credentials::path(),
+            AuthStorage::default(),
+            current,
+            true,
+        );
+        if let Ok(bytes) = std::fs::read(crate::credentials::data_dir().join("accounts.json")) {
+            if let Ok(snapshot) = serde_json::from_slice::<Bootstrap>(&bytes) {
+                accounts.profiles = snapshot.profiles;
+                if !accounts.profiles.iter().any(|p| p.id == ANONYMOUS) {
+                    accounts.profiles.insert(0, Account::anonymous());
+                }
+                if !anonymous && accounts.profiles.iter().any(|p| p.id == snapshot.active) {
+                    accounts.active = snapshot.active;
+                }
+            }
+        }
+        accounts
+    }
+    fn bootstrap_bytes(&self) -> Vec<u8> {
+        serde_json::to_vec(&Bootstrap {
+            profiles: self.profiles.clone(),
+            active: self
+                .storage
+                .active_account
+                .clone()
+                .unwrap_or_else(|| ANONYMOUS.into()),
+        })
+        .unwrap_or_default()
+    }
     pub fn load_session(config: &crate::config::Config, mut auth: AuthContext) -> Result<Self> {
         let legacy = crate::config::config_dir().join("auth.json");
         let cookies = crate::config::resolve_path(&config.backend.cookies_file);
@@ -84,6 +115,12 @@ impl Accounts {
             config.general.start_anonymous || config.backend.auth == "guest",
         );
         accounts.persistent = crate::credentials::path().exists();
+        if accounts.persistent {
+            crate::credentials::atomic_write(
+                &crate::credentials::data_dir().join("accounts.json"),
+                &accounts.bootstrap_bytes(),
+            )?;
+        }
         Ok(accounts)
     }
     pub fn read_storage(path: &Path) -> Result<AuthStorage> {
@@ -223,7 +260,16 @@ impl Accounts {
         }
     }
     pub fn import_profiles(&mut self, profiles: Vec<Account>, current: &AuthContext) {
-        for profile in profiles {
+        for mut profile in profiles {
+            if !profile.handle.is_empty() {
+                if let Some(known) = self
+                    .profiles
+                    .iter()
+                    .find(|known| known.handle == profile.handle)
+                {
+                    profile.id = known.id.clone();
+                }
+            }
             let id = profile.id.clone();
             if let Some(old) = self.profiles.iter_mut().find(|a| a.id == id) {
                 *old = profile.clone();
@@ -379,6 +425,7 @@ impl Accounts {
         let generation = revision.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         let lock = self.write_lock.clone();
         let storage = self.storage.clone();
+        let bootstrap = self.bootstrap_bytes();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn_blocking(move || -> Result<()> {
                 let _guard = lock.lock().unwrap();
@@ -396,7 +443,11 @@ impl Accounts {
                     }
                     saved.active_account = storage.active_account;
                     Ok(())
-                })
+                })?;
+                crate::credentials::atomic_write(
+                    &crate::credentials::data_dir().join("accounts.json"),
+                    &bootstrap,
+                )
             });
         }
     }
@@ -546,4 +597,10 @@ mod anonymous_tests {
         assert!(chain.playlist("LL").await.unwrap().items.is_empty());
         assert_eq!(crate::config::Config::default().backend.auth, "guest");
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct Bootstrap {
+    profiles: Vec<Account>,
+    active: String,
 }

@@ -22,3 +22,12 @@ fn build_client() -> Client {
         .build()
         .unwrap_or_default()
 }
+
+/// Warm pooled DNS/TLS independently of UI and credentials. No authenticated data.
+pub async fn prewarm() {
+    let client = client();
+    let _ = tokio::join!(
+        client.head("https://www.youtube.com/").send(),
+        client.head("https://i.ytimg.com/").send()
+    );
+}

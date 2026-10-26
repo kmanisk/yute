@@ -32,10 +32,7 @@ impl ThumbnailLoader {
 
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             handle.spawn(async move {
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(8))
-                    .build()
-                    .unwrap_or_default();
+                let client = crate::http::client();
 
                 while let Some((url, cache_path)) = rx_req.recv().await {
                     let client_c = client.clone();

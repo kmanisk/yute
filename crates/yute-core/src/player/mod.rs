@@ -30,15 +30,9 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(cfg: &Config) -> Self {
+    pub fn new(_cfg: &Config) -> Self {
         let (tx_status, rx_status) = channel::<PlaybackStatus>(32);
         let profile = MpvProfile::new();
-        let cookies_path = if !cfg.backend.cookies_file.is_empty() {
-            Some(crate::config::resolve_path(&cfg.backend.cookies_file))
-        } else {
-            None
-        };
-        let _ = profile.setup_default_configs(cookies_path.as_deref(), Some(&cfg.playback.hwdec));
 
         Self {
             profile,
@@ -109,6 +103,8 @@ impl Player {
 
     fn start_window_playback(&mut self, url: &str, cfg: &Config) -> Result<()> {
         self.stop();
+        self.profile
+            .setup_default_configs(None, Some(&cfg.playback.hwdec))?;
 
         let sock_path = generate_socket_path();
         if sock_path.exists() {

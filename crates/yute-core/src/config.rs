@@ -337,9 +337,13 @@ pub fn cache_dir() -> PathBuf {
 
 impl Config {
     pub fn load() -> Self {
-        let _ = migrate_legacy_config();
         let dir = config_dir();
-        let path = dir.join("config.toml");
+        let preferred = dir.join("config.toml");
+        let path = if preferred.exists() {
+            preferred
+        } else {
+            resolve_path("~/.config/ytui/config.toml")
+        };
         if path.exists() {
             if let Ok(content) = fs::read_to_string(&path) {
                 if let Ok(mut cfg) = toml::from_str::<Config>(&content) {

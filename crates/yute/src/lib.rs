@@ -11,3 +11,4 @@ pub use yute_core::backend;
 pub use yute_core::config;
 pub use yute_core::local;
 pub use yute_core::player;
+pub mod terminal;
