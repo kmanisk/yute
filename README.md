@@ -1,129 +1,321 @@
-# Yute
+# yute
 
-<img src="assets/yute.png" alt="Yute terminal icon" width="160">
+<p align="center">
+  <img src="assets/yute.png" alt="Yute icon" width="120">
+</p>
 
-A keyboard-first YouTube terminal client built with Rust, Ratatui and Tokio.
-Browse in the terminal; watch in an external MPV window.
+<p align="center">
+  <strong>YouTube, treated like a terminal application.</strong>
+</p>
+
+<p align="center">
+  A keyboard-first YouTube client written in Rust with Ratatui and Tokio.<br>
+  Discovery stays in the terminal; video playback stays in external MPV.
+</p>
+
+<p align="center">
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-2021-b7410e?logo=rust&logoColor=white" alt="Rust 2021"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="https://github.com/kmanisk/yute/stargazers"><img src="https://img.shields.io/github/stars/kmanisk/yute?style=flat" alt="GitHub stars"></a>
+  <a href="https://github.com/kmanisk/yute/commits/main"><img src="https://img.shields.io/github/last-commit/kmanisk/yute" alt="Last commit"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20Unix-lightgrey" alt="Linux and Unix">
+</p>
+
+![Yute subscriptions view](assets/screenshots/subscriptions.png)
+
+---
+
+## Why I built it this way
+
+I wanted a YouTube client that fits the same workflow as Neovim, tmux, yazi and other terminal tools: open it instantly, keep my hands on the keyboard, find something, play it, and keep moving.
+
+That led to a few deliberate choices:
+
+- **the terminal is for browsing, not pretending to be a video player** — Yute sends playback to MPV
+- **keyboard first** — Vim-style movement, `g` navigation, `/` search and a `:` command line
+- **no permanent service** — no daemon or background watcher just to browse YouTube
+- **no embedded browser** — no Chromium, Electron or webview hidden behind a TUI
+- **real terminal graphics** — Sixel and Kitty when available, halfblocks everywhere else
+- **minimal chrome** — content gets the space; help and actions appear when needed
+- **typed navigation** — a channel opens as a channel, a playlist as a playlist, playable media goes to MPV
+
+The goal is not to recreate `youtube.com` cell-for-cell.
+
+The goal is to make YouTube feel native to a keyboard-driven terminal workflow.
+
+---
+
+## What Yute does
+
+```text
+YouTube / InnerTube
+        │
+        ▼
+┌────────────────────────────┐
+│            yute            │
+│                            │
+│  Home       Subscriptions  │
+│  Search     History        │
+│  Channels   Playlists      │
+│  Queue      Local media    │
+└─────────────┬──────────────┘
+              │ Unix JSON IPC
+              ▼
+             MPV
+```
+
+| Part | Yute's choice |
+| --- | --- |
+| UI | Ratatui + Crossterm |
+| Input | Vim-style navigation + command mode |
+| YouTube data | InnerTube, with `yt-dlp` as resolver/fallback |
+| Images | Sixel / Kitty graphics / halfblocks |
+| Playback | external MPV |
+| MPV control | Unix-domain JSON IPC |
+| Async runtime | Tokio |
+| Background service | none |
+
+---
 
 ## Features
 
-- Personal Home recommendations, subscriptions, search, history and saved playlists.
-- Typed navigation: channels and playlists open internally; videos and live streams play in MPV. Mix cards load a real video batch and queue it for playback.
-- Compact cards with two-line titles, view counts, upload age, duration overlays and aspect-preserving thumbnails.
-- Sixel, Kitty and halfblock thumbnails, decoded asynchronously and cached.
-- Watch details with formatted description links, comments and thumbnail suggestions.
-- Command completion, command history, route history and a collapsible sidebar.
-- Adjustable quality, hardware decoding and MPV stream buffer. No daemon or embedded browser.
+- **Personalized browsing** — Home recommendations, Subscriptions, Search, History, Watch Later, Liked videos and playlists where the authenticated session exposes them.
+- **Entity-aware navigation** — videos, Shorts and live streams play in MPV; channels and playlists stay inside Yute.
+- **Terminal thumbnails** — asynchronous image loading with Sixel, Kitty graphics and Unicode halfblock fallback.
+- **Keep browsing while video plays** — leaving Watch does not kill the MPV session.
+- **Command mode** — Vim-like `:` commands with completion and history.
+- **Route history** — move into a channel or playlist and return to the same search/feed position.
+- **Queue and local media** — keep a playback queue and browse configured local video directories.
+- **Playback tuning** — resolution limits, hardware decoding, stream buffering, autoplay and optional user MPV config.
+- **Low idle overhead** — event-driven UI with no animation/redraw loop when nothing changes.
 
-## Install from source
+---
 
-Requires Rust/Cargo, `mpv` and `yt-dlp`. Optional: `ffmpeg` for local media and
-`wl-copy` or `xclip` for copying URLs.
+## A terminal workflow, not a website clone
+
+<table>
+  <tr>
+    <td><img src="assets/screenshots/search.png" alt="Yute search results"></td>
+    <td><img src="assets/screenshots/command.png" alt="Yute command mode"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Search, mixed entities and keyboard navigation</sub></td>
+    <td align="center"><sub>Commands live in the bottom line</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/watch.png" alt="Yute watch view"></td>
+    <td><img src="assets/screenshots/settings.png" alt="Yute settings"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Details stay in Yute; playback stays in MPV</sub></td>
+    <td align="center"><sub>Settings stay keyboard-driven too</sub></td>
+  </tr>
+</table>
+
+Playback remains visible as lightweight state while you browse:
+
+![Yute active playback](assets/screenshots/active-playback.png)
+
+---
+
+## Install
+
+### Requirements
+
+- Rust / Cargo
+- [`mpv`](https://mpv.io/)
+- [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
+- optional: `ffmpeg` / `ffprobe` for local-media metadata
+- optional: `wl-copy` or `xclip` for clipboard integration
+
+### From GitHub
+
+```sh
+cargo install --git https://github.com/kmanisk/yute yute
+```
+
+### Arch Linux / CachyOS
+
+```sh
+sudo pacman -S mpv yt-dlp
+cargo install --git https://github.com/kmanisk/yute yute
+```
+
+### Build it
 
 ```sh
 git clone https://github.com/kmanisk/yute.git
 cd yute
 cargo build --release -p yute
 install -Dm755 target/release/yute ~/.local/bin/yute
+```
+
+`cargo install yute` will become the shortest path after the first crates.io release.
+
+---
+
+## First run
+
+```sh
 yute
 ```
 
-The repository is private; cloning requires repository access. The optional GTK
-frontend remains a separate workspace member and is not needed for the terminal
-client. Build the entire workspace only if its GTK/libadwaita/libmpv development
-libraries are available.
+Yute can browse as a guest. For personalized account-backed views:
 
 ```sh
-yute login               # YouTube device-code login
-yute --quality 720p      # session quality limit
-yute setup-mpv           # optional MPV scripts
+yute login
 ```
+
+This uses YouTube TV/device-code authentication.
+
+Optional MPV helper/profile setup:
+
+```sh
+yute setup-mpv
+```
+
+Config lives at:
+
+```text
+~/.config/yute/
+```
+
+Legacy `ytui` config/token files can be read and migrated without overwriting an existing Yute config.
+
+---
 
 ## Keyboard
 
+Normal mode is the default.
+
+```text
+          k
+          ↑
+      h ←   → l
+          ↓
+          j
+```
+
 | Key | Action |
 | --- | --- |
-| `h/j/k/l` | Move between cards; h/l stay within the row |
+| `h/j/k/l` | Move through cards and lists |
 | `Enter` | Open the selected entity |
-| `Shift-Enter` | Item actions: play, browser, copy, queue, save, download |
-| `o` | Open the selected video/channel/playlist in the browser |
-| `g,` | Settings (`go` remains a compatibility shortcut) |
-| `Shift-J/K` | Next/previous content filter |
-| `Shift-H/L` | Back/forward through route history |
+| `Shift-Enter` | Item actions: play, copy, queue, save, download |
+| `o` | Open the selected entity in the browser |
+| `g,` | Settings (`go` remains compatible) |
 | `Alt-e` | Show/focus sidebar; press again to hide |
+| `gg` / `G` | First / last item |
+| `Ctrl-d` / `Ctrl-u` | Half-page down / up |
+| `Shift-J/K` | Next / previous content filter |
+| `Shift-H/L` | Back / forward through route history |
+| `/` | Search |
+| `:` | Command mode |
+| `g` | Navigation prefix; delayed hints show destinations |
+| `a` | Add selected video to queue |
+| `y` | Copy selected URL |
 | `b` | Toggle sidebar |
-| `/` / `:` | Search / commands in the bottom line |
-| `g` | Navigation prefix; delayed hints show the destinations |
-| `gg/G`, `Ctrl-d/u` | First/last, half-page navigation |
-| `a` / `y` | Queue selected video / copy URL |
 | `?` | Contextual help |
 | `Esc` / `q` | Previous route / quit |
 
-Watch starts with focus in the main content. `d`, `c`, `w` focus Description,
-Comments and Suggestions; `Tab` or h/l move between these sections. j/k scroll or
-select within the focused section. Enter opens a selected suggestion or link.
-`+`/`-` rate the video or focused comment, `n` starts a comment, and `r` replies.
-Posting/reactions require authentication **and real server-provided action
-parameters**. Some YouTube clients do not return those capabilities; Yute reports
-this and offers `:open` instead of pretending an action succeeded. Submitted drafts
-are only sent on Enter; Esc cancels.
-
-MPV keeps its own playback keys. Navigating away from Watch preserves playback.
-The small playback line is passive feedback; Watch has no duplicate playback
-control panel. Terminal font and window size remain controlled by your terminal.
-
-## Commands
+`Enter` is based on the selected entity, not the card that happened to render it:
 
 ```text
-:search rust async
-:quality 720p
-:quality best
-:settings
-:sidebar toggle
-:filter videos
-:shorts off
-:queue add
-:copy url
-:open
+video / Short / live  ──▶ MPV
+channel               ──▶ Channel view
+playlist              ──▶ Playlist view
 ```
 
-See [all commands](docs/commands.md).
+---
 
-## Preferences
+## Command line
 
-Settings are stored in `~/.config/yute/config.toml`. On first use, Yute copies
-legacy `~/.config/ytui/` settings and login files without overwriting existing Yute
-files. The legacy encrypted token format remains readable. Legacy files are kept.
+Press `:` from Normal mode.
+
+```text
+:search rust programming
+:filter videos
+:shorts off
+:quality 1080p
+:quality best
+:queue add
+:sidebar toggle
+:copy url
+:open
+:settings
+:help
+:q
+```
+
+Commands support completion and history, so the command line can expose power-user actions without filling the main UI with permanent controls.
+
+See [`docs/commands.md`](docs/commands.md) for the complete command reference.
+
+---
+
+## Configuration
+
+```text
+~/.config/yute/config.toml
+```
 
 ```toml
 [content]
 shorts = "never"          # never | hide | show
 
 [grid]
-columns = 3              # 0 selects automatic columns
+columns = 3               # 0 = automatic
 min_card_width = 26
 sidebar_expanded = false
 
 [playback]
 max_resolution = "1080p" # 480p | 720p | 1080p | 1440p | 2160p | best
 hwdec = "auto-safe"
-stream_cache_seconds = 20 # Settings steps: 5, 10, 20, 40, 60
+stream_cache_seconds = 20
 use_user_mpv_config = false
 osd_bar = false
 autoplay = true
 ```
 
-`never` hides Shorts in ordinary feeds, saved feeds and suggestions. Explicitly
-opening a Shorts filter or channel Shorts tab always shows Shorts without changing
-the preference. `hide` also permits saved Shorts. The underlying data stays cached. Settings changes persist;
-`:shorts on/off` explicitly changes the preference to show/hide.
+Shorts behavior:
 
-The stream-cache slider controls MPV readahead and a bounded 32–256 MiB packet
-budget. It updates an active session immediately. Initial playback does not wait
-for the full readahead horizon; after an underrun MPV uses a one-second recovery
-buffer. User MPV profile mode retains that profile's startup settings. `:quality`
-reloads the current stream at its existing position and preserves pause state.
-Network extraction and server latency still determine actual startup time.
+- `never` — hide Shorts outside explicit Shorts filters/tabs, including saved feeds and suggestions
+- `hide` — hide them in ordinary feeds but allow explicit Shorts/saved content
+- `show` — show normally
+
+Filtering happens at the view layer; the underlying data remains cached.
+
+---
+
+## Architecture
+
+```text
+crates/
+├── yute-core   headless YouTube, data and playback logic
+├── yute        Ratatui terminal client
+└── yute-gui    optional GTK frontend
+```
+
+The core and TUI are deliberately separated. Rendering does not decide what an item does, and MPV is not embedded into the terminal renderer.
+
+```text
+ContentItem ──▶ Action ──▶ Router / Player
+                    │
+                    ├── OpenChannel
+                    ├── OpenPlaylist
+                    └── Play
+```
+
+That separation is what prevents a channel result from accidentally being treated as a video just because both appear in the same grid.
+
+### Docs
+
+- [Architecture](docs/architecture.md)
+- [Commands](docs/commands.md)
+- [MPV tuning](docs/mpv-tuning.md)
+- [SmartTube protocol notes](docs/smarttube-parity.md)
+- [UI verification](docs/ui-polish-review.md)
+
+---
 
 ## Development
 
@@ -134,15 +326,26 @@ cargo test --workspace
 cargo build --release
 ```
 
-[Architecture](docs/architecture.md) · [MPV configuration](docs/mpv-tuning.md) ·
-[SmartTube protocol notes](docs/smarttube-parity.md) ·
-[UI verification](docs/ui-polish-review.md)
+---
 
-Account switching, full cross-client history/resume parity and endless Mix radio
-continuation remain incomplete. Mix playback uses the current returned batch.
-No account writes are performed by the tests.
+## Still in progress
 
-MIT. See [LICENSE](LICENSE).
+Yute is early software. The parts I would rather mark incomplete than fake are:
+
+- account switching
+- full cross-client history/resume parity
+- endless Mix-radio continuation
+- some authenticated mutations when YouTube does not return usable action parameters
+
+Mix playback currently uses the returned batch.
+
+If YouTube does not expose a working account action, Yute reports that limitation instead of pretending the write succeeded.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 
 ## Item actions and focus

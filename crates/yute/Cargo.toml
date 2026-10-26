@@ -2,14 +2,15 @@
 name = "yute"
 version = "0.1.0"
 edition = "2021"
-description = "Fast, keyboard-driven YouTube terminal client in Rust with personal recommendations, Sixel/Kitty thumbnails, and MPV playback"
+description = "Keyboard-first YouTube terminal client with personalized feeds, terminal thumbnails, and MPV playback"
 license = "MIT"
 readme = "README.md"
-keywords = ["youtube", "terminal", "tui", "mpv"]
+keywords = ["youtube", "terminal", "tui", "mpv", "ratatui"]
 categories = ["command-line-utilities", "multimedia"]
 include = ["src/**", "tests/**", "README.md", "LICENSE", "Cargo.toml"]
 repository = "https://github.com/kmanisk/yute"
 homepage = "https://github.com/kmanisk/yute"
+documentation = "https://docs.rs/yute"
 
 [[bin]]
 name = "yute"
