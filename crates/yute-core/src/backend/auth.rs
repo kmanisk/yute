@@ -1,3 +1,4 @@
+use crate::secret::SecretString;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, Result};
@@ -26,33 +27,21 @@ fn get_machine_encryption_key() -> [u8; 32] {
 }
 
 pub fn encrypt_auth_data(plaintext: &[u8]) -> Result<String> {
-    let key_bytes = get_machine_encryption_key();
-    let cipher = Aes256Gcm::new_from_slice(&key_bytes).map_err(|e| anyhow!("Cipher error: {e}"))?;
-
-    let mut nonce_bytes = [0u8; 12];
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let pid = std::process::id();
-    let now_bytes = now.to_le_bytes();
-    let pid_bytes = pid.to_le_bytes();
-    nonce_bytes[..8].copy_from_slice(&now_bytes[..8]);
-    nonce_bytes[8..12].copy_from_slice(&pid_bytes[..4]);
-    let nonce = Nonce::from(nonce_bytes);
-
-    let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
-        .map_err(|e| anyhow!("Encryption error: {e}"))?;
-
-    let mut payload = Vec::with_capacity(12 + ciphertext.len());
-    payload.extend_from_slice(&nonce_bytes);
-    payload.extend_from_slice(&ciphertext);
-
-    Ok(format!("YTUI_ENC_V1:{}", hex::encode(payload)))
+    crate::credentials::CredentialStore::open(crate::credentials::path())?.encrypt(plaintext)
+}
+pub fn decrypt_auth_data(raw: &str) -> Result<Vec<u8>> {
+    if raw.starts_with("YUTE_ENC_V2:") {
+        Ok(
+            crate::credentials::CredentialStore::open(crate::credentials::path())?
+                .decrypt(raw)?
+                .to_vec(),
+        )
+    } else {
+        decrypt_legacy_auth_data(raw)
+    }
 }
 
-pub fn decrypt_auth_data(encrypted_str: &str) -> Result<Vec<u8>> {
+pub(crate) fn decrypt_legacy_auth_data(encrypted_str: &str) -> Result<Vec<u8>> {
     let hex_part = encrypted_str.trim_start_matches("YTUI_ENC_V1:").trim();
     let payload = hex::decode(hex_part).map_err(|e| anyhow!("Hex decode error: {e}"))?;
     if payload.len() < 12 {
@@ -97,11 +86,11 @@ pub struct AuthAccount {
     #[serde(default)]
     pub page_id: Option<String>,
     #[serde(default)]
-    pub visitor_data: Option<String>,
+    pub visitor_data: Option<SecretString>,
     #[serde(default)]
     pub needs_login: bool,
-    pub access_token: String,
-    pub refresh_token: String,
+    pub access_token: SecretString,
+    pub refresh_token: SecretString,
     pub expires_at: u64,
     #[serde(default)]
     pub name: String,
@@ -112,26 +101,28 @@ pub struct AuthAccount {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AuthStorage {
     #[serde(default)]
+    pub cookie_jars: HashMap<String, SecretString>,
+    #[serde(default)]
     pub accounts: HashMap<String, AuthAccount>,
     #[serde(default)]
     pub active_account: Option<String>,
     #[serde(default)]
-    pub visitor_data: Option<String>,
+    pub visitor_data: Option<SecretString>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceCodeResponse {
-    pub device_code: String,
+    pub device_code: SecretString,
     pub user_code: String,
     pub verification_url: String,
     pub expires_in: u64,
     pub interval: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceTokenResponse {
-    pub access_token: Option<String>,
-    pub refresh_token: Option<String>,
+    pub access_token: Option<SecretString>,
+    pub refresh_token: Option<SecretString>,
     pub expires_in: Option<u64>,
     pub token_type: Option<String>,
     pub error: Option<String>,
@@ -140,17 +131,17 @@ pub struct DeviceTokenResponse {
 
 #[derive(Clone, Debug)]
 pub struct AuthContext {
-    pub cookies: HashMap<String, String>,
-    pub sapisid: Option<String>,
-    pub cookie_header: Option<String>,
+    pub cookies: HashMap<String, SecretString>,
+    pub sapisid: Option<SecretString>,
+    pub cookie_header: Option<SecretString>,
     pub user_agent: String,
-    pub visitor_data: Option<String>,
+    pub visitor_data: Option<SecretString>,
     pub client_name: String,
     pub client_version: String,
     pub hl: String,
     pub gl: String,
-    pub access_token: Option<String>,
-    pub refresh_token: Option<String>,
+    pub access_token: Option<SecretString>,
+    pub refresh_token: Option<SecretString>,
     pub token_expires_at: Option<u64>,
     pub auth_file_path: Option<PathBuf>,
     pub page_id: Option<String>,
@@ -212,14 +203,14 @@ impl AuthContext {
                 self.cookie_header = None;
             }
             "cookies" => {
-                let _ = self.load_cookies_from_path(cookies_path);
+                self.load_cookies_from_path(cookies_path)?;
             }
             _ => {
-                if auth_path.exists() {
-                    let _ = self.load_auth_file(auth_path);
+                if auth_path.exists() || crate::credentials::path().exists() {
+                    self.load_auth_file(auth_path)?;
                 }
                 if self.access_token.is_none() {
-                    let _ = self.load_cookies_from_path(cookies_path);
+                    self.load_cookies_from_path(cookies_path)?;
                 }
             }
         }
@@ -227,208 +218,110 @@ impl AuthContext {
     }
 
     pub fn load_auth_file(&mut self, path: &Path) -> Result<()> {
-        let content = fs::read_to_string(path)?;
-        let (storage, was_plain) = if content.starts_with("YTUI_ENC_V1:") {
-            let decrypted = decrypt_auth_data(&content)?;
-            let parsed: AuthStorage = serde_json::from_slice(&decrypted)?;
-            (parsed, false)
-        } else {
-            let parsed: AuthStorage = serde_json::from_str(&content)?;
-            (parsed, true)
-        };
-        if let Some(ref vis) = storage.visitor_data {
-            self.visitor_data = Some(vis.clone());
-        }
-        let active_key = storage.active_account.as_deref().unwrap_or("default");
-        if let Some(acc) = storage.accounts.get(active_key) {
-            self.access_token = Some(acc.access_token.clone());
-            self.refresh_token = Some(acc.refresh_token.clone());
-            self.token_expires_at = Some(acc.expires_at);
-            self.account_id = Some(active_key.to_string());
-            self.page_id = acc.page_id.clone();
-            self.needs_login = acc.needs_login;
-        } else if let Some((_, acc)) = storage.accounts.iter().next() {
-            self.access_token = Some(acc.access_token.clone());
-            self.refresh_token = Some(acc.refresh_token.clone());
-            self.token_expires_at = Some(acc.expires_at);
-        }
-        if was_plain {
-            let _ = self.save_auth_file(path);
+        let storage = crate::credentials::migrate(
+            &[
+                path.to_owned(),
+                crate::config::resolve_path("~/.config/ytui/auth.json"),
+            ],
+            &[],
+        )?;
+        self.auth_file_path = Some(crate::credentials::path());
+        if let Some(id) = storage
+            .active_account
+            .as_ref()
+            .or_else(|| storage.accounts.keys().next())
+        {
+            if let Some(account) = storage.accounts.get(id) {
+                self.account_id = Some(id.clone());
+                self.page_id = account.page_id.clone();
+                self.needs_login = account.needs_login;
+                self.access_token = if account.needs_login {
+                    None
+                } else {
+                    Some(account.access_token.clone())
+                };
+                self.refresh_token = Some(account.refresh_token.clone());
+                self.token_expires_at = Some(account.expires_at);
+                self.visitor_data = account.visitor_data.clone().or(storage.visitor_data);
+            }
         }
         Ok(())
     }
-
-    pub fn save_auth_file(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let mut storage = if path.exists() {
-            fs::read_to_string(path)
-                .ok()
-                .and_then(|s| {
-                    if s.starts_with("YTUI_ENC_V1:") {
-                        decrypt_auth_data(&s)
-                            .ok()
-                            .and_then(|b| serde_json::from_slice::<AuthStorage>(&b).ok())
-                    } else {
-                        serde_json::from_str::<AuthStorage>(&s).ok()
-                    }
-                })
-                .unwrap_or_default()
-        } else {
-            AuthStorage::default()
-        };
-
-        if let Some(ref vis) = self.visitor_data {
-            storage.visitor_data = Some(vis.clone());
-        }
-
-        if let (Some(ref acc_token), Some(ref ref_token)) =
-            (&self.access_token, &self.refresh_token)
-        {
-            let active_key = self
-                .account_id
-                .clone()
-                .or_else(|| storage.active_account.clone())
-                .unwrap_or_else(|| "default".to_string());
-            let exp = self.token_expires_at.unwrap_or_else(|| {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs()
-                    + 3600
-            });
-            storage.accounts.insert(
-                active_key.clone(),
-                AuthAccount {
-                    access_token: acc_token.clone(),
-                    refresh_token: ref_token.clone(),
-                    expires_at: exp,
-                    name: storage
-                        .accounts
-                        .get(&active_key)
-                        .map(|a| a.name.clone())
-                        .unwrap_or_default(),
-                    handle: storage
-                        .accounts
-                        .get(&active_key)
-                        .map(|a| a.handle.clone())
-                        .unwrap_or_default(),
-                    page_id: self.page_id.clone(),
-                    visitor_data: self.visitor_data.clone(),
-                    needs_login: self.needs_login,
-                    avatar_url: storage
-                        .accounts
-                        .get(&active_key)
-                        .and_then(|a| a.avatar_url.clone()),
-                },
-            );
-            if storage.active_account.is_none() {
-                storage.active_account = Some(active_key);
-            }
-        }
-
-        if self.needs_login {
-            if let Some(account) = self
+    pub fn save_auth_file(&self, _path: &Path) -> Result<()> {
+        crate::credentials::update(|storage| {
+            let Some(id) = self
                 .account_id
                 .as_ref()
-                .and_then(|id| storage.accounts.get_mut(id))
-            {
-                account.needs_login = true;
-                account.access_token.clear();
+                .or(storage.active_account.as_ref())
+                .cloned()
+            else {
+                return Ok(());
+            };
+            let account = storage.accounts.entry(id).or_default();
+            if let Some(token) = &self.access_token {
+                account.access_token = token.clone();
             }
-        }
-        let json_bytes = serde_json::to_vec_pretty(&storage)?;
-        let enc_str = encrypt_auth_data(&json_bytes)?;
-        fs::write(path, enc_str)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
-        }
-        Ok(())
+            if let Some(token) = &self.refresh_token {
+                account.refresh_token = token.clone();
+            }
+            account.expires_at = self.token_expires_at.unwrap_or(account.expires_at);
+            account.page_id = self.page_id.clone();
+            account.visitor_data = self.visitor_data.clone();
+            account.needs_login = self.needs_login;
+            if self.needs_login {
+                account.access_token = SecretString::default();
+            }
+            Ok(())
+        })
     }
 
     pub fn save_token_and_account(
         &mut self,
-        access_token: String,
-        refresh_token: String,
+        access_token: impl Into<SecretString>,
+        refresh_token: impl Into<SecretString>,
         expires_in: Option<u64>,
         name: String,
         handle: String,
     ) -> Result<()> {
-        let path = match &self.auth_file_path {
-            Some(p) => p.clone(),
-            None => crate::config::resolve_path("~/.config/yute/auth.json"),
-        };
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let mut storage = if path.exists() {
-            fs::read_to_string(&path)
-                .ok()
-                .and_then(|s| {
-                    if s.starts_with("YTUI_ENC_V1:") {
-                        decrypt_auth_data(&s)
-                            .ok()
-                            .and_then(|b| serde_json::from_slice::<AuthStorage>(&b).ok())
-                    } else {
-                        serde_json::from_str::<AuthStorage>(&s).ok()
-                    }
-                })
-                .unwrap_or_default()
-        } else {
-            AuthStorage::default()
-        };
-
-        if let Some(ref vis) = self.visitor_data {
-            storage.visitor_data = Some(vis.clone());
-        }
-
-        let now = SystemTime::now()
+        let access_token = access_token.into();
+        let refresh_token = refresh_token.into();
+        let id = self.account_id.clone().unwrap_or_else(|| {
+            if handle.is_empty() {
+                "default".into()
+            } else {
+                handle.clone()
+            }
+        });
+        let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
-        let exp = expires_in.map(|sec| now + sec).unwrap_or(now + 3600);
-
-        self.access_token = Some(access_token.clone());
-        self.refresh_token = Some(refresh_token.clone());
-        self.token_expires_at = Some(exp);
-
-        let active_key = if let Some(id) = self.account_id.clone() {
-            id
-        } else if !handle.is_empty() {
-            handle.clone()
-        } else {
-            storage
-                .active_account
-                .clone()
-                .unwrap_or_else(|| "default".to_string())
-        };
-
-        storage.accounts.insert(
-            active_key.clone(),
-            AuthAccount {
-                access_token,
-                refresh_token,
-                expires_at: exp,
-                name,
-                handle,
-                page_id: self.page_id.clone(),
-                visitor_data: self.visitor_data.clone(),
-                ..Default::default()
-            },
-        );
-        storage.active_account = Some(active_key);
-
-        let json_bytes = serde_json::to_vec_pretty(&storage)?;
-        let enc_str = encrypt_auth_data(&json_bytes)?;
-        fs::write(&path, enc_str)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        }
+            .as_secs()
+            + expires_in.unwrap_or(3600);
+        crate::credentials::update(|storage| {
+            let avatar = storage.accounts.get(&id).and_then(|a| a.avatar_url.clone());
+            storage.accounts.insert(
+                id.clone(),
+                AuthAccount {
+                    access_token: access_token.clone(),
+                    refresh_token: refresh_token.clone(),
+                    expires_at,
+                    name,
+                    handle,
+                    avatar_url: avatar,
+                    page_id: self.page_id.clone(),
+                    visitor_data: self.visitor_data.clone(),
+                    needs_login: false,
+                },
+            );
+            storage.active_account = Some(id.clone());
+            Ok(())
+        })?;
+        self.access_token = Some(access_token);
+        self.refresh_token = Some(refresh_token);
+        self.token_expires_at = Some(expires_at);
+        self.account_id = Some(id);
+        self.auth_file_path = Some(crate::credentials::path());
+        self.needs_login = false;
         Ok(())
     }
 
@@ -439,66 +332,22 @@ impl AuthContext {
     }
 
     pub fn load_cookies_from_path(&mut self, path: &Path) -> Result<()> {
-        if !path.exists() {
-            Self::try_auto_extract_brave_cookies(path);
+        let storage = crate::credentials::migrate(
+            &[],
+            &[
+                path.to_owned(),
+                crate::config::resolve_path("~/.config/ytui/cookies.txt"),
+            ],
+        )?;
+        let key = crate::credentials::cookie_key(path);
+        if let Some(text) = storage
+            .cookie_jars
+            .get(&key)
+            .or_else(|| storage.cookie_jars.values().next())
+        {
+            self.parse_netscape_cookies(text.expose());
         }
-
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(path) {
-                self.parse_netscape_cookies(&content);
-            }
-        }
-
-        if self.cookies.is_empty() {
-            Self::try_auto_extract_brave_cookies(path);
-            if path.exists() {
-                if let Ok(content) = fs::read_to_string(path) {
-                    self.parse_netscape_cookies(&content);
-                }
-            }
-        }
-
         Ok(())
-    }
-
-    fn try_auto_extract_brave_cookies(target_path: &Path) {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let candidates = [
-            format!("{home}/.config/BraveSoftware/Brave-Origin"),
-            format!("{home}/.config/BraveSoftware/Brave-Browser"),
-        ];
-
-        for cand in candidates {
-            let cookie_db = format!("{cand}/Default/Cookies");
-            if Path::new(&cookie_db).exists() {
-                if let Some(parent) = target_path.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                let status = std::process::Command::new("yt-dlp")
-                    .arg("--cookies-from-browser")
-                    .arg(format!("brave:{cand}"))
-                    .arg("--cookies")
-                    .arg(target_path)
-                    .arg("--playlist-items")
-                    .arg("0")
-                    .arg("https://www.youtube.com")
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status();
-
-                if let Ok(st) = status {
-                    if st.success() && target_path.exists() {
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::fs::PermissionsExt;
-                            let _ =
-                                fs::set_permissions(target_path, fs::Permissions::from_mode(0o600));
-                        }
-                        break;
-                    }
-                }
-            }
-        }
     }
 
     pub fn parse_netscape_cookies(&mut self, text: &str) {
@@ -515,7 +364,7 @@ impl AuthContext {
             if parts.len() >= 7 {
                 let domain = parts[0].to_lowercase();
                 let name = parts[5].trim().to_string();
-                let value = parts[6].trim().to_string();
+                let value: SecretString = parts[6].trim().into();
 
                 if domain.contains("youtube.com") {
                     if name == "SAPISID" || name == "__Secure-3PAPISID" {
@@ -546,10 +395,10 @@ impl AuthContext {
             let header_str = self
                 .cookies
                 .iter()
-                .map(|(k, v)| format!("{k}={v}"))
+                .map(|(k, v)| format!("{k}={}", v.expose()))
                 .collect::<Vec<_>>()
                 .join("; ");
-            self.cookie_header = Some(header_str);
+            self.cookie_header = Some(header_str.into());
         }
     }
 
@@ -560,7 +409,8 @@ impl AuthContext {
             .unwrap_or_default()
             .as_secs();
 
-        let payload = format!("{} {} {}", now_sec, sapisid, TV_ORIGIN);
+        let payload =
+            zeroize::Zeroizing::new(format!("{} {} {}", now_sec, sapisid.expose(), TV_ORIGIN));
         let mut hasher = Sha1::new();
         hasher.update(payload.as_bytes());
         let hash = format!("{:x}", hasher.finalize());
@@ -704,7 +554,7 @@ impl AuthContext {
         }
 
         if let Some(ref token) = self.access_token {
-            if let Ok(val) = HeaderValue::from_str(&format!("Bearer {token}")) {
+            if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", token.expose())) {
                 headers.insert(AUTHORIZATION, val);
             }
         } else {
@@ -721,6 +571,15 @@ impl AuthContext {
             }
         }
 
+        for key in [
+            AUTHORIZATION,
+            COOKIE,
+            reqwest::header::HeaderName::from_static("x-goog-visitor-id"),
+        ] {
+            if let Some(value) = headers.get_mut(key) {
+                value.set_sensitive(true);
+            }
+        }
         headers
     }
 
@@ -742,7 +601,7 @@ impl AuthContext {
         }
 
         if let Some(ref visitor) = self.visitor_data {
-            client_obj["visitorData"] = serde_json::Value::String(visitor.clone());
+            client_obj["visitorData"] = serde_json::Value::String(visitor.expose().to_owned());
         }
 
         serde_json::json!({
@@ -752,5 +611,16 @@ impl AuthContext {
                 "lockedSafetyMode": false
             }
         })
+    }
+}
+
+impl std::fmt::Debug for DeviceCodeResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeviceCodeResponse([REDACTED])")
+    }
+}
+impl std::fmt::Debug for DeviceTokenResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DeviceTokenResponse([REDACTED])")
     }
 }

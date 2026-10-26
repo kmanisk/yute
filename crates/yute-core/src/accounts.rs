@@ -50,24 +50,50 @@ pub struct Accounts {
     sessions: HashMap<String, AuthContext>,
     active: String,
     storage: AuthStorage,
-    path: PathBuf,
     feeds: HashMap<(String, String), FeedPage>,
+    persistent: bool,
     revision: Arc<std::sync::atomic::AtomicU64>,
     write_lock: Arc<Mutex<()>>,
 }
 impl Accounts {
     pub fn load(path: &Path, current: &AuthContext, anonymous: bool) -> Self {
         let storage = Self::read_storage(path).unwrap_or_default();
-        Self::from_storage(path.to_owned(), storage, current, anonymous)
+        let mut accounts =
+            Self::from_storage(crate::credentials::path(), storage, current, anonymous);
+        accounts.persistent = true;
+        accounts
+    }
+    pub fn load_session(config: &crate::config::Config, mut auth: AuthContext) -> Result<Self> {
+        let legacy = crate::config::config_dir().join("auth.json");
+        let cookies = crate::config::resolve_path(&config.backend.cookies_file);
+        let storage = crate::credentials::migrate(
+            &[
+                legacy.clone(),
+                crate::config::resolve_path("~/.config/ytui/auth.json"),
+            ],
+            &[
+                cookies.clone(),
+                crate::config::resolve_path("~/.config/ytui/cookies.txt"),
+            ],
+        )?;
+        auth.load_auth_with_mode(&crate::credentials::path(), &cookies, &config.backend.auth)?;
+        let mut accounts = Self::from_storage(
+            crate::credentials::path(),
+            storage,
+            &auth,
+            config.general.start_anonymous || config.backend.auth == "guest",
+        );
+        accounts.persistent = crate::credentials::path().exists();
+        Ok(accounts)
     }
     pub fn read_storage(path: &Path) -> Result<AuthStorage> {
-        let raw = std::fs::read_to_string(path)?;
-        let bytes = if raw.starts_with("YTUI_ENC_V1:") {
-            crate::backend::auth::decrypt_auth_data(&raw)?
-        } else {
-            raw.into_bytes()
-        };
-        Ok(serde_json::from_slice(&bytes)?)
+        crate::credentials::migrate(
+            &[
+                path.to_owned(),
+                crate::config::resolve_path("~/.config/ytui/auth.json"),
+            ],
+            &[],
+        )
     }
     pub fn from_storage(
         path: PathBuf,
@@ -113,7 +139,11 @@ impl Accounts {
             sessions.insert(
                 id.clone(),
                 AuthContext {
-                    access_token: Some(account.access_token.clone()),
+                    access_token: if account.needs_login || account.access_token.is_empty() {
+                        None
+                    } else {
+                        Some(account.access_token.clone())
+                    },
                     refresh_token: Some(account.refresh_token.clone()),
                     token_expires_at: Some(account.expires_at),
                     visitor_data: account.visitor_data.clone().or_else(|| {
@@ -135,7 +165,7 @@ impl Accounts {
             );
         }
         // Imported cookie sessions are selectable without inventing OAuth tokens.
-        if current.cookie_header.is_some() && profiles.len() == 1 {
+        if current.cookie_header.is_some() {
             profiles.push(Account {
                 id: "cookies".into(),
                 name: "Cookie session".into(),
@@ -145,10 +175,14 @@ impl Accounts {
                 avatar_url: None,
                 status: AccountStatus::Ok,
             });
-            sessions.insert("cookies".into(), current.clone());
+            let mut cookie_session = current.clone();
+            cookie_session.auth_file_path = None;
+            sessions.insert("cookies".into(), cookie_session);
         }
         let active = if anonymous {
             ANONYMOUS.into()
+        } else if current.cookie_header.is_some() && current.access_token.is_none() {
+            "cookies".into()
         } else {
             storage
                 .active_account
@@ -163,14 +197,17 @@ impl Accounts {
             sessions,
             active,
             storage,
-            path,
             feeds: HashMap::new(),
+            persistent: false,
             revision: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             write_lock: Arc::new(Mutex::new(())),
         }
     }
     pub fn current_context(&self) -> AuthContext {
-        self.sessions[&self.active].clone()
+        self.sessions
+            .get(&self.active)
+            .unwrap_or(&self.sessions[ANONYMOUS])
+            .clone()
     }
     pub fn update_profile(&mut self, name: &str, handle: &str) {
         let index = self.active_index();
@@ -299,94 +336,69 @@ impl Accounts {
     pub fn cache_namespace(&self) -> String {
         hex::encode(&Sha256::digest(self.active.as_bytes())[..12])
     }
-    pub fn remove(&mut self, index: usize) -> Result<()> {
-        let profile = self
+    pub fn removal_job(
+        &self,
+        index: usize,
+    ) -> Result<impl FnOnce() -> Result<()> + Send + 'static> {
+        let id = self
             .profiles
             .get(index)
-            .ok_or_else(|| anyhow::anyhow!("Account not found"))?;
-        if profile.id == ANONYMOUS {
+            .ok_or_else(|| anyhow::anyhow!("Account not found"))?
+            .id
+            .clone();
+        if id == ANONYMOUS {
             bail!("Anonymous cannot be removed");
         }
-        if profile.id == self.active {
-            bail!("Switch to another account before removing this one");
+        self.revision
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let lock = self.write_lock.clone();
+        Ok(move || {
+            let _guard = lock.lock().unwrap();
+            crate::credentials::update(|storage| {
+                storage.accounts.remove(&id);
+                Ok(())
+            })
+        })
+    }
+    pub fn forget(&mut self, id: &str) {
+        if id == ANONYMOUS {
+            return;
         }
-        let id = profile.id.clone();
-        self.storage.accounts.remove(&id);
-        self.persist()?;
-        self.profiles.remove(index);
-        self.sessions.remove(&id);
-        self.feeds.retain(|(account, _), _| *account != id);
-        Ok(())
+        self.revision
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.storage.accounts.remove(id);
+        self.profiles.retain(|p| p.id != id);
+        self.sessions.remove(id);
+        self.feeds.retain(|(account, _), _| account != id);
     }
     pub fn persist_background(&self) {
-        let path = self.path.clone();
+        if !self.persistent {
+            return;
+        }
         let revision = self.revision.clone();
         let generation = revision.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         let lock = self.write_lock.clone();
-        let mut storage = self.storage.clone();
-        for (id, session) in &self.sessions {
-            if let Some(saved) = storage.accounts.get_mut(id) {
-                if let Some(token) = &session.access_token {
-                    saved.access_token = token.clone();
-                }
-                if let Some(token) = &session.refresh_token {
-                    saved.refresh_token = token.clone();
-                }
-                saved.expires_at = session.token_expires_at.unwrap_or(saved.expires_at);
-                saved.visitor_data = session.visitor_data.clone();
-            }
-        }
+        let storage = self.storage.clone();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             runtime.spawn_blocking(move || -> Result<()> {
                 let _guard = lock.lock().unwrap();
                 if revision.load(std::sync::atomic::Ordering::SeqCst) != generation {
                     return Ok(());
                 }
-                let encrypted =
-                    crate::backend::auth::encrypt_auth_data(&serde_json::to_vec(&storage)?)?;
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                #[cfg(unix)]
-                {
-                    use std::{fs::OpenOptions, io::Write, os::unix::fs::OpenOptionsExt};
-                    let mut file = OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .mode(0o600)
-                        .open(path)?;
-                    file.write_all(encrypted.as_bytes())?;
-                }
-                #[cfg(not(unix))]
-                std::fs::write(path, encrypted)?;
-                Ok(())
+                crate::credentials::update(|saved| {
+                    for (id, account) in storage.accounts {
+                        // Existing tokens may have been refreshed independently.
+                        let existing = saved.accounts.entry(id).or_insert_with(|| account.clone());
+                        existing.name = account.name;
+                        existing.handle = account.handle;
+                        existing.avatar_url = account.avatar_url;
+                        existing.page_id = account.page_id;
+                    }
+                    saved.active_account = storage.active_account;
+                    Ok(())
+                })
             });
         }
-    }
-    pub fn persist(&self) -> Result<()> {
-        self.revision
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        let _guard = self.write_lock.lock().unwrap();
-        let json = serde_json::to_vec(&self.storage)?;
-        let encrypted = crate::backend::auth::encrypt_auth_data(&json)?;
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        #[cfg(unix)]
-        {
-            use std::{fs::OpenOptions, io::Write, os::unix::fs::OpenOptionsExt};
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&self.path)?;
-            file.write_all(encrypted.as_bytes())?;
-        }
-        #[cfg(not(unix))]
-        std::fs::write(&self.path, encrypted)?;
-        Ok(())
     }
 }
 

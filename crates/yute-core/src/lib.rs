@@ -5,6 +5,8 @@ pub mod media;
 pub mod player;
 
 pub mod accounts;
+pub mod credentials;
 pub mod http;
 pub mod oauth;
+pub mod secret;
 pub mod trace;

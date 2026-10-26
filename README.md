@@ -180,7 +180,7 @@ Config lives at:
 ~/.config/yute/
 ```
 
-Legacy `ytui` config/token files can be read and migrated without overwriting an existing Yute config.
+Legacy `ytui` settings are imported without overwriting Yute settings. Tokens and cookies migrate into the encrypted XDG data store; see [credential storage](docs/credentials.md).
 
 ---
 

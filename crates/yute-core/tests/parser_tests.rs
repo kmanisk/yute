@@ -637,7 +637,7 @@ fn http_only_cookie_rows_are_not_mistaken_for_comments() {
     let mut auth = yute_core::backend::auth::AuthContext::default();
     auth.parse_netscape_cookies("# Netscape cookie file\n#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tSID\ttest-session\n.youtube.com\tTRUE\t/\tTRUE\t0\tSAPISID\ttest-sapisid\n");
     assert_eq!(
-        auth.cookies.get("SID").map(String::as_str),
+        auth.cookies.get("SID").map(|secret| secret.expose()),
         Some("test-session")
     );
     assert_eq!(auth.sapisid.as_deref(), Some("test-sapisid"));

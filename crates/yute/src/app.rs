@@ -233,6 +233,7 @@ pub struct App {
     pub accounts: Vec<AccountProfile>,
     pub account_store: yute_core::accounts::Accounts,
     pub account_picker: bool,
+    pub credentials_loaded: bool,
     pub login_modal: Option<crate::ui::signin::LoginModal>,
     pub pending_remove: Option<usize>,
     pub active_account_index: usize,
@@ -279,8 +280,6 @@ impl App {
         let thumbs = ThumbnailManager::new(picker, disk_cache);
         let player = Player::new(&config);
 
-        let cookies_path = resolve_path(&config.backend.cookies_file);
-        let auth_path = resolve_path("~/.config/yute/auth.json");
         let mut auth = AuthContext::default();
         auth.hl = config.backend.hl.clone();
         auth.gl = config.backend.gl.clone();
@@ -296,12 +295,12 @@ impl App {
                 auth.client_version = config.backend.client_version.clone();
             }
         }
-        let _ = auth.load_auth_with_mode(&auth_path, &cookies_path, &config.backend.auth);
-
-        let account_store = yute_core::accounts::Accounts::load(
-            &auth_path,
+        // Credentials and keyring access are deferred to a blocking worker.
+        let account_store = yute_core::accounts::Accounts::from_storage(
+            yute_core::credentials::path(),
+            Default::default(),
             &auth,
-            config.general.start_anonymous || config.backend.auth == "guest",
+            true,
         );
         let auth = std::sync::Arc::new(std::sync::Mutex::new(account_store.current_context()));
         let accounts = account_store.profiles.clone();
@@ -403,6 +402,7 @@ impl App {
             accounts,
             account_store,
             account_picker: false,
+            credentials_loaded: false,
             login_modal: None,
             pending_remove: None,
             active_account_index,
@@ -441,8 +441,10 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        auth.access_token.is_some() && auth.token_expires_at.is_none_or(|expiry| expiry > now)
-            || (auth.sapisid.is_some() && auth.cookie_header.is_some())
+        !auth.needs_login
+            && (auth.access_token.as_ref().is_some_and(|t| !t.is_empty())
+                && auth.token_expires_at.is_none_or(|expiry| expiry > now)
+                || (auth.sapisid.is_some() && auth.cookie_header.is_some()))
     }
     pub fn rebuild_backend(&mut self) {
         self.action_menu = None;

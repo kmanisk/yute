@@ -380,13 +380,7 @@ fn migrate_config_from(old: &std::path::Path, new: &std::path::Path) -> std::io:
     }
     fs::create_dir_all(new)?;
     fs::set_permissions(new, fs::Permissions::from_mode(0o700))?;
-    for name in [
-        "config.toml",
-        "auth.json",
-        "cookies.txt",
-        "active_account.json",
-        "theme.toml",
-    ] {
+    for name in ["config.toml", "active_account.json", "theme.toml"] {
         let source = old.join(name);
         let dest = new.join(name);
         if source.is_file() && !dest.exists() {
@@ -438,7 +432,6 @@ mod migration_tests {
     #[test]
     fn copies_private_legacy_files_without_overwriting_new_settings() {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
         let root = std::env::temp_dir().join(format!("yute-migration-{}", std::process::id()));
         let old = root.join("legacy");
         let new = root.join("current");
@@ -452,17 +445,9 @@ mod migration_tests {
             fs::read_to_string(new.join("config.toml")).unwrap(),
             "current"
         );
-        assert_eq!(
-            fs::read_to_string(new.join("auth.json")).unwrap(),
-            "fixture-encrypted-data"
-        );
-        assert_eq!(
-            fs::metadata(new.join("auth.json"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
+        assert!(
+            !new.join("auth.json").exists(),
+            "credentials migrate only through the encrypted store"
         );
         assert!(old.join("auth.json").exists());
         fs::remove_dir_all(root).unwrap();

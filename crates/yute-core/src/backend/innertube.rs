@@ -98,9 +98,10 @@ impl InnerTubeBackend {
         {
             let mut guard = self.auth.lock().unwrap();
             if guard.visitor_data.as_deref() != Some(vis) {
-                guard.visitor_data = Some(vis.to_string());
-                if let Some(ref p) = guard.auth_file_path.clone() {
-                    let _ = guard.save_auth_file(p);
+                guard.visitor_data = Some(vis.into());
+                if let Some(path) = guard.auth_file_path.clone() {
+                    let context = guard.clone();
+                    tokio::task::spawn_blocking(move || context.save_auth_file(&path));
                 }
             }
         }
@@ -530,7 +531,7 @@ impl Backend for InnerTubeBackend {
             let _ = self
                 .client
                 .get(&playback_url)
-                .header("Authorization", format!("Bearer {tok}"))
+                .header("Authorization", format!("Bearer {}", tok.expose()))
                 .header("User-Agent", "Mozilla/5.0")
                 .send()
                 .await;
@@ -561,7 +562,7 @@ impl Backend for InnerTubeBackend {
             let _ = self
                 .client
                 .get(&watchtime_url)
-                .header("Authorization", format!("Bearer {tok}"))
+                .header("Authorization", format!("Bearer {}", tok.expose()))
                 .header("User-Agent", "Mozilla/5.0")
                 .send()
                 .await;

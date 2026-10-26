@@ -80,27 +80,19 @@ pub struct GuiAppInner {
 
 impl GuiApp {
     pub fn new(app: &Application, cfg: Config) -> anyhow::Result<Self> {
-        let auth_path = yute_core::config::config_dir().join("auth.json");
-        let cookies_path = yute_core::config::config_dir().join("cookies.txt");
+        let auth = AuthContext::default();
+        let credentials_config = cfg.clone();
 
-        let mut auth = AuthContext::default();
-        let _ = auth.load_auth_with_mode(&auth_path, &cookies_path, &cfg.backend.auth);
-
-        let cookies_from_browser = if !cfg.backend.cookies_from_browser.is_empty() {
-            Some(cfg.backend.cookies_from_browser.clone())
-        } else {
-            let brave_origin =
-                yute_core::config::resolve_path("~/.config/BraveSoftware/Brave-Origin");
-            if brave_origin.exists() {
-                Some(format!("brave:{}", brave_origin.display()))
+        let cookies_from_browser =
+            if cfg.backend.auth == "cookies" && !cfg.backend.cookies_from_browser.is_empty() {
+                Some(cfg.backend.cookies_from_browser.clone())
             } else {
                 None
-            }
-        };
+            };
 
         let auth_arc = Arc::new(Mutex::new(auth));
         let inner_backend = Box::new(InnerTubeBackend::from_arc(Arc::clone(&auth_arc)));
-        let ytdlp_backend = Box::new(YtDlpBackend::new(Some(cookies_path), cookies_from_browser));
+        let ytdlp_backend = Box::new(YtDlpBackend::new(None, cookies_from_browser));
         let backend: Arc<dyn Backend> =
             Arc::new(BackendChain::new(vec![inner_backend, ytdlp_backend]));
 
@@ -233,7 +225,24 @@ impl GuiApp {
         app_inst.build_ui();
         app_inst.setup_shortcuts();
         app_inst.setup_polling_timer();
-        app_inst.load_home_feed();
+        let ready_app = app_inst.clone();
+        spawn_task(
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    yute_core::accounts::Accounts::load_session(
+                        &credentials_config,
+                        AuthContext::default(),
+                    )
+                })
+                .await
+            },
+            move |result| {
+                if let Ok(Ok(accounts)) = result {
+                    *auth_arc.lock().unwrap() = accounts.current_context();
+                }
+                ready_app.load_home_feed();
+            },
+        );
 
         Ok(app_inst)
     }

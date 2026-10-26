@@ -38,8 +38,11 @@ yute/
    - TV OAuth device-code authorization (`yute login`).
    - Tokens stored on disk with strict `0600` permissions.
    - Encrypted at rest via AES-256-GCM.
-   - Machine-bound encryption key derived from system hardware identifiers.
-   - Token files (`~/.config/yute/auth.json`) must remain excluded from dotfile managers such as chezmoi.
+   - Fresh OS-random nonce and authenticated version/key-source header per write.
+   - OS keyring master key; private keyfile fallback or Argon2id passphrase-file key.
+   - Secrets use zeroizing owned strings with redacted Debug implementations.
+   - Credential I/O runs on blocking workers after the first frame.
+   - See [Credential storage](credentials.md) for paths and migration.
 
 2. **InnerTube TVHTML5 Client:**
    - Emulates the stable TV client identity (`TVHTML5`).

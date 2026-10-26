@@ -135,6 +135,8 @@ async fn main() -> anyhow::Result<()> {
     let mut app = App::new(config, picker);
     let (tx_event, mut rx_event) = channel::<AppEvent>(64);
 
+    hydrate_accounts(&app, tx_event.clone());
+
     // Initial load: load disk cache immediately for fast launch, then fetch fresh
     try_load_feed_cache(&mut app, "feed_home");
     app.is_loading = true;
@@ -335,6 +337,24 @@ fn init_performance_trace() -> anyhow::Result<()> {
         }));
     let _ = tracing_subscriber::registry().with(layer).try_init();
     Ok(())
+}
+
+fn hydrate_accounts(app: &App, tx: Sender<AppEvent>) {
+    let generation = app
+        .auth_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    let config = app.config.clone();
+    let auth = app.auth.lock().unwrap().clone();
+    tokio::spawn(async move {
+        let result = tokio::task::spawn_blocking(move || {
+            yute_core::accounts::Accounts::load_session(&config, auth)
+        })
+        .await
+        .unwrap_or_else(|_| Err(anyhow::anyhow!("Credential worker failed")));
+        let _ = tx
+            .send(AppEvent::CredentialsLoaded(generation, result))
+            .await;
+    });
 }
 
 fn refresh_account_profiles(app: &App, tx: Sender<AppEvent>) {
@@ -560,13 +580,21 @@ async fn handle_key_event(
                 if index == app.active_account_index {
                     activate_account(app, 0, tx.clone());
                 }
-                match app.account_store.remove(index) {
-                    Ok(()) => {
-                        app.accounts = app.account_store.profiles.clone();
-                        app.accounts_cursor = 0;
-                        app.status_text = "Account removed locally".into();
+                if let Some(account) = app.accounts.get(index) {
+                    let id = account.id.clone();
+                    match app.account_store.removal_job(index) {
+                        Ok(job) => {
+                            tokio::spawn(async move {
+                                let result =
+                                    tokio::task::spawn_blocking(job).await.unwrap_or_else(|_| {
+                                        Err(anyhow::anyhow!("Credential worker failed"))
+                                    });
+                                let _ = tx.send(AppEvent::AccountRemoved(id, result)).await;
+                            });
+                            app.status_text = "Removing saved account…".into();
+                        }
+                        Err(_) => app.status_text = "Cannot remove this account".into(),
                     }
-                    Err(_) => app.status_text = "Could not remove account".into(),
                 }
             } else {
                 logout(app);
@@ -2364,6 +2392,66 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
         AppEvent::StatusMessage(msg) => {
             app.status_text = msg;
         }
+        AppEvent::CredentialsLoaded(generation, result) => {
+            if generation
+                != app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            app.credentials_loaded = true;
+            match result {
+                Ok(accounts) => {
+                    let next = accounts.current_context();
+                    let changed = app.account_store.active_id() != accounts.active_id()
+                        || app.auth.lock().unwrap().access_token != next.access_token;
+                    app.accounts = accounts.profiles.clone();
+                    app.active_account_index = accounts.active_index();
+                    app.account_name = app.accounts[app.active_account_index].name.clone();
+                    app.account_handle = app.accounts[app.active_account_index].handle.clone();
+                    app.account_store = accounts;
+                    if changed {
+                        app.auth.lock().unwrap().cancelled.cancel();
+                        app.auth = Arc::new(std::sync::Mutex::new(next));
+                        app.rebuild_backend();
+                        app.feed_generation = app.feed_generation.wrapping_add(1);
+                        app.items.clear();
+                        app.continuation_token = None;
+                        if app.screen == Screen::Home {
+                            try_load_feed_cache(app, "feed_home");
+                            trigger_home_fetch(app, tx.clone(), None);
+                        } else if app.screen == Screen::Search && !app.search_query.is_empty() {
+                            trigger_search_fetch(app, tx.clone(), app.search_query.clone());
+                        } else {
+                            ensure_screen_loaded(app, tx.clone());
+                        }
+                    }
+                    refresh_account_profiles(app, tx);
+                }
+                Err(_) => {
+                    app.status_text =
+                        "Credentials locked or unreadable; unlock the keyring or check YUTE_KEYFILE"
+                            .into()
+                }
+            }
+        }
+        AppEvent::AccountRemoved(id, result) => {
+            if result.is_ok() {
+                let was_active = app.account_store.active_id() == id;
+                app.account_store.forget(&id);
+                app.accounts = app.account_store.profiles.clone();
+                if was_active {
+                    activate_account(app, 0, tx.clone());
+                    app.account_store.forget(&id);
+                }
+                app.active_account_index = app.account_store.active_index();
+                app.accounts_cursor = app.active_account_index;
+                app.status_text = "Account removed locally".into();
+            } else {
+                app.status_text = "Could not remove saved credentials".into();
+            }
+        }
         AppEvent::LoginDisplay(generation, event) => {
             if generation
                 != app
@@ -2396,18 +2484,10 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             }
             app.login_modal = None;
             app.config.backend.auth = "tv_oauth".into();
-            app.account_store = yute_core::accounts::Accounts::load(
-                &yute::config::resolve_path("~/.config/yute/auth.json"),
-                &app.auth.lock().unwrap(),
-                false,
-            );
-            app.accounts = app.account_store.profiles.clone();
-            app.active_account_index = app.account_store.active_index();
-            app.auth = Arc::new(std::sync::Mutex::new(app.account_store.current_context()));
-            app.rebuild_backend();
+            hydrate_accounts(app, tx.clone());
             let saved = app.config.save().is_ok();
             if let Ok(mut auth) = app.auth.lock() {
-                auth.auth_file_path = Some(yute::config::resolve_path("~/.config/yute/auth.json"));
+                auth.auth_file_path = Some(yute_core::credentials::path());
             }
             app.account_name = if name.is_empty() {
                 "Signed in".into()

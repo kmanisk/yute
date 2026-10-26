@@ -524,54 +524,21 @@ fn watch_keys_navigate_content_without_player_controls() {
 }
 
 #[test]
-fn test_oauth_save_token_and_auth_file_0600_permissions() {
-    use std::fs;
-    use yute::backend::auth::AuthContext;
-
-    let dir = std::env::temp_dir().join(format!(
-        "yute_test_auth_{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let _ = fs::create_dir_all(&dir);
-    let auth_file = dir.join("auth.json");
-
-    let mut ctx = AuthContext::default();
-    ctx.auth_file_path = Some(auth_file.clone());
-
-    let res = ctx.save_token_and_account(
-        "test_access_token_123".to_string(),
-        "test_refresh_token_456".to_string(),
-        Some(3600),
-        "Test Channel".to_string(),
-        "@testchannel".to_string(),
-    );
-    assert!(res.is_ok(), "save_token_and_account must succeed");
-    assert!(auth_file.exists(), "auth.json must be written");
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let meta = fs::metadata(&auth_file).unwrap();
-        let mode = meta.permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "auth.json must be saved with 0600 permissions");
+fn credential_debug_never_exposes_auth_values() {
+    let mut auth = yute::backend::auth::AuthContext::default();
+    auth.access_token = Some("access-fixture".into());
+    auth.refresh_token = Some("refresh-fixture".into());
+    auth.cookie_header = Some("cookie-fixture".into());
+    auth.visitor_data = Some("visitor-fixture".into());
+    let debug = format!("{auth:?}");
+    for secret in [
+        "access-fixture",
+        "refresh-fixture",
+        "cookie-fixture",
+        "visitor-fixture",
+    ] {
+        assert!(!debug.contains(secret));
     }
-
-    let mut reload_ctx = AuthContext::default();
-    let load_res = reload_ctx.load_auth_file(&auth_file);
-    assert!(load_res.is_ok());
-    assert_eq!(
-        reload_ctx.access_token.as_deref(),
-        Some("test_access_token_123")
-    );
-    assert_eq!(
-        reload_ctx.refresh_token.as_deref(),
-        Some("test_refresh_token_456")
-    );
-
-    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -812,49 +779,6 @@ fn watch_reactions_and_comment_bindings() {
 fn test_default_hwdec_is_auto_safe() {
     let cfg = yute::config::Config::default();
     assert_eq!(cfg.playback.hwdec, "auto-safe");
-}
-
-#[test]
-fn test_auth_encryption_and_migration() {
-    use std::fs;
-    use yute::backend::auth::{decrypt_auth_data, encrypt_auth_data, AuthContext};
-
-    let sample_payload = b"{\"accounts\":{\"test\":{\"access_token\":\"secret_token_123\",\"refresh_token\":\"secret_ref_456\",\"expires_at\":9999999999,\"name\":\"Test Account\",\"handle\":\"@test\"}},\"active_account\":\"test\"}";
-
-    // Test encryption and decryption round-trip
-    let enc = encrypt_auth_data(sample_payload).expect("Encryption must succeed");
-    assert!(enc.starts_with("YTUI_ENC_V1:"));
-    assert!(!enc.contains("secret_token_123"));
-
-    let dec = decrypt_auth_data(&enc).expect("Decryption must succeed");
-    assert_eq!(dec, sample_payload);
-
-    // Test automatic migration from plaintext file
-    let tmp_dir = std::env::temp_dir().join(format!("yute_test_auth_{}", std::process::id()));
-    let _ = fs::create_dir_all(&tmp_dir);
-    let auth_file = tmp_dir.join("auth.json");
-
-    fs::write(&auth_file, sample_payload).expect("Write plaintext test auth");
-
-    let mut ctx = AuthContext::default();
-    ctx.load_auth_file(&auth_file).expect("Load auth file");
-
-    assert_eq!(ctx.access_token.as_deref(), Some("secret_token_123"));
-    assert_eq!(ctx.refresh_token.as_deref(), Some("secret_ref_456"));
-
-    // Verify it was migrated to encrypted format on disk
-    let migrated_content = fs::read_to_string(&auth_file).expect("Read migrated file");
-    assert!(migrated_content.starts_with("YTUI_ENC_V1:"));
-    assert!(!migrated_content.contains("secret_token_123"));
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = fs::metadata(&auth_file).expect("Metadata").permissions();
-        assert_eq!(perms.mode() & 0o777, 0o600);
-    }
-
-    let _ = fs::remove_dir_all(&tmp_dir);
 }
 
 #[test]
