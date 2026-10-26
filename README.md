@@ -110,9 +110,9 @@ osd_bar = false
 autoplay = true
 ```
 
-`never` hides Shorts everywhere, including saved feeds, suggestions and explicit
-Shorts tabs. `hide` hides them in ordinary feeds but permits explicit Shorts and
-saved content. The underlying data stays cached. Settings changes persist;
+`never` hides Shorts in ordinary feeds, saved feeds and suggestions. Explicitly
+opening a Shorts filter or channel Shorts tab always shows Shorts without changing
+the preference. `hide` also permits saved Shorts. The underlying data stays cached. Settings changes persist;
 `:shorts on/off` explicitly changes the preference to show/hide.
 
 The stream-cache slider controls MPV readahead and a bounded 32–256 MiB packet

@@ -490,12 +490,13 @@ impl App {
                 | Screen::LocalVideos
         );
         let shorts_tab = matches!(&self.detail_route, Some(DetailRoute::Channel(route)) if route.tabs.get(route.active).is_some_and(|tab| tab.title.eq_ignore_ascii_case("shorts")));
-        let allow_shorts = saved
-            || shorts_tab
-            || matches!(
-                self.config.content.shorts,
-                crate::config::ShortsVisibility::Show
-            );
+        let explicit_shorts = shorts_tab || self.filter_kind == FilterKind::Shorts;
+        let allow_shorts = explicit_shorts
+            || match self.config.content.shorts {
+                crate::config::ShortsVisibility::Show => true,
+                crate::config::ShortsVisibility::Hide => saved,
+                crate::config::ShortsVisibility::Never => false,
+            };
         self.items
             .iter()
             .chain(
@@ -504,11 +505,7 @@ impl App {
                     .filter(|_| self.filter_kind == FilterKind::Channels),
             )
             .filter(|c| {
-                if matches!(
-                    self.config.content.shorts,
-                    crate::config::ShortsVisibility::Never
-                ) || (!allow_shorts && self.filter_kind != FilterKind::Shorts)
-                {
+                if !allow_shorts {
                     if let Card::Video(v) = c {
                         if v.badges.iter().any(|b| b == "SHORTS") {
                             return false;

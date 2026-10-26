@@ -14,7 +14,7 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("MPV seekbar", "Show MPV's seek overlay in addition to its own bottom controls."),
     ("User MPV profile", "Use your existing MPV configuration. Startup buffering follows your profile in this mode."),
     ("Autoplay next", "Play the next queued video when the current video ends."),
-    ("Shorts", "Never hides Shorts everywhere, including saved feeds and the Shorts tab. Hidden keeps explicit Shorts access."),
+    ("Shorts", "Hidden outside Shorts also hides saved Shorts. Explicit Shorts tabs always work without changing this preference."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -50,7 +50,7 @@ fn value(app: &App, index: usize) -> String {
         5 => toggle(app.config.playback.use_user_mpv_config),
         6 => toggle(app.config.playback.autoplay),
         7 => match app.config.content.shorts {
-            ShortsVisibility::Never => "‹ Never show ›",
+            ShortsVisibility::Never => "‹ Hidden outside Shorts ›",
             ShortsVisibility::Hide => "‹ Hidden in feeds ›",
             ShortsVisibility::Show => "‹ Show ›",
         }

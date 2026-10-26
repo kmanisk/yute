@@ -24,7 +24,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Clipboard | `copy url`, `copy title`, `copy channel` | Native `wl-copy` on Wayland or `xclip` on X11, invoked only by the copy action. |
 | Refresh | `refresh`, `refresh hard` | Network refresh of the current route; hard is an alias, not a disk-cache purge. Normal `r` can retry continuation failures. |
 | Filtering | `filter all/videos/shorts/live/playlists/channels`, `filter <query>`, `filter` | Named types select a tab; other text filters loaded titles. Omit the query to clear the title filter. |
-| Shorts | `shorts on`, `shorts off`, `shorts toggle` | Re-filter and save the visibility preference. Settings also offers Never show, which overrides saved items and explicit Shorts tabs. |
+| Shorts | `shorts on`, `shorts off`, `shorts toggle` | Re-filter and save the visibility preference. Settings also offers Hidden outside Shorts, which also hides saved Shorts; explicitly opening Shorts always works. |
 | Route names | `goto <route>` | Navigate to a canonical route; Tab lists available routes. |
 | Graphics | `set graphics sixel`, `kitty`, `halfblocks`, `none`, `auto` | Save the chosen graphics preference; restart required. |
 | Sidebar | `sidebar`, `sidebar show`, `sidebar hide`, `sidebar toggle` | Toggle or explicitly set visibility; hidden reclaims all width. |
@@ -63,7 +63,7 @@ shorts = "never" # "never", "hide" (default), or "show"
 This supersedes the legacy `grid.show_shorts` preference. Home, Subscriptions,
 Search and ordinary channel tabs hide Shorts by default, without deleting cached
 items. Explicit Shorts filters/tabs show them. History, playlists, Watch Later,
-Liked, Queue and Local preserve explicit content. `never` overrides all exceptions, including suggestions. `:shorts` explicitly changes and saves this preference without fetching again.
+Liked, Queue and Local preserve explicit content. `never` also hides saved Shorts and suggestions; explicit Shorts filters and channel Shorts tabs still work. `:shorts` explicitly changes and saves this preference without fetching again.
 
 Search and command rows support Left/Right, Home/End, Ctrl+A/E, Ctrl+U/W and
 Unicode-safe editing. Command Up/Down recalls session history. `g` shows a small

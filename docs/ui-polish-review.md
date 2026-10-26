@@ -77,9 +77,10 @@ Drafts require Enter to send and Esc cancels; successful posting requires a
 confirmed returned comment action, not optimistic local content.
 
 Settings uses compact step selectors, toggles, a bounded stream-cache slider and
-selected-option explanations. Its Shorts selector offers Never show, Hidden in
-feeds, and Show. Never overrides all saved-route/explicit-tab exceptions and
-suggestions without deleting the underlying cache.
+selected-option explanations. Its Shorts selector offers Hidden outside Shorts, Hidden in
+feeds, and Show. The strongest hiding also covers saved feeds and suggestions,
+but explicit Shorts filters and channel Shorts tabs always work without changing
+the saved preference or deleting underlying cached data.
 
 The stream-cache slider changes actual MPV readahead/cache-secs and a 32–256 MiB
 packet budget. Dedicated launches use the same values. Initial playback does not
@@ -99,7 +100,7 @@ synchronization remain incomplete. No daemon or new frequent timer was added.
 
 - `cargo fmt --check`: pass across the renamed workspace, including GTK files.
 - `cargo clippy --workspace --all-targets --all-features`: pass with existing style warnings.
-- `cargo test --workspace`: 107 pass, 3 native tests ignored by default.
+- `cargo test --workspace`: 108 pass, 3 native tests ignored by default.
 - All three native MPV tests were separately run and passed with local generated
   media/null outputs. Runtime quality, position, pause and actual cache properties
   were checked over native MPV JSON IPC. No YouTube playback/account writes were

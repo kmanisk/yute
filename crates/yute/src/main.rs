@@ -1013,16 +1013,6 @@ async fn handle_key_event(
 }
 
 fn set_content_filter(app: &mut App, kind: yute::app::FilterKind, tx: Sender<AppEvent>) {
-    if kind == yute::app::FilterKind::Shorts
-        && matches!(
-            app.config.content.shorts,
-            yute::config::ShortsVisibility::Never
-        )
-    {
-        app.status_text = "Shorts are disabled in Settings · :shorts on to enable".into();
-        return;
-    }
-
     use yute::app::{FilterKind, TabState};
     let source = if matches!(kind, FilterKind::Shorts | FilterKind::Live) {
         kind
@@ -3819,5 +3809,54 @@ mod feed_ui_tests {
         set_content_filter(&mut app, FilterKind::Channels, tx);
         assert_eq!(app.filtered_items().len(), 1);
         assert!(matches!(app.selected_card(),Some(Card::Channel(c)) if c.id=="UCfixture-owner"));
+    }
+    #[tokio::test]
+    async fn explicit_shorts_navigation_overrides_hiding_without_changing_preference() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        use yute::app::{FilterKind, TabState};
+        let (mut app, mut cards) = app_and_cards();
+        let mut short = cards[0].clone();
+        if let Card::Video(v) = &mut short {
+            v.id = "fixture-short".into();
+            v.badges.push("SHORTS".into());
+        }
+        cards.push(short.clone());
+        app.items = cards;
+        app.screen = Screen::Home;
+        app.filter_kind = FilterKind::Videos;
+        app.config.content.shorts = yute::config::ShortsVisibility::Never;
+        app.home_pages.insert(
+            FilterKind::Shorts,
+            TabState {
+                items: vec![short],
+                continuation: None,
+                selected: 0,
+                scroll: 0,
+            },
+        );
+        let (tx, _) = channel(16);
+        let mut keys = KeymapState::new();
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::SHIFT),
+            tx.clone(),
+        )
+        .await;
+        assert_eq!(app.filter_kind, FilterKind::Shorts);
+        assert_eq!(app.home_source, FilterKind::Shorts);
+        assert_eq!(app.selected_card().unwrap().id(), "fixture-short");
+        assert!(!app.is_loading);
+        assert!(matches!(
+            app.config.content.shorts,
+            yute::config::ShortsVisibility::Never
+        ));
+        set_content_filter(&mut app, FilterKind::All, tx);
+        assert_eq!(app.items.len(), 6);
+        assert_eq!(app.filtered_items().len(), 5);
+        assert!(!app
+            .filtered_items()
+            .iter()
+            .any(|c| c.id() == "fixture-short"));
     }
 }

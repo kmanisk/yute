@@ -315,7 +315,7 @@ fn home_and_search_share_framed_two_row_layout_at_screenshot_geometry() {
 }
 
 #[test]
-fn never_show_shorts_overrides_saved_routes_and_explicit_tabs() {
+fn strongest_shorts_hiding_still_allows_explicit_shorts_tabs() {
     let mut app = app();
     if let Card::Video(v) = &mut app.items[0] {
         v.badges.push("SHORTS".into());
@@ -333,8 +333,22 @@ fn never_show_shorts_overrides_saved_routes_and_explicit_tabs() {
         app.filter_kind = FilterKind::All;
         assert_eq!(app.filtered_items().len(), 29);
         app.filter_kind = FilterKind::Shorts;
-        assert!(app.filtered_items().is_empty());
+        assert_eq!(app.filtered_items().len(), 1);
     }
+    app.screen = Screen::ChannelView;
+    app.filter_kind = FilterKind::All;
+    app.detail_route = Some(DetailRoute::Channel(Box::new(ChannelState {
+        channel: channel(),
+        tabs: vec![yute::backend::models::ChannelLink {
+            title: "Shorts".into(),
+            params: None,
+            selected: true,
+        }],
+        active: 0,
+        subscribed: None,
+        pages: Default::default(),
+    })));
+    assert_eq!(app.filtered_items().len(), 30);
     assert_eq!(app.items.len(), 30, "policy must not destroy cached items");
 }
 
