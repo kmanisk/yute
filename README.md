@@ -332,7 +332,6 @@ cargo build --release
 
 Yute is early software. The parts I would rather mark incomplete than fake are:
 
-- account switching
 - full cross-client history/resume parity
 - endless Mix-radio continuation
 - some authenticated mutations when YouTube does not return usable action parameters
@@ -373,3 +372,10 @@ Exiting Yute terminates an unfinished download; yt-dlp partial files can resume
 on a later attempt. Playlist/Mix downloads use their collection URL. No shell is
 used to execute entity URLs or filenames. Account cookies are only supplied for
 non-guest sessions with an existing cookie file.
+
+Account switching is available through `:account` (`:acc`, `:a`) or `ga`.
+The picker includes Anonymous and saved TV identities; returned brand profiles
+use their page-id header. Use `:account add`, `:account <name|index|prefix>`,
+`:account remove <name>`, `:account anon`, or `:account whoami`.
+Set `[general] start_anonymous = true` to start anonymously instead of restoring
+the last used account. Cached feeds are isolated by account; thumbnails are shared.

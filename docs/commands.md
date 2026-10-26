@@ -20,7 +20,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Seek | `seek +30`, `seek -10`, `seek 1:20`, `seek 1:02:30` | Relative seconds or absolute time, never percentages for colon timestamps. |
 | Volume | `volume 50`, `volume +5`, `volume -5` (`vol`) | Absolute 0–100 or bounded relative change. |
 | Local queue | `queue add`, `queue next`, `queue remove`, `queue clear` | Append/prepend a selected playable video, remove the selected queue instance, or clear the local queue. |
-| Session | `login`, `logout`, `account switch` | Device-code login; confirmed local sign-out; switching explicitly reports unavailable. |
+| Session | `account` (`acc`, `a`), `account <name/index/prefix>`, `account add` (`login`, `signin`), `account remove <name>` (`logout`), `account anon` (`anonymous`), `account whoami` | Quick picker, direct switching, TV login, confirmed local removal, Anonymous, or session details. |
 | Subscription | `subscribe`, `unsubscribe` | Real authenticated requests for the selected channel; reported state changes only after successful results. |
 | Rating | `like`, `unlike` | Authenticated selected-video/current-Watch rating requests. Unconfirmed results are errors. |
 | Browser | `open`, `open channel` | Open the typed entity URL or selected item's channel through `xdg-open`. No embedded browser. |
@@ -39,16 +39,15 @@ non-finite numeric arguments produce status errors rather than launching a proce
 
 ## Account and backend limits
 
-Logout is local sign-out, not Google token revocation: it clears active yute
-credentials/visitor state, cancels obsolete login/account results, saves guest mode,
-stops its playback and discards private route history. The encrypted saved login
-file remains available. Guest feeds use a separate cache namespace, and guest
-requests/resolution do not receive yute-supplied cookies. Independently configured
-user MPV/yt-dlp settings remain under the user's control.
+The built-in Anonymous account is always present. The picker and `ga` list saved
+accounts, including returned brand identities. j/k + Enter or 1-9 switches; a adds
+and d requests confirmed removal. Removal deletes local credentials and does not
+revoke Google's token. Start as in Settings chooses last used or Anonymous.
+Accounts own auth/visitor state and cache namespaces; switching cancels obsolete
+requests and renders a saved Home page immediately before network revalidation.
+All accounts share connection pools and thumbnail caches. Profile discovery uses
+MediaServiceCore's V2 accounts_list read mask and branded X-Goog-Pageid header.
 
-The existing credential implementation does not support real UI account switching,
-so selecting/switching a displayed account cannot claim success. Refresh and full
-cross-client history/resume synchronization remain backend follow-up work.
 Subscription/rating commands use existing InnerTube endpoints; they are not locally
 simulated, and live authenticated mutations were not performed during development.
 

@@ -9,25 +9,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 const INNERTUBE_BASE: &str = "https://www.youtube.com/youtubei/v1";
-
-fn build_optimized_client() -> Client {
-    Client::builder()
-        .timeout(Duration::from_secs(10))
-        .tcp_nodelay(true)
-        .tcp_keepalive(Duration::from_secs(60))
-        .pool_idle_timeout(Duration::from_secs(90))
-        .pool_max_idle_per_host(10)
-        .http2_keep_alive_interval(Duration::from_secs(15))
-        .http2_keep_alive_timeout(Duration::from_secs(5))
-        .http2_keep_alive_while_idle(true)
-        .brotli(true)
-        .gzip(true)
-        .build()
-        .unwrap_or_default()
-}
 
 pub struct InnerTubeBackend {
     client: Client,
@@ -37,14 +20,14 @@ pub struct InnerTubeBackend {
 impl InnerTubeBackend {
     pub fn new(auth: AuthContext) -> Self {
         Self {
-            client: build_optimized_client(),
+            client: crate::http::client(),
             auth: Arc::new(Mutex::new(auth)),
         }
     }
 
     pub fn from_arc(auth: Arc<Mutex<AuthContext>>) -> Self {
         Self {
-            client: build_optimized_client(),
+            client: crate::http::client(),
             auth,
         }
     }
@@ -57,9 +40,16 @@ impl InnerTubeBackend {
             "search" => "search",
             _ => "other",
         };
-        self.post_endpoint_inner(endpoint, body)
-            .instrument(tracing::info_span!(target:"yute_perf","innertube_request",operation))
-            .await
+        let cancelled = self.auth.lock().unwrap().cancelled.clone();
+        let request = self.post_endpoint_inner(endpoint, body);
+        async {
+            tokio::select! {
+                _ = cancelled.cancelled() => Err(crate::accounts::AccountCancelled.into()),
+                result = request => result,
+            }
+        }
+        .instrument(tracing::info_span!(target:"yute_perf","innertube_request",operation))
+        .await
     }
     async fn post_endpoint_inner(&self, endpoint: &str, body: Value) -> Result<Value> {
         let url = format!("{INNERTUBE_BASE}/{endpoint}");

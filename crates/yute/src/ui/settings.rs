@@ -15,6 +15,7 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("User MPV profile", "Use your existing MPV configuration. Startup buffering follows your profile in this mode."),
     ("Autoplay next", "Play the next queued video when the current video ends."),
     ("Shorts", "Hidden outside Shorts also hides saved Shorts. Explicit Shorts tabs always work without changing this preference."),
+    ("Start as", "Choose the last used account or Anonymous for the next launch."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -53,6 +54,12 @@ fn value(app: &App, index: usize) -> String {
             ShortsVisibility::Never => "‹ Hidden outside Shorts ›",
             ShortsVisibility::Hide => "‹ Hidden in feeds ›",
             ShortsVisibility::Show => "‹ Show ›",
+        }
+        .into(),
+        8 => if app.config.general.start_anonymous {
+            "‹ Anonymous ›"
+        } else {
+            "‹ Last used ›"
         }
         .into(),
         _ => String::new(),
@@ -195,6 +202,7 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
             app.selected_index = 0;
             app.scroll_row = 0;
         }
+        8 => app.config.general.start_anonymous = !app.config.general.start_anonymous,
         _ => return,
     }
     app.status_text = format!(

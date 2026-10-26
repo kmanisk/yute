@@ -15,7 +15,10 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Tab / Shift-Tab", "Cycle pane focus"),
     ("Other panes", ""),
     ("Settings: j/k", "Choose setting; h/l/Enter changes it"),
-    ("Account", "Session details; :login / :logout"),
+    (
+        "Account",
+        "ga lists accounts; :acc picker; a add, d remove, 1-9 switch",
+    ),
     (
         "Command: :",
         "Type commands; Tab completes; Up/Down history",

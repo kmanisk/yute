@@ -100,8 +100,9 @@ impl ShellLayout {
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
-    app.overlay_area =
-        super::actions::menu_rect(app, size).or_else(|| cmdline::popup_area(app, size));
+    app.overlay_area = accounts::picker_area(app, size)
+        .or_else(|| super::actions::menu_rect(app, size))
+        .or_else(|| cmdline::popup_area(app, size));
     if size.width < 30 || size.height < 10 {
         return;
     }
@@ -186,6 +187,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     crate::actions::render_menu(f, app);
+    accounts::render_picker(f, app);
 
     // Render quit confirmation modal
     if app.confirming_quit || app.confirming_logout {

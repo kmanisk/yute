@@ -323,10 +323,10 @@ fn test_header_is_minimal_and_does_not_show_account() {
 }
 
 #[test]
-fn test_account_switching_reports_unavailable_without_faking_identity() {
+fn test_account_switching_rejects_unknown_identity() {
     let mut app = create_mock_app();
     let name = app.account_name.clone();
-    assert!(!app.switch_account(1));
+    assert!(!app.switch_account(usize::MAX));
     assert_eq!(app.account_name, name);
     assert!(app.status_text.contains("unavailable"));
 }

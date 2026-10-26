@@ -116,6 +116,7 @@ impl Backend for BackendChain {
             match b.home(chip_token).await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
                 Ok(res) => empty_res = Some(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -127,6 +128,7 @@ impl Backend for BackendChain {
         for backend in &self.backends {
             match backend.home_category(category).await {
                 Ok(page) if !page.items.is_empty() => return Ok(page),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => error = e,
                 _ => {}
             }
@@ -139,6 +141,7 @@ impl Backend for BackendChain {
         for b in &self.backends {
             match b.continue_feed(token).await {
                 Ok(res) => return Ok(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -152,6 +155,7 @@ impl Backend for BackendChain {
             match b.subscriptions().await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
                 Ok(res) => empty_res = Some(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -165,6 +169,7 @@ impl Backend for BackendChain {
             match b.history().await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
                 Ok(res) => empty_res = Some(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -178,6 +183,7 @@ impl Backend for BackendChain {
             match b.watch_later().await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
                 Ok(res) => empty_res = Some(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -205,6 +211,7 @@ impl Backend for BackendChain {
             match b.playlists().await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
                 Ok(res) => empty_res = Some(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -218,6 +225,7 @@ impl Backend for BackendChain {
             match b.playlist(id).await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
                 Ok(res) => empty_res = Some(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -236,6 +244,7 @@ impl Backend for BackendChain {
             match b.search(q, filters, token).await {
                 Ok(res) if !res.items.is_empty() => return Ok(res),
                 Ok(res) => empty_res = Some(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -265,6 +274,7 @@ impl Backend for BackendChain {
         for b in &self.backends {
             match b.watch(video_id).await {
                 Ok(res) => return Ok(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -276,6 +286,7 @@ impl Backend for BackendChain {
         for b in &self.backends {
             match b.channel(id, tab).await {
                 Ok(res) => return Ok(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -291,6 +302,7 @@ impl Backend for BackendChain {
         for backend in &self.backends {
             match backend.channel_page(id, params).await {
                 Ok(page) => return Ok(page),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => error = e,
             }
         }
@@ -302,6 +314,7 @@ impl Backend for BackendChain {
         for b in &self.backends {
             match b.live_chat(token).await {
                 Ok(res) => return Ok(res),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => last_err = e,
             }
         }
@@ -407,6 +420,7 @@ impl Backend for BackendChain {
         for backend in &self.backends {
             match backend.comment_action(action).await {
                 Ok(()) => return Ok(()),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => error = e,
             }
         }
@@ -417,6 +431,7 @@ impl Backend for BackendChain {
         for backend in &self.backends {
             match backend.submit_comment(params, text, reply).await {
                 Ok(()) => return Ok(()),
+                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
                 Err(e) => error = e,
             }
         }

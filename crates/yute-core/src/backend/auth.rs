@@ -90,8 +90,16 @@ pub const TV_ORIGIN: &str = "https://www.youtube.com";
 pub const TV_REFERER: &str = "https://www.youtube.com/tv";
 pub const DEFAULT_CLIENT_VERSION: &str = "7.20260901.15.00";
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AuthAccount {
+    #[serde(default)]
+    pub avatar_url: Option<String>,
+    #[serde(default)]
+    pub page_id: Option<String>,
+    #[serde(default)]
+    pub visitor_data: Option<String>,
+    #[serde(default)]
+    pub needs_login: bool,
     pub access_token: String,
     pub refresh_token: String,
     pub expires_at: u64,
@@ -145,6 +153,8 @@ pub struct AuthContext {
     pub refresh_token: Option<String>,
     pub token_expires_at: Option<u64>,
     pub auth_file_path: Option<PathBuf>,
+    pub page_id: Option<String>,
+    pub cancelled: tokio_util::sync::CancellationToken,
 }
 
 impl Default for AuthContext {
@@ -163,6 +173,8 @@ impl Default for AuthContext {
             refresh_token: None,
             token_expires_at: None,
             auth_file_path: None,
+            page_id: None,
+            cancelled: tokio_util::sync::CancellationToken::new(),
         }
     }
 }
@@ -276,7 +288,12 @@ impl AuthContext {
                     refresh_token: ref_token.clone(),
                     expires_at: exp,
                     name: String::new(),
-                    handle: String::new(),
+                    handle: storage
+                        .accounts
+                        .get(&active_key)
+                        .map(|a| a.handle.clone())
+                        .unwrap_or_default(),
+                    ..Default::default()
                 },
             );
             storage.active_account = Some(active_key);
@@ -356,6 +373,7 @@ impl AuthContext {
                 expires_at: exp,
                 name,
                 handle,
+                ..Default::default()
             },
         );
         storage.active_account = Some(active_key);
@@ -617,6 +635,14 @@ impl AuthContext {
             if let Ok(val) = HeaderValue::from_str(visitor) {
                 headers.insert("X-Goog-Visitor-Id", val);
             }
+        }
+
+        if let Some(page) = self
+            .page_id
+            .as_deref()
+            .and_then(|p| HeaderValue::from_str(p).ok())
+        {
+            headers.insert("X-Goog-Pageid", page);
         }
 
         if let Some(ref token) = self.access_token {

@@ -160,6 +160,8 @@ async fn main() -> anyhow::Result<()> {
             .await;
     });
 
+    refresh_account_profiles(&app, tx_event.clone());
+
     let mut keymap = KeymapState::new();
     let mut reader = EventStream::new();
     let mut ticker = tokio::time::interval(Duration::from_millis(250));
@@ -335,6 +337,59 @@ fn init_performance_trace() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn refresh_account_profiles(app: &App, tx: Sender<AppEvent>) {
+    if app.auth.lock().unwrap().access_token.is_none() {
+        return;
+    }
+    let auth = app.auth.clone();
+    let generation = app
+        .auth_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    tokio::spawn(async move {
+        let result = yute_core::accounts::fetch_profiles(auth).await;
+        let _ = tx.send(AppEvent::AccountProfiles(generation, result)).await;
+    });
+}
+fn activate_account(app: &mut App, index: usize, tx: Sender<AppEvent>) {
+    if app.switch_account(index) {
+        let _ = app.config.save();
+        try_load_feed_cache(app, "feed_home");
+        trigger_home_fetch(app, tx, None);
+    }
+}
+fn handle_account_picker(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.account_picker = false;
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.accounts_cursor =
+                (app.accounts_cursor + 1).min(app.accounts.len().saturating_sub(1))
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.accounts_cursor = app.accounts_cursor.saturating_sub(1)
+        }
+        KeyCode::Enter => activate_account(app, app.accounts_cursor, tx),
+        KeyCode::Char(c @ '1'..='9') => {
+            let index = c as usize - '1' as usize;
+            if index < app.accounts.len() {
+                activate_account(app, index, tx);
+            }
+        }
+        KeyCode::Char('a') => {
+            app.account_picker = false;
+            trigger_oauth_device_flow(app, tx);
+        }
+        KeyCode::Char('d') => {
+            if app.accounts_cursor != 0 {
+                app.pending_remove = Some(app.accounts_cursor);
+                app.confirming_logout = true;
+            }
+        }
+        _ => (),
+    }
+}
+
 fn handle_command_input(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
     use crossterm::event::KeyModifiers;
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -486,10 +541,38 @@ async fn handle_key_event(
     if app.confirming_logout {
         app.confirming_logout = false;
         if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
-            logout(app);
+            if let Some(index) = app.pending_remove.take() {
+                if index == app.active_account_index {
+                    activate_account(app, 0, tx.clone());
+                }
+                match app.account_store.remove(index) {
+                    Ok(()) => {
+                        app.accounts = app.account_store.profiles.clone();
+                        app.accounts_cursor = 0;
+                        app.status_text = "Account removed locally".into();
+                    }
+                    Err(_) => app.status_text = "Could not remove account".into(),
+                }
+            } else {
+                logout(app);
+            }
+        } else {
+            app.pending_remove = None;
         }
         return;
     }
+    if app.account_picker {
+        handle_account_picker(app, key, tx);
+        return;
+    }
+    if app.screen == Screen::Accounts
+        && app.focus == Focus::Content
+        && matches!(key.code, KeyCode::Char('a' | 'd' | '1'..='9'))
+    {
+        handle_account_picker(app, key, tx);
+        return;
+    }
+
     if key
         .modifiers
         .contains(crossterm::event::KeyModifiers::CONTROL)
@@ -845,7 +928,7 @@ async fn handle_key_event(
                         (app.accounts_cursor + 1).min(app.accounts.len().saturating_sub(1));
                 }
                 Action::PlayDefault | Action::Right => {
-                    app.switch_account(app.accounts_cursor);
+                    activate_account(app, app.accounts_cursor, tx.clone());
                 }
                 Action::Back | Action::Quit => {
                     app.nav_back();
@@ -2278,6 +2361,14 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 return;
             }
             app.config.backend.auth = "tv_oauth".into();
+            app.account_store = yute_core::accounts::Accounts::load(
+                &yute::config::resolve_path("~/.config/yute/auth.json"),
+                &app.auth.lock().unwrap(),
+                false,
+            );
+            app.accounts = app.account_store.profiles.clone();
+            app.active_account_index = app.account_store.active_index();
+            app.auth = Arc::new(std::sync::Mutex::new(app.account_store.current_context()));
             app.rebuild_backend();
             let saved = app.config.save().is_ok();
             if let Ok(mut auth) = app.auth.lock() {
@@ -2304,7 +2395,23 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 "Signed in; could not save login mode"
             }
             .into();
+            refresh_account_profiles(app, tx.clone());
             trigger_home_fetch(app, tx, None);
+        }
+        AppEvent::AccountProfiles(generation, result) => {
+            if generation
+                != app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            if let Ok(profiles) = result {
+                app.account_store
+                    .import_profiles(profiles, &app.auth.lock().unwrap());
+                app.accounts = app.account_store.profiles.clone();
+                app.account_store.persist_background();
+            }
         }
         AppEvent::AccountLoaded(generation, res) => {
             if generation
@@ -2321,6 +2428,9 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 if !handle.is_empty() {
                     app.account_handle = handle;
                 }
+                app.account_store
+                    .update_profile(&app.account_name, &app.account_handle);
+                app.accounts = app.account_store.profiles.clone();
                 if let Some(ch) = app.account_name.chars().next() {
                     app.account_initial = ch.to_uppercase().to_string();
                 }
@@ -3171,10 +3281,47 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
             app.status_text = "Queue cleared".into();
         }
         Command::Login => trigger_oauth_device_flow(app, tx),
-        Command::Logout => app.confirming_logout = true,
-        Command::AccountSwitch => {
-            app.status_text = "Account switching is unavailable — use :login to authenticate".into()
+        Command::Logout => {
+            if app.active_account_index == 0 {
+                app.status_text = "Anonymous has no saved credentials".into();
+            } else {
+                app.pending_remove = Some(app.active_account_index);
+                app.confirming_logout = true;
+            }
         }
+        Command::Account(args) => match args.trim() {
+            "" | "switch" => {
+                app.accounts_cursor = app.active_account_index;
+                app.account_picker = true;
+            }
+            "add" => trigger_oauth_device_flow(app, tx),
+            "whoami" => {
+                app.command_help = Some(format!(
+                    "{}\n{}\n{}",
+                    app.account_name,
+                    app.account_handle,
+                    if authenticated(app) {
+                        "Signed in"
+                    } else {
+                        "Anonymous"
+                    }
+                ))
+            }
+            input if input.starts_with("remove ") => match app
+                .account_store
+                .resolve(input.trim_start_matches("remove ").trim())
+            {
+                Ok(index) if index > 0 => {
+                    app.pending_remove = Some(index);
+                    app.confirming_logout = true;
+                }
+                _ => app.status_text = "Choose a saved account to remove".into(),
+            },
+            input => match app.account_store.resolve(input) {
+                Ok(index) => activate_account(app, index, tx),
+                Err(_) => app.status_text = "Account not found or prefix is ambiguous".into(),
+            },
+        },
         Command::Subscribe(value) => {
             if !authenticated(app) {
                 app.status_text = "Login required for subscriptions — use :login".into();
@@ -3540,9 +3687,9 @@ fn feed_cache_key(app: &App, key: &str) -> String {
         key
     };
     format!(
-        "v2_{}_{}_{}",
+        "v3_{}_{}_{}",
         app.config.backend.auth,
-        app.account_handle.trim_start_matches('@'),
+        app.account_store.cache_namespace(),
         key
     )
 }
@@ -3774,7 +3921,7 @@ mod feed_ui_tests {
                 tx,
             )
             .await;
-            assert_eq!(app.screen, Screen::Accounts);
+            assert!(app.account_picker);
             assert!(!app.player.is_alive());
         }
         let (mut app, _) = app_and_cards();

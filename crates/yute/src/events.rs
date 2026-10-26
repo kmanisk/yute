@@ -24,6 +24,7 @@ pub enum AppEvent {
     ),
     WatchDataLoaded(String, anyhow::Result<WatchData>),
     SuggestionsLoaded(anyhow::Result<Vec<String>>),
+    AccountProfiles(u64, anyhow::Result<Vec<yute_core::accounts::Account>>),
     AccountLoaded(u64, anyhow::Result<(String, String)>),
     LoginStatus(u64, String),
     LoginSucceeded(u64, String, String),

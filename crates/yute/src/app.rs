@@ -134,14 +134,7 @@ pub struct NavState {
     pub search_view_mode: ViewMode,
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct AccountProfile {
-    pub id: String,
-    pub name: String,
-    pub handle: String,
-    pub initial: String,
-    pub channel_id: Option<String>,
-}
+pub use yute_core::accounts::Account as AccountProfile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WatchPane {
@@ -238,6 +231,9 @@ pub struct App {
     pub account_name: String,
     pub account_handle: String,
     pub accounts: Vec<AccountProfile>,
+    pub account_store: yute_core::accounts::Accounts,
+    pub account_picker: bool,
+    pub pending_remove: Option<usize>,
     pub active_account_index: usize,
     pub accounts_cursor: usize,
     pub cell_w_px: f32,
@@ -262,7 +258,11 @@ impl App {
     pub fn command_choices(&self) -> Vec<String> {
         crate::commands::completions_with_accounts(
             self.completion_base.as_deref().unwrap_or(&self.cmd_input),
-            &[self.account_name.clone()],
+            &self
+                .accounts
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>(),
         )
     }
 
@@ -297,7 +297,16 @@ impl App {
         }
         let _ = auth.load_auth_with_mode(&auth_path, &cookies_path, &config.backend.auth);
 
-        let auth = std::sync::Arc::new(std::sync::Mutex::new(auth));
+        let account_store = yute_core::accounts::Accounts::load(
+            &auth_path,
+            &auth,
+            config.general.start_anonymous || config.backend.auth == "guest",
+        );
+        let auth = std::sync::Arc::new(std::sync::Mutex::new(account_store.current_context()));
+        let accounts = account_store.profiles.clone();
+        let active_account_index = account_store.active_index();
+        let active_name = accounts[active_account_index].name.clone();
+        let active_handle = accounts[active_account_index].handle.clone();
         let chain = backend_for_session(&config, Arc::clone(&auth));
 
         let authenticated = {
@@ -388,10 +397,13 @@ impl App {
             should_quit: false,
             confirming_quit: false,
             account_initial: if authenticated { "S" } else { "G" }.into(),
-            account_name: if authenticated { "Signed in" } else { "Guest" }.into(),
-            account_handle: String::new(),
-            accounts: Vec::new(),
-            active_account_index: 0,
+            account_name: active_name,
+            account_handle: active_handle,
+            accounts,
+            account_store,
+            account_picker: false,
+            pending_remove: None,
+            active_account_index,
             accounts_cursor: 0,
             watch_right_mode: WatchRightMode::UpNext,
             comments_cursor: 0,
@@ -428,9 +440,61 @@ impl App {
         self.backend = backend_for_session(&self.config, Arc::clone(&self.auth));
     }
 
-    pub fn switch_account(&mut self, _index: usize) -> bool {
-        self.status_text = "Account switching is unavailable — use :login to authenticate".into();
-        false
+    pub fn switch_account(&mut self, index: usize) -> bool {
+        let start = std::time::Instant::now();
+        let route = format!("{:?}", self.screen);
+        self.account_store.remember_feed(
+            &route,
+            crate::backend::models::FeedPage {
+                items: self.items.clone(),
+                chips: vec![],
+                continuation: self.continuation_token.clone(),
+            },
+        );
+        let next = match self.account_store.activate(index, &self.auth) {
+            Ok(auth) => auth,
+            Err(_) => {
+                self.status_text = "Account unavailable".into();
+                return false;
+            }
+        };
+        self.auth = next;
+        self.account_store.persist_background();
+        self.active_account_index = index;
+        self.account_name = self.accounts[index].name.clone();
+        self.account_handle = self.accounts[index].handle.clone();
+        self.account_initial = self.accounts[index].initial.clone();
+        self.config.backend.auth = if index == 0 { "guest" } else { "tv_oauth" }.into();
+        self.auth_generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.feed_generation = self.feed_generation.wrapping_add(1);
+        self.metadata_generation = self.metadata_generation.wrapping_add(1);
+        self.metadata_pending.clear();
+        self.metadata_attempted.clear();
+        self.nav_history.clear();
+        self.nav_future.clear();
+        self.detail_route = None;
+        self.watch_data = None;
+        self.rebuild_backend();
+        self.selected_index = 0;
+        self.scroll_row = 0;
+        self.filter_kind = FilterKind::All;
+        self.filter_text.clear();
+        self.screen = Screen::Home;
+        self.items.clear();
+        self.continuation_token = None;
+        if let Some(page) = self.account_store.cached_feed("Home") {
+            self.items = page.items;
+            self.continuation_token = page.continuation;
+        }
+        self.is_loading = false;
+        self.is_loading_more = false;
+        self.account_picker = false;
+        self.focus = Focus::Content;
+        self.status_text = format!("Switched to {}", self.account_name);
+        // Trace measures cached state availability; first-frame placement is measured separately.
+        yute_core::trace::duration("account_switch", start.elapsed(), self.items.len());
+        true
     }
 
     /// A new full feed request supersedes older work, including continuation loads.
@@ -832,7 +896,11 @@ fn backend_for_session(
     config: &Config,
     auth: Arc<std::sync::Mutex<AuthContext>>,
 ) -> Arc<BackendChain> {
-    let cookies_from_browser = if config.backend.auth == "guest" {
+    let cookie_session = {
+        let session = auth.lock().unwrap();
+        session.access_token.is_none() && session.cookie_header.is_some()
+    };
+    let cookies_from_browser = if !cookie_session {
         None
     } else if !config.backend.cookies_from_browser.is_empty() {
         Some(config.backend.cookies_from_browser.clone())
@@ -843,7 +911,7 @@ fn backend_for_session(
     Arc::new(BackendChain::new(vec![
         Box::new(InnerTubeBackend::from_arc(auth)),
         Box::new(YtDlpBackend::new(
-            (config.backend.auth != "guest").then(|| resolve_path(&config.backend.cookies_file)),
+            cookie_session.then(|| resolve_path(&config.backend.cookies_file)),
             cookies_from_browser,
         )),
     ]))

@@ -46,6 +46,8 @@ pub struct UiConfig {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GeneralConfig {
+    #[serde(default)]
+    pub start_anonymous: bool,
     pub graphics: String,
     pub icons: String,
     pub theme: String,
@@ -58,6 +60,7 @@ pub struct GeneralConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
+            start_anonymous: false,
             graphics: "auto".to_string(),
             icons: "ascii".to_string(),
             theme: "youtube-dark".to_string(),
