@@ -1,6 +1,7 @@
 use ratatui::style::Style;
 use ratatui::text::Span;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 pub fn is_emoji(c: char) -> bool {
     matches!(c,
@@ -107,10 +108,10 @@ pub fn wrap_and_truncate_title(
                 // Word alone is wider than max_width, truncate it
                 let mut fit_word = String::new();
                 let mut fit_w = 0;
-                for ch in word.chars() {
-                    let ch_w = ch.width().unwrap_or(1);
+                for ch in word.graphemes(true) {
+                    let ch_w = ch.width();
                     if fit_w + ch_w <= max_width {
-                        fit_word.push(ch);
+                        fit_word.push_str(ch);
                         fit_w += ch_w;
                     } else {
                         break;
@@ -325,17 +326,20 @@ pub fn truncate_str(s: &str, max_width: usize) -> String {
     if s.width() <= max_width {
         return s.to_string();
     }
-    if max_width <= 1 {
+    if max_width == 0 {
+        return String::new();
+    }
+    if max_width == 1 {
         return "…".to_string();
     }
 
     let target = max_width.saturating_sub(1);
     let mut res = String::new();
     let mut current_w = 0;
-    for ch in s.chars() {
-        let ch_w = ch.width().unwrap_or(1);
+    for ch in s.graphemes(true) {
+        let ch_w = ch.width();
         if current_w + ch_w <= target {
-            res.push(ch);
+            res.push_str(ch);
             current_w += ch_w;
         } else {
             break;

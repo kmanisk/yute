@@ -19,7 +19,7 @@ pub fn column_count(width: u16, config: &crate::config::GridConfig) -> usize {
     (width.saturating_sub(1) / min_width.saturating_add(1)).clamp(1, 5) as usize
 }
 
-/// Shared by drawing, scrolling and layout tests. Whole rows only.
+/// Shared geometry for complete selection rows and a clipped trailing row.
 #[derive(Clone, Copy, Debug)]
 pub struct GridGeometry {
     pub columns: usize,
@@ -31,6 +31,7 @@ pub struct GridGeometry {
     pub title_rows: u16,
     pub card_height: u16,
     pub visible_rows: usize,
+    pub complete_rows: usize,
     pub row_stride: u16,
 }
 impl GridGeometry {
@@ -41,7 +42,7 @@ impl GridGeometry {
             .saturating_sub(2 + 2 * columns.saturating_sub(1) as u16)
             / columns as u16;
         let mut card_width = slot_width.min(30);
-        while card_width > 24 && area.height >= 24 {
+        while card_width > 12 && area.height >= 18 {
             let rows = ((card_width.saturating_sub(2)) as f32 * cell_w / cell_h.max(1.) * 9. / 16.)
                 .round() as u16;
             if (rows + 6) * 2 <= area.height {
@@ -65,7 +66,7 @@ impl GridGeometry {
         } else {
             card_height.max(1)
         };
-        let visible_rows = if area.height >= card_height {
+        let complete_rows = if area.height >= card_height {
             1 + (area.height - card_height) / row_stride
         } else {
             1
@@ -79,7 +80,8 @@ impl GridGeometry {
             thumbnail_height,
             title_rows,
             card_height,
-            visible_rows: visible_rows as usize,
+            visible_rows: area.height.div_ceil(row_stride.max(1)) as usize,
+            complete_rows: complete_rows as usize,
             row_stride,
         }
     }
@@ -152,8 +154,8 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let card_h = geometry.card_height;
     let thumb_h = geometry.thumbnail_height;
     let row_stride = geometry.row_stride;
-    let visible_rows = geometry.visible_rows;
-    app.rendered_rows = visible_rows;
+    let visible_rows = geometry.complete_rows;
+    app.rendered_rows = geometry.visible_rows;
     let total_rows = total_items.div_ceil(num_cols);
 
     let selected = app.selected_index.min(total_items.saturating_sub(1));
@@ -177,7 +179,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
     let start_row = app.scroll_row;
     let start_idx = start_row * num_cols;
-    let visible_count = visible_rows * num_cols;
+    let visible_count = geometry.visible_rows * num_cols;
 
     let cards_to_render: Vec<Card> = app
         .filtered_items()
@@ -189,9 +191,10 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
     let mut selected_card = None;
     // Render inactive cards first so shared frame rows cannot overwrite selection.
-    for r in 0..visible_rows {
+    for r in 0..geometry.visible_rows {
         let card_y = area.y + (r as u16) * row_stride;
-        if card_y + card_h > area.y + area.height {
+        let remaining = area.bottom().saturating_sub(card_y);
+        if remaining == 0 {
             break;
         }
 
@@ -203,12 +206,16 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
                 x: card_x,
                 y: card_y,
                 width: card_w,
-                height: card_h,
+                height: card_h.min(remaining),
             };
 
             card_x += geometry.column_stride;
 
             if i < cards_to_render.len() {
+                if remaining < card_h {
+                    render_partial_card(f, app, &cards_to_render[i], card_rect);
+                    continue;
+                }
                 let item_idx = start_idx + i;
                 let is_selected = item_idx == selected
                     && matches!(app.focus, Focus::Content | Focus::CommandLine);
@@ -276,6 +283,23 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     }
+}
+
+/// A clipped row never emits a graphics payload outside the viewport. Keep its
+/// title first so even a one-line remainder communicates the next row.
+fn render_partial_card(f: &mut Frame, app: &App, card: &Card, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::LEFT | Borders::RIGHT)
+        .border_style(Style::default().fg(app.theme.border));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let title = sanitize_title(card.title(), app.config.strip_emoji());
+    let lines = wrap_and_truncate_title(&title, inner.width as usize, inner.height.min(2) as usize);
+    f.render_widget(
+        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
+            .style(Style::default().fg(app.theme.text_secondary)),
+        inner,
+    );
 }
 
 fn render_grid_card(

@@ -34,3 +34,16 @@ pseudo-terminal benchmark does not represent an unresponsive real terminal.
 Raw trace samples and the measurement harness are ignored under
 `target/perf-baseline/`. Later sections record after results under matching
 conditions. No authenticated writes or media playback were used for these runs.
+
+## Layout correction
+
+Resize previously only marked the frame dirty: it retained the startup font size.
+Resize and focus regain now re-read TIOCGWINSZ pixel dimensions on a blocking
+worker with a 40 ms timeout, preserving the detected protocol. Terminals that
+return zero pixel dimensions retain the last valid font size; no competing stdin
+query is started alongside Crossterm. Cover cache generations reject old encodes.
+The grid adapts thumbnail width to fit two rows where feasible and renders a
+text preview for clipped trailing rows without emitting cropped graphics payloads.
+Structural changes erase Kitty placements and the terminal before repainting.
+Geometry tests cover 80x24 through 300x80 with both sidebar states. Real terminal
+fullscreen and Sixel erase behavior still require interactive verification.

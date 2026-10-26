@@ -436,3 +436,45 @@ fn focus_frames_and_single_row_header_stay_clear_with_hidden_sidebar() {
         );
     }
 }
+
+#[test]
+fn grid_bounds_complete_and_partial_rows_across_terminal_sizes() {
+    let mut app = app();
+    for width in (80..=300).step_by(5) {
+        for height in 24..=80 {
+            for sidebar in [true, false] {
+                app.sidebar_expanded = sidebar;
+                let shell = ShellLayout::new(Rect::new(0, 0, width, height), &app);
+                let g = GridGeometry::new(shell.content, &app.config.grid, 15., 38.);
+                assert!(g.visible_rows >= g.complete_rows);
+                assert!(
+                    g.card_width * g.columns as u16 + 2 * (g.columns - 1) as u16
+                        <= shell.content.width
+                );
+                let used = g.row_stride * (g.visible_rows - 1) as u16;
+                assert!(used < shell.content.height);
+                assert!(shell.content.height - used <= g.row_stride);
+                if shell.content.height >= 20 {
+                    assert!(g.complete_rows >= 2, "{width}x{height}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn truncation_respects_graphemes_and_ellipsis_width() {
+    use unicode_width::UnicodeWidthStr;
+    for value in [
+        "Vietnamese extended title",
+        "\u{4e2d}\u{6587} title",
+        "\u{1f469}\u{200d}\u{1f4bb} developer",
+        "a\u{301} long title",
+    ] {
+        for width in 0..20 {
+            let result = yute::ui::text::truncate_str(value, width);
+            assert!(result.width() <= width, "{result:?} {width}");
+            assert!(!result.ends_with("\u{200d}…"));
+        }
+    }
+}

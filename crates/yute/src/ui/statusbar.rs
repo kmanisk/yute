@@ -62,9 +62,10 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         &app.status_text
     };
     let right = if !state.is_empty() { state } else { "? help" };
+    let right = super::text::truncate_str(right, area.width.saturating_sub(2) as usize);
     let right_width = right.width().min(area.width.saturating_sub(2) as usize) as u16;
     let left_width = if right == "? help" {
-        area.width.saturating_sub(right_width + 1)
+        area.width.saturating_sub(right_width + 2)
     } else {
         (left.width() as u16).min(area.width / 2)
     };
@@ -75,11 +76,11 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     let right_area = Rect::new(
         area.x + left_width + 1,
         area.y,
-        area.width.saturating_sub(left_width + 1),
+        area.width.saturating_sub(left_width + 2),
         1,
     );
     f.render_widget(
-        Paragraph::new(right)
+        Paragraph::new(super::text::truncate_str(&right, right_area.width as usize))
             .alignment(ratatui::layout::Alignment::Right)
             .style(Style::default().fg(app.theme.text)),
         right_area,

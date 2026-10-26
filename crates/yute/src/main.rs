@@ -166,10 +166,33 @@ async fn main() -> anyhow::Result<()> {
     let mut dirty = true;
     let mut first_frame = true;
     let mut first_home = true;
+    let mut graphics_layout = String::new();
 
     while !app.should_quit {
         if dirty {
             app.refresh_channel_items();
+            let next_layout = format!(
+                "{:?}:{:?}:{:?}:{}:{}:{:?}:{}:{}:{}",
+                terminal.size()?,
+                app.screen,
+                app.focus,
+                app.selected_index / app.rendered_columns.max(1),
+                app.sidebar_expanded,
+                app.overlay_area,
+                app.confirming_quit,
+                app.confirming_logout,
+                app.scroll_row
+            );
+            if next_layout != graphics_layout {
+                // Delete Kitty placements and erase Sixel cells before a structural
+                // change. Cached encodings remain available for the next draw.
+                use std::io::Write;
+                terminal
+                    .backend_mut()
+                    .write_all(b"\x1b_Ga=d,d=a,q=2;\x1b\\")?;
+                terminal.clear()?;
+                graphics_layout = next_layout;
+            }
             terminal.draw(|f| ui::draw(f, &mut app))?;
             if first_frame {
                 yute_core::trace::since_start("first_frame");
@@ -220,8 +243,9 @@ async fn main() -> anyhow::Result<()> {
                             dirty = true;
                             maybe_continue_feed(&mut app, tx_event.clone());
                         }
-                        Event::Resize(w, h) => {
-                            let _ = (w, h);
+                        Event::Resize(_, _) | Event::FocusGained => {
+                            refresh_terminal_cells(&mut app).await;
+                            graphics_layout.clear();
                             dirty = true;
                         }
                         _ => {}
@@ -309,6 +333,20 @@ fn init_performance_trace() -> anyhow::Result<()> {
         }));
     let _ = tracing_subscriber::registry().with(layer).try_init();
     Ok(())
+}
+
+async fn refresh_terminal_cells(app: &mut App) {
+    // TIOCGWINSZ never reads stdin; EventStream retains exclusive input ownership.
+    let query = tokio::task::spawn_blocking(crossterm::terminal::window_size);
+    if let Ok(Ok(Ok(size))) = tokio::time::timeout(Duration::from_millis(40), query).await {
+        if size.columns > 0 && size.rows > 0 && size.width > 0 && size.height > 0 {
+            let width = (size.width / size.columns).max(1);
+            let height = (size.height / size.rows).max(1);
+            app.cell_w_px = width as f32;
+            app.cell_h_px = height as f32;
+            app.thumbs.refresh_cell_size(width, height);
+        }
+    }
 }
 
 async fn handle_key_event(
@@ -2838,7 +2876,7 @@ fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
         return;
     }
     let count = app.filtered_items().len();
-    if app.selected_index + app.rendered_columns * (app.rendered_rows + 1) < count {
+    if app.selected_index + app.rendered_columns * 2 < count {
         return;
     }
     let Some(token) = app.continuation_token.clone() else {

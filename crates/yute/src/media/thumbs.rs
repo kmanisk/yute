@@ -9,6 +9,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 struct CoverKey {
     url: String,
     size: Size,
+    generation: u64,
 }
 use yute_core::media::cache::DiskCache;
 use yute_core::media::thumbs::ThumbnailLoader;
@@ -16,6 +17,7 @@ use yute_core::media::thumbs::ThumbnailLoader;
 pub struct ThumbnailManager {
     trace_requests: HashMap<CoverKey, (std::time::Instant, bool)>,
     trace_completed: HashSet<CoverKey>,
+    generation: u64,
     picker: Picker,
     loader: ThumbnailLoader,
     ram_lru: HashMap<String, StatefulProtocol>,
@@ -41,6 +43,7 @@ impl ThumbnailManager {
             cover_failed: HashSet::new(),
             cover_tx,
             cover_rx,
+            generation: 0,
             picker,
             loader: ThumbnailLoader::new(cache),
             ram_lru: HashMap::new(),
@@ -65,6 +68,9 @@ impl ThumbnailManager {
         let loaded_images = self.loader.poll_loaded();
         let mut has_loaded = !loaded_images.is_empty();
         while let Ok((key, protocol)) = self.cover_rx.try_recv() {
+            if key.generation != self.generation {
+                continue;
+            }
             self.cover_pending.remove(&key);
             has_loaded = true;
             if let Some(protocol) = protocol {
@@ -95,6 +101,7 @@ impl ThumbnailManager {
         let key = CoverKey {
             url: url.to_string(),
             size,
+            generation: self.generation,
         };
         if yute_core::trace::enabled() && !self.trace_completed.contains(&key) {
             self.trace_requests
@@ -191,8 +198,22 @@ impl ThumbnailManager {
         self.loader.cache()
     }
 
-    #[allow(dead_code)]
+    pub fn refresh_cell_size(&mut self, width: u16, height: u16) {
+        let kind = self.picker.protocol_type();
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize((width, height).into());
+        picker.set_protocol_type(kind);
+        self.set_picker(picker);
+    }
+
     pub fn set_picker(&mut self, picker: Picker) {
+        self.generation = self.generation.wrapping_add(1);
+        self.covers.clear();
+        self.cover_order.clear();
+        self.cover_pending.clear();
+        self.cover_failed.clear();
+        self.trace_requests.clear();
+        self.trace_completed.clear();
         self.picker = picker;
         self.ram_lru.clear();
         self.lru_order.clear();
