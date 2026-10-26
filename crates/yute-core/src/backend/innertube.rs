@@ -53,16 +53,28 @@ impl InnerTubeBackend {
     }
     async fn post_endpoint_inner(&self, endpoint: &str, body: Value) -> Result<Value> {
         let url = format!("{INNERTUBE_BASE}/{endpoint}");
-        let headers = self.auth.lock().unwrap().build_headers();
-
-        let resp = self
-            .client
-            .post(&url)
-            .headers(headers)
-            .json(&body)
-            .send()
-            .await
-            .with_context(|| format!("InnerTube request to {endpoint} failed"))?;
+        crate::oauth::ensure_fresh(&self.auth, &self.client, false).await?;
+        let mut retry = false;
+        let resp = loop {
+            let headers = self.auth.lock().unwrap().build_headers();
+            let response = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .json(&body)
+                .send()
+                .await
+                .with_context(|| format!("InnerTube request to {endpoint} failed"))?;
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED
+                && !retry
+                && self.auth.lock().unwrap().refresh_token.is_some()
+            {
+                retry = true;
+                crate::oauth::ensure_fresh(&self.auth, &self.client, true).await?;
+                continue;
+            }
+            break response;
+        };
 
         let status = resp.status();
         if !status.is_success() {

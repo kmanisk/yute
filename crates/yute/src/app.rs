@@ -233,6 +233,7 @@ pub struct App {
     pub accounts: Vec<AccountProfile>,
     pub account_store: yute_core::accounts::Accounts,
     pub account_picker: bool,
+    pub login_modal: Option<crate::ui::signin::LoginModal>,
     pub pending_remove: Option<usize>,
     pub active_account_index: usize,
     pub accounts_cursor: usize,
@@ -402,6 +403,7 @@ impl App {
             accounts,
             account_store,
             account_picker: false,
+            login_modal: None,
             pending_remove: None,
             active_account_index,
             accounts_cursor: 0,
@@ -797,6 +799,15 @@ impl App {
 
     pub fn tick(&mut self) -> bool {
         let mut dirty = false;
+        if self.auth.lock().unwrap().needs_login {
+            if let Some(account) = self.accounts.get_mut(self.active_account_index) {
+                if account.status != yute_core::accounts::AccountStatus::NeedsLogin {
+                    account.status = yute_core::accounts::AccountStatus::NeedsLogin;
+                    self.status_text = "Account needs re-login · :account add".into();
+                    dirty = true;
+                }
+            }
+        }
         if self.status_text != self.status_seen {
             self.status_seen.clone_from(&self.status_text);
             self.status_deadline =

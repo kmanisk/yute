@@ -121,3 +121,17 @@ destination is chosen. Downloads run yt-dlp asynchronously at the chosen quality
 write to ~/Videos/Yute, and appear under Local. One download job is allowed at a
 time, with explicit cancellation and process cleanup on exit. No account writes
 or real online downloads are part of the automated tests.
+
+## TV-code sign-in
+
+`:account add`, `:login`, `:signin`, and `yute login` share the core TV-code flow.
+The TUI modal shows the server-provided activation address and user code, an
+optional half-block QR code when it fits, and the remaining lifetime. Esc cancels
+without replacing the active session. CLI Ctrl+C cancels. Polling honors the
+server interval, increases it after slow_down, and ends on denial or expiry.
+OAuth refresh uses a 60-second skew, a single-flight lock per identity, and one
+retry on HTTP 401. Revoked tokens mark that account as needing re-login.
+
+The V2 request shape follows the repository's pinned MediaServiceCore source;
+polling behavior also follows Google's limited-input-device documentation:
+https://developers.google.com/youtube/data/guides/auth/devices

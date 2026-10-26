@@ -6,4 +6,5 @@ pub mod player;
 
 pub mod accounts;
 pub mod http;
+pub mod oauth;
 pub mod trace;

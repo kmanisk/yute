@@ -154,6 +154,9 @@ pub struct AuthContext {
     pub token_expires_at: Option<u64>,
     pub auth_file_path: Option<PathBuf>,
     pub page_id: Option<String>,
+    pub account_id: Option<String>,
+    pub needs_login: bool,
+    pub refresh_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub cancelled: tokio_util::sync::CancellationToken,
 }
 
@@ -174,6 +177,9 @@ impl Default for AuthContext {
             token_expires_at: None,
             auth_file_path: None,
             page_id: None,
+            account_id: None,
+            needs_login: false,
+            refresh_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             cancelled: tokio_util::sync::CancellationToken::new(),
         }
     }
@@ -231,6 +237,9 @@ impl AuthContext {
             self.access_token = Some(acc.access_token.clone());
             self.refresh_token = Some(acc.refresh_token.clone());
             self.token_expires_at = Some(acc.expires_at);
+            self.account_id = Some(active_key.to_string());
+            self.page_id = acc.page_id.clone();
+            self.needs_login = acc.needs_login;
         } else if let Some((_, acc)) = storage.accounts.iter().next() {
             self.access_token = Some(acc.access_token.clone());
             self.refresh_token = Some(acc.refresh_token.clone());
@@ -270,9 +279,10 @@ impl AuthContext {
         if let (Some(ref acc_token), Some(ref ref_token)) =
             (&self.access_token, &self.refresh_token)
         {
-            let active_key = storage
-                .active_account
+            let active_key = self
+                .account_id
                 .clone()
+                .or_else(|| storage.active_account.clone())
                 .unwrap_or_else(|| "default".to_string());
             let exp = self.token_expires_at.unwrap_or_else(|| {
                 SystemTime::now()
@@ -287,18 +297,40 @@ impl AuthContext {
                     access_token: acc_token.clone(),
                     refresh_token: ref_token.clone(),
                     expires_at: exp,
-                    name: String::new(),
+                    name: storage
+                        .accounts
+                        .get(&active_key)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_default(),
                     handle: storage
                         .accounts
                         .get(&active_key)
                         .map(|a| a.handle.clone())
                         .unwrap_or_default(),
-                    ..Default::default()
+                    page_id: self.page_id.clone(),
+                    visitor_data: self.visitor_data.clone(),
+                    needs_login: self.needs_login,
+                    avatar_url: storage
+                        .accounts
+                        .get(&active_key)
+                        .and_then(|a| a.avatar_url.clone()),
                 },
             );
-            storage.active_account = Some(active_key);
+            if storage.active_account.is_none() {
+                storage.active_account = Some(active_key);
+            }
         }
 
+        if self.needs_login {
+            if let Some(account) = self
+                .account_id
+                .as_ref()
+                .and_then(|id| storage.accounts.get_mut(id))
+            {
+                account.needs_login = true;
+                account.access_token.clear();
+            }
+        }
         let json_bytes = serde_json::to_vec_pretty(&storage)?;
         let enc_str = encrypt_auth_data(&json_bytes)?;
         fs::write(path, enc_str)?;
@@ -356,7 +388,9 @@ impl AuthContext {
         self.refresh_token = Some(refresh_token.clone());
         self.token_expires_at = Some(exp);
 
-        let active_key = if !handle.is_empty() {
+        let active_key = if let Some(id) = self.account_id.clone() {
+            id
+        } else if !handle.is_empty() {
             handle.clone()
         } else {
             storage
@@ -373,6 +407,8 @@ impl AuthContext {
                 expires_at: exp,
                 name,
                 handle,
+                page_id: self.page_id.clone(),
+                visitor_data: self.visitor_data.clone(),
                 ..Default::default()
             },
         );
@@ -544,10 +580,10 @@ impl AuthContext {
         Ok(res)
     }
 
-    pub async fn poll_device_token(
+    pub async fn poll_device_response(
         client: &reqwest::Client,
         device_code: &str,
-    ) -> Result<Option<DeviceTokenResponse>> {
+    ) -> Result<DeviceTokenResponse> {
         let payload = serde_json::json!({
             "code": device_code,
             "client_id": OAUTH_CLIENT_ID,
@@ -563,12 +599,19 @@ impl AuthContext {
             .await?;
 
         let tok: DeviceTokenResponse = resp.json().await?;
-        if tok.access_token.is_some() {
-            Ok(Some(tok))
-        } else if tok.error.as_deref() == Some("authorization_pending") {
+        Ok(tok)
+    }
+    pub async fn poll_device_token(
+        client: &reqwest::Client,
+        device_code: &str,
+    ) -> Result<Option<DeviceTokenResponse>> {
+        let token = Self::poll_device_response(client, device_code).await?;
+        if token.access_token.is_some() {
+            Ok(Some(token))
+        } else if token.error.as_deref() == Some("authorization_pending") {
             Ok(None)
         } else {
-            Err(anyhow!("OAuth device code error: {:?}", tok.error))
+            Err(anyhow!("TV sign-in pending or unavailable"))
         }
     }
 
@@ -601,12 +644,20 @@ impl AuthContext {
                 .unwrap_or_default()
                 .as_secs();
             self.token_expires_at = Some(now + exp_in);
-            if let Some(ref path) = self.auth_file_path {
-                let _ = self.save_auth_file(path);
+            if let Some(refresh) = tok.refresh_token {
+                self.refresh_token = Some(refresh);
             }
+            self.needs_login = false;
             Ok(true)
+        } else if matches!(
+            tok.error.as_deref(),
+            Some("invalid_grant" | "access_denied")
+        ) {
+            self.needs_login = true;
+            self.access_token = None;
+            Err(crate::oauth::NeedsLogin.into())
         } else {
-            Ok(false)
+            Err(anyhow!("Token refresh failed"))
         }
     }
 

@@ -499,6 +499,21 @@ async fn handle_key_event(
     tx: Sender<AppEvent>,
 ) {
     let key = yute::keymap::normalize_key(key);
+    if let Some(modal) = &app.login_modal {
+        if key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('c')
+                && key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL))
+        {
+            modal.cancelled.cancel();
+            app.login_modal = None;
+            app.auth_generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            app.status_text = "Sign-in cancelled".into();
+        }
+        return;
+    }
     if app.action_menu.is_some() {
         handle_item_menu(app, key, tx);
         return;
@@ -2343,12 +2358,25 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
         AppEvent::StatusMessage(msg) => {
             app.status_text = msg;
         }
+        AppEvent::LoginDisplay(generation, event) => {
+            if generation
+                != app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            if let Some(modal) = &mut app.login_modal {
+                modal.update(event);
+            }
+        }
         AppEvent::LoginStatus(generation, message) => {
             if generation
                 == app
                     .auth_generation
                     .load(std::sync::atomic::Ordering::SeqCst)
             {
+                app.login_modal = None;
                 app.status_text = message;
             }
         }
@@ -2360,6 +2388,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             {
                 return;
             }
+            app.login_modal = None;
             app.config.backend.auth = "tv_oauth".into();
             app.account_store = yute_core::accounts::Accounts::load(
                 &yute::config::resolve_path("~/.config/yute/auth.json"),
@@ -2564,105 +2593,36 @@ fn ensure_screen_loaded(app: &mut App, tx: Sender<AppEvent>) {
 }
 
 fn trigger_oauth_device_flow(app: &mut App, tx: Sender<AppEvent>) {
-    app.status_text = "Requesting device code from Google...".to_string();
-    let backend = Arc::clone(&app.backend);
-    let auth = Arc::clone(&app.auth);
-    let epoch = Arc::clone(&app.auth_generation);
-    let generation = epoch
+    if let Some(old) = app.login_modal.take() {
+        old.cancelled.cancel();
+    }
+    let cancelled = yute_core::oauth::CancellationToken::new();
+    app.login_modal = Some(ui::signin::LoginModal::new(cancelled.clone()));
+    app.account_picker = false;
+    app.status_text = "Requesting TV sign-in code…".into();
+    let generation = app
+        .auth_generation
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
-        .wrapping_add(1);
+        + 1;
+    let language = (app.config.backend.hl.clone(), app.config.backend.gl.clone());
     tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        let code_res = match yute::backend::auth::AuthContext::request_device_code(&client).await {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = tx
-                    .send(AppEvent::LoginStatus(
-                        generation,
-                        format!("Failed to request device code: {e}"),
-                    ))
-                    .await;
-                return;
-            }
-        };
-
-        let msg = format!(
-            "Login: Visit {} and enter code: {}",
-            code_res.verification_url, code_res.user_code
+        let (events, mut updates) = tokio::sync::mpsc::unbounded_channel();
+        let flow = yute_core::oauth::device_login(
+            yute::config::resolve_path("~/.config/yute/auth.json"),
+            language,
+            cancelled,
+            events,
         );
-        let _ = tx.send(AppEvent::LoginStatus(generation, msg)).await;
-
-        let interval = code_res.interval.max(5);
-        let max_wait = std::time::Duration::from_secs(code_res.expires_in.min(600));
-        let start = std::time::Instant::now();
-
+        tokio::pin!(flow);
         loop {
-            if epoch.load(std::sync::atomic::Ordering::SeqCst) != generation {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-            if start.elapsed() > max_wait {
-                let _ = tx
-                    .send(AppEvent::LoginStatus(
-                        generation,
-                        "OAuth device code expired. Run :login again.".to_string(),
-                    ))
-                    .await;
-                break;
-            }
-
-            match yute::backend::auth::AuthContext::poll_device_token(
-                &client,
-                &code_res.device_code,
-            )
-            .await
-            {
-                Ok(Some(tok)) => {
-                    let access_token = tok.access_token.unwrap_or_default();
-                    let refresh_token = tok.refresh_token.unwrap_or_default();
-
-                    {
-                        if let Ok(mut a) = auth.lock() {
-                            if epoch.load(std::sync::atomic::Ordering::SeqCst) != generation {
-                                return;
-                            }
-                            a.visitor_data = None;
-                            a.access_token = Some(access_token.clone());
-                            a.refresh_token = Some(refresh_token.clone());
-                        }
-                    }
-
-                    let (name, handle) = backend.account_info().await.unwrap_or_default();
-
-                    {
-                        if let Ok(mut a) = auth.lock() {
-                            if epoch.load(std::sync::atomic::Ordering::SeqCst) != generation {
-                                return;
-                            }
-                            let _ = a.save_token_and_account(
-                                access_token,
-                                refresh_token,
-                                tok.expires_in,
-                                name.clone(),
-                                handle.clone(),
-                            );
-                        }
-                    }
-
-                    let _ = tx
-                        .send(AppEvent::LoginSucceeded(generation, name, handle))
-                        .await;
-                    break;
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    let _ = tx
-                        .send(AppEvent::LoginStatus(
-                            generation,
-                            format!("OAuth polling error: {e}"),
-                        ))
-                        .await;
-                    break;
+            tokio::select! {
+                Some(event)=updates.recv()=>{ if tx.send(AppEvent::LoginDisplay(generation,event)).await.is_err() { return; } },
+                result=&mut flow=>{
+                    let event=match result {
+                        Ok(account)=>AppEvent::LoginSucceeded(generation,account.name,account.handle),
+                        Err(error)=>AppEvent::LoginStatus(generation,error.to_string()),
+                    };
+                    let _=tx.send(event).await; break;
                 }
             }
         }
@@ -2670,79 +2630,31 @@ fn trigger_oauth_device_flow(app: &mut App, tx: Sender<AppEvent>) {
 }
 
 async fn run_login() -> anyhow::Result<()> {
-    use std::time::Duration;
-    use tokio::time::sleep;
-    use yute::backend::auth::AuthContext;
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()?;
-
-    println!("==================================================");
-    println!("          YouTube Device Sign-In");
-    println!("==================================================");
-    println!("Requesting device authorization code from YouTube...");
-
-    let device_code = AuthContext::request_device_code(&client).await?;
-
-    println!();
-    println!("1. On your phone or computer, open your browser and go to:");
-    println!("   {}", device_code.verification_url);
-    println!();
-    println!("2. Enter this code:");
-    println!("   >>> {} <<<", device_code.user_code);
-    println!();
-    println!("Waiting for authorization in browser... (Press Ctrl+C to cancel)");
-
-    let interval = device_code.interval.max(5);
-    let start = std::time::Instant::now();
-    let max_duration = Duration::from_secs(device_code.expires_in.max(300));
-
-    while start.elapsed() < max_duration {
-        sleep(Duration::from_secs(interval)).await;
-
-        match AuthContext::poll_device_token(&client, &device_code.device_code).await {
-            Ok(Some(token_res)) => {
-                if let (Some(access), Some(refresh)) =
-                    (token_res.access_token, token_res.refresh_token)
-                {
-                    let mut auth = AuthContext::default();
-                    auth.save_token_and_account(
-                        access,
-                        refresh,
-                        token_res.expires_in,
-                        "Authenticated User".to_string(),
-                        String::new(),
-                    )?;
-                    let mut config = Config::load();
-                    config.backend.auth = "tv_oauth".into();
-                    config.save()?;
-                    println!();
-                    println!("==================================================");
-                    println!("Authorization successful!");
-                    println!("Credentials stored securely at ~/.config/yute/auth.json (mode 0600)");
-                    println!("==================================================");
-                    return Ok(());
-                }
-            }
-            Ok(None) => {
-                use std::io::Write;
-                print!(".");
-                let _ = std::io::stdout().flush();
-            }
-            Err(e) => {
-                let err_str = e.to_string();
-                if err_str.contains("slow_down") {
-                    sleep(Duration::from_secs(5)).await;
-                } else {
-                    eprintln!("\nDevice login error: {e}");
-                    return Err(e);
-                }
+    let config = Config::load();
+    let cancelled = yute_core::oauth::CancellationToken::new();
+    let (events, mut updates) = tokio::sync::mpsc::unbounded_channel();
+    let flow = yute_core::oauth::device_login(
+        yute::config::resolve_path("~/.config/yute/auth.json"),
+        (config.backend.hl.clone(), config.backend.gl.clone()),
+        cancelled.clone(),
+        events,
+    );
+    tokio::pin!(flow);
+    loop {
+        tokio::select! {
+            _=tokio::signal::ctrl_c()=>{cancelled.cancel(); anyhow::bail!("Sign-in cancelled");},
+            Some(event)=updates.recv()=>{ if let yute_core::oauth::LoginEvent::Code{user_code,verification_url,..}=event {
+                println!("Open {verification_url} and enter {user_code}. Ctrl+C cancels.");
+                println!("{}",ui::signin::qr_text(&verification_url));
+            }},
+            result=&mut flow=>{
+                let account=result?;
+                let mut config=config.clone(); config.backend.auth="tv_oauth".into(); config.save()?;
+                println!("Signed in as {}. Credentials saved.",account.name);
+                return Ok(());
             }
         }
     }
-
-    anyhow::bail!("Authorization code expired. Please run `yute login` again.");
 }
 
 async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
@@ -2915,7 +2827,10 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
 // Keep diagnostics concise; never display request URLs, headers or response bodies.
 fn feed_error_message(error: &anyhow::Error) -> &'static str {
     let diagnostic = format!("{error:#}").to_ascii_lowercase();
-    if diagnostic.contains("401") || diagnostic.contains("unauthorized") {
+    if diagnostic.contains("401")
+        || diagnostic.contains("unauthorized")
+        || diagnostic.contains("needs re-login")
+    {
         "YouTube session expired — use :login to reconnect"
     } else if diagnostic.contains("403") {
         "YouTube rejected this session/client — check Accounts, then press r to retry"

@@ -127,6 +127,8 @@ impl Accounts {
                     cookie_header: None,
                     sapisid: None,
                     page_id: account.page_id.clone(),
+                    account_id: Some(id.clone()),
+                    needs_login: account.needs_login,
                     auth_file_path: Some(path.clone()),
                     ..current.clone()
                 },
@@ -193,6 +195,7 @@ impl Accounts {
             }
             let mut session = current.clone();
             session.page_id = profile.channel_id.clone();
+            session.account_id = Some(id.clone());
             session.cancelled = tokio_util::sync::CancellationToken::new();
             self.sessions.insert(id.clone(), session);
             if let (Some(access), Some(refresh)) = (&current.access_token, &current.refresh_token) {
