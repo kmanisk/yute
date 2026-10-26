@@ -7,7 +7,12 @@ pub fn scan_local_videos(dirs: &[String]) -> FeedPage {
     let extensions = ["mp4", "mkv", "webm", "mov", "avi"];
     let mut files: Vec<(PathBuf, u64, SystemTime)> = Vec::new();
 
-    for dir_str in dirs {
+    let mut dirs = dirs.to_vec();
+    let downloads = "~/Videos/Yute".to_string();
+    if !dirs.contains(&downloads) {
+        dirs.push(downloads);
+    }
+    for dir_str in &dirs {
         let dir_path = crate::config::resolve_path(dir_str);
         if !dir_path.exists() {
             continue;

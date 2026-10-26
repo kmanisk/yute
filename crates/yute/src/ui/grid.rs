@@ -38,11 +38,20 @@ impl GridGeometry {
         let columns = column_count(area.width, config);
         let slot_width = area
             .width
-            .saturating_sub(2 + columns.saturating_sub(1) as u16)
+            .saturating_sub(2 + 2 * columns.saturating_sub(1) as u16)
             / columns as u16;
-        let card_width = slot_width.min(30);
-        let column_stride = slot_width.saturating_add(1);
-        let first_column_offset = 1 + slot_width.saturating_sub(card_width) / 2;
+        let mut card_width = slot_width.min(30);
+        while card_width > 24 && area.height >= 24 {
+            let rows = ((card_width.saturating_sub(2)) as f32 * cell_w / cell_h.max(1.) * 9. / 16.)
+                .round() as u16;
+            if (rows + 6) * 2 <= area.height {
+                break;
+            }
+            card_width -= 1;
+        }
+        let column_stride = card_width.saturating_add(2);
+        let occupied = card_width * columns as u16 + 2 * columns.saturating_sub(1) as u16;
+        let first_column_offset = area.width.saturating_sub(occupied) / 2;
         let thumbnail_width = card_width.saturating_sub(2);
         let aspect_height =
             (thumbnail_width as f32 * cell_w / cell_h.max(1.0) * 9.0 / 16.0).round() as u16;

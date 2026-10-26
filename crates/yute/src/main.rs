@@ -257,6 +257,10 @@ async fn handle_key_event(
     tx: Sender<AppEvent>,
 ) {
     let key = yute::keymap::normalize_key(key);
+    if app.action_menu.is_some() {
+        handle_item_menu(app, key, tx);
+        return;
+    }
     if key.code == KeyCode::Char('e')
         && key.modifiers == crossterm::event::KeyModifiers::ALT
         && !app.confirming_quit
@@ -471,6 +475,10 @@ async fn handle_key_event(
         return;
     };
 
+    if action == Action::ItemActions {
+        open_item_menu(app);
+        return;
+    }
     if action == Action::Quit {
         app.should_quit = true;
         return;
@@ -1079,6 +1087,196 @@ fn set_content_filter(app: &mut App, kind: yute::app::FilterKind, tx: Sender<App
     }
 }
 
+fn open_item_menu(app: &mut App) {
+    let card = if app.screen == Screen::Watch && app.watch_pane != yute::app::WatchPane::Suggestions
+    {
+        app.player.current_video.clone().map(Card::Video)
+    } else if app.focus == Focus::Content {
+        app.selected_card().cloned()
+    } else {
+        None
+    };
+    let Some(card) = card else {
+        app.status_text = "Select a video, playlist or channel first".into();
+        return;
+    };
+    app.menu_request = app.menu_request.wrapping_add(1);
+    app.action_menu = Some(yute::actions::ActionMenu {
+        request: app.menu_request,
+        card,
+        cursor: 0,
+        stage: yute::actions::MenuStage::Actions,
+        playlists: vec![],
+        message: String::new(),
+    });
+}
+fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
+    use crossterm::event::KeyModifiers;
+    use yute::actions::{menu_entries, ItemAction, MenuStage};
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
+    {
+        app.player.stop();
+        app.should_quit = true;
+        return;
+    }
+    if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+        app.action_menu = None;
+        return;
+    }
+    let auth = authenticated(app);
+    let menu = app.action_menu.as_mut().unwrap();
+    let entries = menu_entries(&menu.card, auth, app.download_active);
+    let count = if menu.stage == MenuStage::Actions {
+        entries.len()
+    } else {
+        menu.playlists.len()
+    };
+    match key.code {
+        KeyCode::Char('j') | KeyCode::Down => {
+            menu.cursor = (menu.cursor + 1).min(count.saturating_sub(1));
+            menu.message.clear();
+            return;
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            menu.cursor = menu.cursor.saturating_sub(1);
+            menu.message.clear();
+            return;
+        }
+        KeyCode::Enter => {}
+        KeyCode::Char(c) if menu.stage == MenuStage::Actions => {
+            if let Some(i) = entries.iter().position(|e| e.key == c) {
+                menu.cursor = i;
+            } else {
+                return;
+            }
+        }
+        _ => return,
+    }
+    if menu.stage == MenuStage::LoadingPlaylists {
+        return;
+    }
+    if menu.stage == MenuStage::Playlists {
+        let Some(playlist) = menu.playlists.get(menu.cursor) else {
+            return;
+        };
+        let Card::Video(video) = &menu.card else {
+            return;
+        };
+        let id = video.id.clone();
+        let playlist = playlist.id.clone();
+        let backend = Arc::clone(&app.backend);
+        let generation = app
+            .auth_generation
+            .load(std::sync::atomic::Ordering::SeqCst);
+        app.action_menu = None;
+        app.status_text = "Saving to playlist…".into();
+        tokio::spawn(async move {
+            let result = backend.save_to_playlist(&playlist, &id).await;
+            let _ = tx.send(AppEvent::PlaylistSaved(generation, result)).await;
+        });
+        return;
+    }
+    let Some(entry) = entries.get(menu.cursor) else {
+        return;
+    };
+    if let Some(reason) = entry.unavailable {
+        menu.message = reason.into();
+        return;
+    }
+    let action = entry.action;
+    let card = menu.card.clone();
+    let request = menu.request;
+    if action == ItemAction::Save {
+        menu.stage = MenuStage::LoadingPlaylists;
+        menu.message.clear();
+        let backend = Arc::clone(&app.backend);
+        let id = card.id().to_string();
+        tokio::spawn(async move {
+            let result = backend.playlist_destinations(&id).await;
+            let _ = tx.send(AppEvent::MenuPlaylists(request, result)).await;
+        });
+        return;
+    }
+    app.action_menu = None;
+    match action {
+        ItemAction::Play => match card {
+            Card::Playlist(p) => dispatch_open(app, yute::actions::OpenAction::PlayMix(p), tx),
+            _ => dispatch_open(app, yute::actions::activation(&card), tx),
+        },
+        ItemAction::Browse => dispatch_open(app, yute::actions::activation(&card), tx),
+        ItemAction::Browser => open_system_url(yute::actions::url(&card), tx),
+        ItemAction::CopyUrl => copy_to_clipboard(yute::actions::url(&card), tx),
+        ItemAction::CopyTitle => copy_to_clipboard(card.title().into(), tx),
+        ItemAction::Queue => {
+            if let Card::Video(v) = card {
+                app.player.queue.push_back(v);
+                sync_queue_view(app);
+                app.status_text = "Added to queue".into();
+            }
+        }
+        ItemAction::Channel => {
+            if let Some(c) = yute::actions::channel_of(&card) {
+                dispatch_open(app, yute::actions::OpenAction::OpenChannel(c), tx);
+            }
+        }
+        ItemAction::Download => start_download(app, card, tx),
+        ItemAction::CancelDownload => {
+            app.download_request = app.download_request.wrapping_add(1);
+            if let Some(task) = app.download_task.take() {
+                task.abort();
+            }
+            app.download_active = false;
+            app.status_text = "Download cancelled".into();
+        }
+        ItemAction::Save => {}
+    }
+}
+fn open_system_url(url: String, tx: Sender<AppEvent>) {
+    tokio::spawn(async move {
+        let result = tokio::process::Command::new("xdg-open")
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+        let _ = tx
+            .send(AppEvent::StatusMessage(
+                if result.is_ok_and(|s| s.success()) {
+                    "Opened in system browser"
+                } else {
+                    "Could not open URL — check xdg-open"
+                }
+                .into(),
+            ))
+            .await;
+    });
+}
+fn start_download(app: &mut App, card: Card, tx: Sender<AppEvent>) {
+    if app.download_active {
+        return;
+    }
+    app.download_active = true;
+    app.status_text = "Downloading with yt-dlp → ~/Videos/Yute".into();
+    let config = app.config.clone();
+    app.download_request = app.download_request.wrapping_add(1);
+    let request = app.download_request;
+    let task = tokio::spawn(async move {
+        let dir = yute::config::resolve_path("~/Videos/Yute");
+        let result = async {
+            tokio::fs::create_dir_all(&dir).await?;
+            let mut command = yute::actions::download_command(&card, &config, &dir);
+            command.status().await.map(|s| s.success())
+        }
+        .await;
+        let _ = tx
+            .send(AppEvent::DownloadFinished(request, result.unwrap_or(false)))
+            .await;
+    });
+    app.download_task = Some(task.abort_handle());
+}
+
 fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<AppEvent>) -> bool {
     use yute::app::WatchPane;
     match action {
@@ -1571,6 +1769,59 @@ fn execute_command(app: &mut App, tx: Sender<AppEvent>) {
 
 fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
     match event {
+        AppEvent::MenuPlaylists(request, result) => {
+            let Some(menu) = &mut app.action_menu else {
+                return;
+            };
+            if menu.request != request || menu.stage != yute::actions::MenuStage::LoadingPlaylists {
+                return;
+            }
+            menu.stage = yute::actions::MenuStage::Playlists;
+            menu.cursor = 0;
+            match result {
+                Ok(page) => {
+                    menu.playlists = page
+                        .items
+                        .into_iter()
+                        .filter_map(|c| {
+                            if let Card::Playlist(p) = c {
+                                Some(p)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                }
+                Err(_) => menu.message = "Could not load playlists · Esc closes, then retry".into(),
+            }
+        }
+        AppEvent::PlaylistSaved(generation, result) => {
+            if generation
+                != app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            app.status_text = match result {
+                Ok(()) => "Saved to playlist".into(),
+                Err(error) => mutation_error_message(&error),
+            };
+        }
+        AppEvent::DownloadFinished(request, ok) => {
+            if request != app.download_request {
+                return;
+            }
+            app.download_task = None;
+            app.download_active = false;
+            app.status_text = if ok {
+                "Download complete · ~/Videos/Yute · :local to browse"
+            } else {
+                "Download failed · check yt-dlp, FFmpeg, disk space and account access"
+            }
+            .into();
+        }
+
         AppEvent::MutationFinished(generation, mutation, result) => {
             if generation != app.feed_generation {
                 return;
@@ -2874,22 +3125,7 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 selected
             };
             if let Some(card) = card {
-                let url = yute::actions::url(&card);
-                tokio::spawn(async move {
-                    let result = tokio::process::Command::new("xdg-open")
-                        .arg(&url)
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status()
-                        .await;
-                    let message = if result.is_ok_and(|s| s.success()) {
-                        "Opened in system browser"
-                    } else {
-                        "Could not open URL — check xdg-open and browser association"
-                    };
-                    let _ = tx.send(AppEvent::StatusMessage(message.into())).await;
-                });
+                open_system_url(yute::actions::url(&card), tx);
             } else {
                 app.status_text = "No matching selected entity to open".into();
             }
@@ -2985,14 +3221,9 @@ fn send_player_command(app: &mut App, command: IpcCommand) {
     }
 }
 fn authenticated(app: &App) -> bool {
-    let auth = app.auth.lock().unwrap();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    auth.access_token.is_some() && auth.token_expires_at.is_none_or(|expiry| expiry > now)
-        || (auth.sapisid.is_some() && auth.cookie_header.is_some())
+    app.is_authenticated()
 }
+
 fn perform_mutation(app: &mut App, mutation: yute::actions::AccountMutation, tx: Sender<AppEvent>) {
     let backend = Arc::clone(&app.backend);
     let generation = app.feed_generation;
@@ -3858,5 +4089,84 @@ mod feed_ui_tests {
             .filtered_items()
             .iter()
             .any(|c| c.id() == "fixture-short"));
+    }
+    #[tokio::test]
+    async fn item_menu_captures_target_and_consumes_keys_without_normal_navigation() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let (mut app, cards) = app_and_cards();
+        app.items = cards;
+        app.focus = Focus::Content;
+        let mut keys = KeymapState::new();
+        let (tx, _) = channel(16);
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+            tx.clone(),
+        )
+        .await;
+        assert!(app.action_menu.is_some());
+        assert!(!app.player.is_alive());
+        let target = app.action_menu.as_ref().unwrap().card.id().to_string();
+        app.selected_index = 2;
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            tx.clone(),
+        )
+        .await;
+        assert!(app.action_menu.is_none());
+        assert_eq!(app.player.queue.pop_next().unwrap().id, target);
+        open_item_menu(&mut app);
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            tx.clone(),
+        )
+        .await;
+        assert!(!app.should_quit);
+        assert!(app.action_menu.is_none());
+        app.focus = Focus::CommandLine;
+        app.cmd_input = "help".into();
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT),
+            tx,
+        )
+        .await;
+        assert!(app.action_menu.is_none());
+        assert!(app.command_help.is_some());
+    }
+    #[tokio::test]
+    async fn cancelling_download_ignores_already_queued_completion_from_old_job() {
+        use yute::actions::{menu_entries, ItemAction};
+        let (mut app, cards) = app_and_cards();
+        app.items = cards;
+        app.focus = Focus::Content;
+        app.download_active = true;
+        app.download_request = 1;
+        let task = tokio::spawn(std::future::pending::<()>());
+        app.download_task = Some(task.abort_handle());
+        open_item_menu(&mut app);
+        app.action_menu.as_mut().unwrap().cursor = menu_entries(&app.items[0], false, true)
+            .iter()
+            .position(|e| e.action == ItemAction::CancelDownload)
+            .unwrap();
+        let (tx, _) = channel(16);
+        handle_item_menu(
+            &mut app,
+            crossterm::event::KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+            tx.clone(),
+        );
+        tokio::task::yield_now().await;
+        assert!(!app.download_active);
+        assert!(task.await.unwrap_err().is_cancelled());
+        app.download_request = 3;
+        app.download_active = true;
+        handle_app_event(&mut app, AppEvent::DownloadFinished(1, true), tx);
+        assert!(app.download_active);
     }
 }

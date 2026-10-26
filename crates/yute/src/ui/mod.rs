@@ -17,14 +17,15 @@ pub mod watch;
 use crate::app::{App, Focus, Screen, ViewMode};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 pub mod miniplayer;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ShellLayout {
     pub header: Rect,
+    pub pane: Rect,
     pub sidebar: Rect,
     pub tabs: Rect,
     pub title: Rect,
@@ -56,28 +57,37 @@ impl ShellLayout {
         let sidebar = Rect::new(body.x, body.y, sb, body.height);
         let content_x = body.x + sb;
         let width = body.width.saturating_sub(sb);
-        let tabs_h = u16::from(!matches!(
+        let has_tabs = !matches!(
             app.screen,
             Screen::Watch
                 | Screen::Settings
                 | Screen::Accounts
                 | Screen::Help
                 | Screen::ChannelView
-        ));
-        let tabs = Rect::new(content_x, body.y, width, tabs_h);
-        let title_h = u16::from(!matches!(
-            app.screen,
-            Screen::Home | Screen::Search | Screen::Watch
-        ));
-        let title = Rect::new(content_x, body.y + tabs_h, width, title_h);
-        let content = Rect::new(
-            content_x,
-            title.bottom(),
-            width,
-            body.height.saturating_sub(tabs_h + title_h),
         );
+        let label_width = header::label(app, area.width / 3).width() as u16;
+        let tabs_x = area.x + sb.max(label_width + 2).min(area.width);
+        let tabs = Rect::new(
+            tabs_x,
+            area.y,
+            area.right().saturating_sub(tabs_x),
+            u16::from(has_tabs),
+        );
+        let pane = Rect::new(content_x, body.y, width, body.height);
+        let content = pane.inner(ratatui::layout::Margin::new(1, 1));
+        let title = Rect::new(content.x, content.y, content.width, 0);
         Self {
-            header: Rect::new(area.x, area.y, area.width, 1),
+            header: Rect::new(
+                area.x,
+                area.y,
+                if has_tabs {
+                    tabs_x - area.x
+                } else {
+                    area.width
+                },
+                1,
+            ),
+            pane,
             sidebar,
             tabs,
             title,
@@ -90,7 +100,8 @@ impl ShellLayout {
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
-    app.overlay_area = cmdline::popup_area(app, size);
+    app.overlay_area =
+        super::actions::menu_rect(app, size).or_else(|| cmdline::popup_area(app, size));
     if size.width < 30 || size.height < 10 {
         return;
     }
@@ -98,46 +109,30 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let shell = ShellLayout::new(size, app);
     header::render_header(f, app, shell.header);
     sidebar::render_sidebar(f, app, shell.sidebar);
+    let focused = app.focus == Focus::Content && app.action_menu.is_none();
+    let frame = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(Style::default().fg(if focused {
+            app.theme.accent
+        } else {
+            app.theme.border
+        }))
+        .title(if matches!(app.screen, Screen::Watch) {
+            " Video details "
+        } else {
+            " Content "
+        })
+        .title_style(Style::default().fg(if focused {
+            app.theme.accent
+        } else {
+            app.theme.text_secondary
+        }));
+    f.render_widget(frame, shell.pane);
     if !shell.tabs.is_empty() {
         chips::render_chips(f, app, shell.tabs);
     }
     let content_area = shell.content;
     let status_area = shell.footer;
-    let title_prefix = match app.screen {
-        Screen::ChannelView => match &app.detail_route {
-            Some(crate::app::DetailRoute::Channel(route)) => route.channel.title.clone(),
-            _ => "Channel".into(),
-        },
-        Screen::Home => "Home".to_string(),
-        Screen::Subscriptions => "Subscriptions".to_string(),
-        Screen::History => "History".to_string(),
-        Screen::WatchLater => "Watch Later".to_string(),
-        Screen::Playlists | Screen::PlaylistView => "Playlists".to_string(),
-        Screen::Liked => "Liked Videos".to_string(),
-        Screen::LocalVideos => "Local Videos".to_string(),
-        Screen::Queue => "Queue".to_string(),
-        Screen::Search => {
-            if app.search_query.is_empty() {
-                "Search".to_string()
-            } else {
-                format!("Search: '{}'", app.search_query)
-            }
-        }
-        Screen::Settings => "Settings".to_string(),
-        Screen::Accounts => "Accounts".to_string(),
-        Screen::Watch => "Now Playing".to_string(),
-        Screen::Help => "Help".to_string(),
-    };
-
-    let pane_title = match &app.detail_route {
-        Some(crate::app::DetailRoute::Playlist(playlist)) => playlist.title.clone(),
-        _ => title_prefix,
-    };
-
-    f.render_widget(
-        Paragraph::new(pane_title).style(Style::default().fg(app.theme.text)),
-        shell.title,
-    );
     let inner_content = content_area;
     app.rendered_columns = if app.current_view_mode() == ViewMode::List || content_area.width < 72 {
         1
@@ -189,6 +184,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.which_key || app.focus == Focus::CommandLine || app.command_help.is_some() {
         cmdline::render_cmdline(f, app);
     }
+
+    crate::actions::render_menu(f, app);
 
     // Render quit confirmation modal
     if app.confirming_quit || app.confirming_logout {

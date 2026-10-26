@@ -48,6 +48,7 @@ pub enum Action {
 
     // Cards / lists
     PlayDefault,
+    ItemActions,
     PlayWindow,
     OpenBrowser,
     QueueAppend,
@@ -130,7 +131,7 @@ pub const G_BINDINGS: &[(char, Action, &str)] = &[
     ('q', Action::NavQueue, "Queue"),
     ('v', Action::NavLocal, "Local"),
     ('a', Action::NavAccounts, "Account"),
-    ('o', Action::NavSettings, "Settings"),
+    (',', Action::NavSettings, "Settings"),
     ('n', Action::NavWatch, "Now Playing"),
     ('c', Action::NavChannel, "Channel"),
 ];
@@ -164,9 +165,15 @@ pub const WATCH_BINDINGS: &[(&str, Action, &str, bool)] = &[
         false,
     ),
     (
-        "o",
+        "O",
         Action::OpenDescriptionLink,
         "Open selected description link",
+        false,
+    ),
+    (
+        "o",
+        Action::OpenBrowser,
+        "Open current video in browser",
         false,
     ),
     ("[", Action::PrevChip, "Previous description link", false),
@@ -227,6 +234,9 @@ impl KeymapState {
             let count = self.take_count();
             if prefix == 'g' {
                 if let KeyCode::Char(c) = code {
+                    if c == 'o' {
+                        return Some((Action::NavSettings, count));
+                    }
                     return G_BINDINGS
                         .iter()
                         .find(|(key, _, _)| *key == c)
@@ -260,6 +270,10 @@ impl KeymapState {
                 KeyCode::Char('l') => return Some((Action::Redraw, 1)),
                 _ => {}
             }
+        }
+
+        if code == KeyCode::Enter && mods.contains(KeyModifiers::SHIFT) {
+            return Some((Action::ItemActions, 1));
         }
 
         // Watch mode bindings

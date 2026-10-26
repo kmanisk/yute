@@ -1711,3 +1711,53 @@ fn typed_live_state(value: &Value) -> LiveState {
     }
     LiveState::None
 }
+
+/// The add-to-playlist endpoint returns actual destinations for this account/video.
+pub fn parse_playlist_destinations(value: &Value) -> FeedPage {
+    fn walk(value: &Value, out: &mut Vec<Card>) {
+        if let Some(p) = value.get("playlistAddToOptionRenderer") {
+            if p.get("containsSelectedVideos").and_then(Value::as_str) == Some("ALL")
+                || p.get("isEditable").and_then(Value::as_bool) == Some(false)
+            {
+                return;
+            }
+            if let (Some(id), Some(title)) =
+                (p.get("playlistId").and_then(Value::as_str), p.get("title"))
+            {
+                let title = extract_text(title);
+                if !id.is_empty() && !title.is_empty() && !out.iter().any(|c| c.id() == id) {
+                    out.push(Card::Playlist(crate::backend::models::PlaylistCard {
+                        id: id.into(),
+                        title,
+                        channel: String::new(),
+                        video_count: None,
+                        thumb_url: String::new(),
+                        is_mix: false,
+                        first_video_id: None,
+                    }));
+                }
+            }
+            return;
+        }
+        match value {
+            Value::Object(map) => {
+                for v in map.values() {
+                    walk(v, out)
+                }
+            }
+            Value::Array(items) => {
+                for v in items {
+                    walk(v, out)
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut items = Vec::new();
+    walk(value, &mut items);
+    FeedPage {
+        items,
+        chips: vec![],
+        continuation: None,
+    }
+}

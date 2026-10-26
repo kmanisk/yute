@@ -642,3 +642,22 @@ fn http_only_cookie_rows_are_not_mistaken_for_comments() {
     );
     assert_eq!(auth.sapisid.as_deref(), Some("test-sapisid"));
 }
+
+#[test]
+fn playlist_destinations_only_use_actual_unsaved_server_options() {
+    use serde_json::json;
+    let raw = json!({"contents":[{"addToPlaylistRenderer":{"playlists":[
+        {"playlistAddToOptionRenderer":{"playlistId":"PLavailable","title":{"simpleText":"Learning"},"containsSelectedVideos":"NONE"}},
+        {"playlistAddToOptionRenderer":{"playlistId":"PLsaved","title":{"simpleText":"Saved already"},"containsSelectedVideos":"ALL"}},
+        {"playlistAddToOptionRenderer":{"playlistId":"PLreadonly","title":{"simpleText":"Read only"},"isEditable":false}}
+    ]}}]});
+    let page = yute_core::backend::parse::parse_playlist_destinations(&raw);
+    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items[0].id(), "PLavailable");
+    assert!(matches!(page.items[0], Card::Playlist(_)));
+    assert!(
+        yute_core::backend::parse::parse_playlist_destinations(&json!({}))
+            .items
+            .is_empty()
+    );
+}

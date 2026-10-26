@@ -17,7 +17,7 @@ pub const SIDEBAR_ITEMS: &[(&str, Screen, &str)] = &[
     ("Queue", Screen::Queue, "gq"),
     ("Local", Screen::LocalVideos, "gv"),
     ("Account", Screen::Accounts, "ga"),
-    ("Settings", Screen::Settings, "go"),
+    ("Settings", Screen::Settings, "g,"),
 ];
 pub fn index_of(screen: Screen) -> Option<usize> {
     let screen = if screen == Screen::PlaylistView {
@@ -40,7 +40,8 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     }
     let focused = app.focus == Focus::Sidebar;
     let block = Block::default()
-        .borders(Borders::RIGHT)
+        .borders(Borders::ALL)
+        .title(" Navigation ")
         .border_style(Style::default().fg(if focused {
             app.theme.accent
         } else {
@@ -76,10 +77,10 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         } else {
             style
         };
-        let name = super::text::truncate_str(name, inner.width.saturating_sub(6) as usize);
+        let name = super::text::truncate_str(name, inner.width.saturating_sub(5) as usize);
         let pad = inner
             .width
-            .saturating_sub(2 + name.len() as u16 + hint.len() as u16 + 1);
+            .saturating_sub(2 + name.len() as u16 + hint.len() as u16);
         let line = Line::from(vec![
             Span::styled(marker, style),
             Span::styled(name, style),

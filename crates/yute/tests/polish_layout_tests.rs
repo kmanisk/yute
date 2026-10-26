@@ -87,7 +87,9 @@ fn shell_geometry_and_rendering_matrix() {
             let area = Rect::new(0, 0, w, h);
             let shell = ShellLayout::new(area, &app);
             assert_eq!(shell.sidebar.y, 1, "{screen:?} {w}x{h}");
-            assert_eq!(shell.tabs.x, shell.content.x);
+            assert_eq!(shell.tabs.y, shell.header.y);
+            assert_eq!(shell.pane.y, 1);
+            assert_eq!(shell.content.x, shell.pane.x + 1);
             assert_eq!(shell.title.x, shell.content.x);
             assert!(shell.tabs.x >= shell.sidebar.right());
             assert!(shell.player.is_empty());
@@ -385,4 +387,52 @@ fn compact_grid_and_settings_remain_bounded_at_requested_sizes() {
         yute::ui::settings::cycle_setting(&mut app, true);
     }
     assert_eq!(app.config.playback.stream_cache_seconds, 60);
+}
+
+#[test]
+fn focus_frames_and_single_row_header_stay_clear_with_hidden_sidebar() {
+    for (w, h) in [
+        (80, 24),
+        (113, 28),
+        (120, 30),
+        (135, 31),
+        (160, 40),
+        (200, 50),
+    ] {
+        let mut app = app();
+        app.sidebar_expanded = false;
+        app.focus = Focus::Content;
+        let shell = ShellLayout::new(Rect::new(0, 0, w, h), &app);
+        assert_eq!(shell.tabs.y, 0);
+        assert_eq!(shell.header.y, 0);
+        assert_eq!(shell.pane, Rect::new(0, 1, w, h - 2));
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(shell.pane.x, shell.pane.y)].fg,
+            app.theme.accent
+        );
+        let g = GridGeometry::new(
+            shell.content,
+            &app.config.grid,
+            app.cell_w_px,
+            app.cell_h_px,
+        );
+        assert_eq!(g.column_stride - g.card_width, 2);
+        if w == 135 {
+            assert!(g.visible_rows >= 2);
+        }
+        app.sidebar_expanded = true;
+        app.focus = Focus::Sidebar;
+        let shell = ShellLayout::new(Rect::new(0, 0, w, h), &app);
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+        assert_eq!(
+            terminal.backend().buffer()[(shell.sidebar.x, shell.sidebar.y)].fg,
+            app.theme.accent
+        );
+        assert_eq!(
+            terminal.backend().buffer()[(shell.pane.x, shell.pane.y)].fg,
+            app.theme.border
+        );
+    }
 }

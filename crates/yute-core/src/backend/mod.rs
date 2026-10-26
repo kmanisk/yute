@@ -22,6 +22,12 @@ pub trait Backend: Send + Sync {
     async fn watch_later(&self) -> anyhow::Result<FeedPage>;
     async fn playlists(&self) -> anyhow::Result<FeedPage>;
     async fn playlist(&self, id: &str) -> anyhow::Result<FeedPage>;
+    async fn playlist_destinations(&self, _video: &str) -> anyhow::Result<FeedPage> {
+        anyhow::bail!("Playlist destinations unavailable")
+    }
+    async fn save_to_playlist(&self, _playlist: &str, _video: &str) -> anyhow::Result<()> {
+        anyhow::bail!("Saving playlists is unavailable from this backend")
+    }
     async fn search(
         &self,
         q: &str,
@@ -178,6 +184,20 @@ impl Backend for BackendChain {
         empty_res.map(Ok).unwrap_or(Err(last_err))
     }
 
+    async fn playlist_destinations(&self, video: &str) -> anyhow::Result<FeedPage> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No backend"))?
+            .playlist_destinations(video)
+            .await
+    }
+    async fn save_to_playlist(&self, playlist: &str, video: &str) -> anyhow::Result<()> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No backend"))?
+            .save_to_playlist(playlist, video)
+            .await
+    }
     async fn playlists(&self) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;

@@ -15,8 +15,12 @@ fn section(f: &mut Frame, app: &App, area: Rect, title: &str, active: bool) -> R
     }
     let block = Block::default()
         .borders(Borders::TOP)
-        .title(format!(" {title} "))
-        .border_style(Style::default().fg(app.theme.border))
+        .title(format!(" {}{title} ", if active { "▸ " } else { "" }))
+        .border_style(Style::default().fg(if active {
+            app.theme.accent
+        } else {
+            app.theme.border
+        }))
         .title_style(
             Style::default()
                 .fg(if active {

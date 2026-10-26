@@ -129,3 +129,44 @@ synchronization remain incomplete. No daemon or new frequent timer was added.
 The supplied icon is in `assets/yute.png` and the README. GitHub was created
 private before pushing. Public crates.io publication is a separate decision:
 its package source becomes public even while the GitHub repository stays private.
+
+
+## Focus framing and item menu follow-up
+
+The route and filters now share one header row. A content frame remains visible
+with a hidden sidebar; sidebar/content borders use accent vs dim styles to show
+keyboard focus separately from the current sidebar route. Two-column card gutters
+replace the old full-width slots. Geometry can narrow cards slightly to preserve
+two complete rows inside the new frame without stretching thumbnails.
+
+Shift+Enter opens a typed menu with play/open, browse playlist, browser, copy,
+queue, save-to-playlist and download choices. Disabled capabilities explain why.
+Settings is labelled g, in the sidebar and generated navigation hints, while go
+remains compatible. o consistently opens the entity in the browser; Shift+O opens
+a selected description link in Watch. Menu q closes the menu, leaving normal q
+as application quit.
+
+Playlist destinations come from the real account/video add-to-playlist endpoint;
+already-saved and explicitly non-editable entries are excluded. Saving requires
+an affirmative server response. The read-only live destination lookup was
+unavailable for the current session; no live playlist write was attempted.
+
+A single external yt-dlp job handles downloads, using the quality limit and Node
+runtime support. It writes to ~/Videos/Yute, also scanned by Local. Cancellation
+aborts the task and kills its child; late completion events cannot clear a newer
+job's state. Jobs end when Yute exits. Automated checks cover argument construction,
+collection URLs, guest cookie isolation, cancellation, frozen menu targets,
+entity-specific actions, stale results, frame focus and the layout size matrix.
+
+The release PTY run recognized the one-line header, Shift+Enter menu, menu q-close,
+g, Settings, and normal q-exit. Five-second idle measurements produced 0 redraw
+bytes and 0.0–0.2% CPU across runs. These checks used terminal text/halfblocks;
+actual Sixel display remains visually unverified.
+
+[Hidden sidebar](../assets/screenshots/home.png) ·
+[Sidebar focus](../assets/screenshots/sidebar-focus.png) ·
+[Actions menu](../assets/screenshots/actions.png)
+
+Follow-up validation: 114 workspace tests pass (3 native tests remain ignored by
+default); workspace formatting, Clippy and release build pass. Existing Clippy
+style warnings remain. No new dependency, service or redraw timer was added.

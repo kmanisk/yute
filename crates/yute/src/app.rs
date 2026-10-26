@@ -158,6 +158,11 @@ pub struct CommentDraft {
 }
 
 pub struct App {
+    pub action_menu: Option<crate::actions::ActionMenu>,
+    pub menu_request: u64,
+    pub download_active: bool,
+    pub download_request: u64,
+    pub download_task: Option<tokio::task::AbortHandle>,
     pub watch_pane: WatchPane,
     pub description_scroll: u16,
     pub watch_link_index: usize,
@@ -297,6 +302,11 @@ impl App {
             search_view_mode: ViewMode::Grid,
             filter_kind: FilterKind::All,
             home_source: FilterKind::All,
+            action_menu: None,
+            menu_request: 0,
+            download_active: false,
+            download_request: 0,
+            download_task: None,
             home_pages: Default::default(),
             watch_pane: WatchPane::Description,
             description_scroll: 0,
@@ -389,7 +399,17 @@ impl App {
         }
     }
 
+    pub fn is_authenticated(&self) -> bool {
+        let auth = self.auth.lock().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        auth.access_token.is_some() && auth.token_expires_at.is_none_or(|expiry| expiry > now)
+            || (auth.sapisid.is_some() && auth.cookie_header.is_some())
+    }
     pub fn rebuild_backend(&mut self) {
+        self.action_menu = None;
         self.home_pages.clear();
         self.home_source = FilterKind::All;
         self.channel_items.clear();

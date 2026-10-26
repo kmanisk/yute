@@ -287,7 +287,7 @@ fn test_fixed_three_columns_preserve_selection_when_scrolling() {
 }
 
 #[test]
-fn test_shift_enter_external_playback_keymap() {
+fn test_shift_enter_opens_item_actions_keymap() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use yute::keymap::{Action, KeymapState};
 
@@ -296,8 +296,8 @@ fn test_shift_enter_external_playback_keymap() {
     let key_shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
     assert_eq!(
         keymap.handle_key(key_shift_enter, false),
-        Some((Action::PlayDefault, 1)),
-        "Shift+Enter must use external playback"
+        Some((Action::ItemActions, 1)),
+        "Shift+Enter must open the item menu"
     );
 
     let key_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
@@ -317,7 +317,7 @@ fn test_header_is_minimal_and_does_not_show_account() {
     let header: String = (0..120)
         .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
         .collect();
-    assert_eq!(header.trim(), "yute");
+    assert!(header.contains("yute") && header.contains("Home") && header.contains("All"));
     assert!(!header.contains("YouTube"));
     assert!(!header.contains("Private account"));
 }

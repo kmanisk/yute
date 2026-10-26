@@ -249,6 +249,28 @@ impl Backend for InnerTubeBackend {
         Ok(page)
     }
 
+    async fn playlist_destinations(&self, video: &str) -> Result<FeedPage> {
+        let response = self
+            .post_endpoint(
+                "playlist/get_add_to_playlist",
+                self.make_body(json!({"videoIds":[video]})),
+            )
+            .await?;
+        Ok(crate::backend::parse::parse_playlist_destinations(
+            &response,
+        ))
+    }
+    async fn save_to_playlist(&self, playlist: &str, video: &str) -> Result<()> {
+        let response=self.post_endpoint("browse/edit_playlist",self.make_body(json!({"playlistId":playlist.trim_start_matches("VL"),"actions":[{"action":"ACTION_ADD_VIDEO","addedVideoId":video}]}))).await?;
+        if response.get("status").and_then(Value::as_str) == Some("STATUS_SUCCEEDED")
+            || crate::backend::parse::find_json_key(&response, "playlistEditVideoAddedResultData")
+                .is_some()
+        {
+            Ok(())
+        } else {
+            anyhow::bail!("YouTube did not confirm this playlist update")
+        }
+    }
     async fn playlists(&self) -> Result<FeedPage> {
         let body = self.make_body(json!({
             "browseId": "FElibrary"

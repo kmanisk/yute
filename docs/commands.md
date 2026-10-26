@@ -68,7 +68,7 @@ Liked, Queue and Local preserve explicit content. `never` also hides saved Short
 Search and command rows support Left/Right, Home/End, Ctrl+A/E, Ctrl+U/W and
 Unicode-safe editing. Command Up/Down recalls session history. `g` shows a small
 navigation hint after 400 ms; it closes on a second key, Esc or a four-second timeout.
-`gn` returns to Watch without restarting playback.
+`g,` opens Settings (`go` remains an alias). `gn` returns to Watch without restarting playback.
 
 Shift+J / Shift+K move forward/backward through the content-type tabs in browsing
 views. Lowercase j/k continue moving through cards. Shifted characters remain text
@@ -92,7 +92,7 @@ sections; j/k scroll or select. Enter opens the selected suggestion/link. +/- ra
 the video or focused comment; n starts a comment and r replies. Text input consumes
 normal keys. Real action parameters and authentication are required; absent
 capabilities are reported rather than simulated. Enter posts a draft; Esc cancels.
-Description links are underlined; [/] selects a link and o opens it.
+Description links are underlined; [/] selects a link and Shift+O opens it. Lowercase o opens the video in the browser.
 
 `:quality [480p|720p|1080p|1440p|2160p|best]` reports or changes quality. Numeric
 aliases such as `:quality 720` and `:quality 4k` work. With active MPV this reloads
@@ -103,3 +103,19 @@ Settings uses compact step selectors/toggles and a stream buffer slider. Buffer
 presets are 5/10/20/40/60 seconds with 32/64/128/192/256 MiB packet budgets. The
 slider updates active MPV properties; dedicated-profile launches use the same
 values. Initial playback does not wait to fill the entire cache horizon.
+
+
+## Item menu
+
+Shift+Enter opens typed actions for the current video, channel or playlist.
+Enter alone retains its original typed activation. o opens the entity in the
+browser; g, opens Settings. Within the menu, j/k/arrows select and Esc/q cancels.
+Shortcuts p/v/o/y/t/a/s/d/x select play, browse, browser, copy URL, copy title,
+queue, save to playlist, download, and cancel download when applicable.
+
+Save requires authentication, loads real available destinations from
+playlist/get_add_to_playlist, then submits browse/edit_playlist only after a
+destination is chosen. Downloads run yt-dlp asynchronously at the chosen quality,
+write to ~/Videos/Yute, and appear under Local. One download job is allowed at a
+time, with explicit cancellation and process cleanup on exit. No account writes
+or real online downloads are part of the automated tests.

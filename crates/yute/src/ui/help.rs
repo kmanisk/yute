@@ -9,6 +9,7 @@ const ENTRIES: &[(&str, &str)] = &[
     ("Navigation", ""),
     ("Alt-e", "Show and focus sidebar; press again to hide"),
     ("Enter", "Open/play selected entity"),
+    ("Shift-Enter", "Item actions: play, copy, save, download"),
     ("arrows", "Move between cards"),
     ("Ctrl-d/u, Ctrl-f/b", "Half/full page"),
     ("Tab / Shift-Tab", "Cycle pane focus"),

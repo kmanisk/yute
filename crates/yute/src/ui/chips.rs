@@ -1,4 +1,4 @@
-use crate::app::{App, FilterKind};
+use crate::app::{App, FilterKind, Focus};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -26,7 +26,11 @@ pub fn render_chips(f: &mut Frame, app: &App, area: Rect) {
             Style::default()
                 .bg(app.theme.chip_active_bg)
                 .fg(app.theme.chip_active_fg)
-                .add_modifier(Modifier::BOLD)
+                .add_modifier(if app.focus == Focus::Chips {
+                    Modifier::BOLD | Modifier::UNDERLINED
+                } else {
+                    Modifier::BOLD
+                })
         } else {
             Style::default().fg(app.theme.text_secondary)
         };

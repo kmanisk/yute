@@ -135,3 +135,93 @@ fn explicit_video_types_win_over_ambiguous_id_prefixes() {
         assert!(matches!(activation(&card), OpenAction::Play(_)));
     }
 }
+
+#[test]
+fn entity_action_menu_never_offers_channel_playback_and_marks_login_requirements() {
+    use yute::actions::{menu_entries, ItemAction};
+    use yute::backend::models::{ChannelCard, PlaylistCard, VideoCard};
+    let channel = Card::Channel(ChannelCard {
+        id: "UCtest".into(),
+        title: "Channel".into(),
+        handle: None,
+        subscribers: None,
+        avatar_url: None,
+        verified: false,
+    });
+    let actions = menu_entries(&channel, false, false);
+    assert!(!actions.iter().any(|e| matches!(
+        e.action,
+        ItemAction::Play | ItemAction::Download | ItemAction::Save
+    )));
+    let video:VideoCard=serde_json::from_value(serde_json::json!({"id":"video-id","title":"Video","channel":"Creator","verified":false,"thumb_url":"","live":"None","badges":[]})).unwrap();
+    let video = Card::Video(video);
+    assert!(menu_entries(&video, false, false)
+        .iter()
+        .find(|e| e.action == ItemAction::Save)
+        .unwrap()
+        .unavailable
+        .is_some());
+    assert!(menu_entries(&video, true, false)
+        .iter()
+        .find(|e| e.action == ItemAction::Save)
+        .unwrap()
+        .unavailable
+        .is_none());
+    let playlist = Card::Playlist(PlaylistCard {
+        id: "PLtest".into(),
+        title: "Playlist".into(),
+        channel: "Creator".into(),
+        video_count: None,
+        thumb_url: String::new(),
+        is_mix: false,
+        first_video_id: None,
+    });
+    assert!(menu_entries(&playlist, true, false)
+        .iter()
+        .any(|e| e.action == ItemAction::Play));
+    assert!(matches!(
+        yute::actions::activation(&playlist),
+        yute::actions::OpenAction::OpenPlaylist(_)
+    ));
+    assert!(menu_entries(&video, true, true)
+        .iter()
+        .any(|e| e.action == ItemAction::CancelDownload));
+}
+
+#[test]
+fn yt_dlp_arguments_are_bounded_to_the_selected_entity_and_quality() {
+    use yute::{actions, backend::models::PlaylistCard, config::Config};
+    let card = Card::Playlist(PlaylistCard {
+        id: "RDabcdefghijk".into(),
+        title: "Mix".into(),
+        channel: "YouTube".into(),
+        video_count: None,
+        thumb_url: String::new(),
+        is_mix: true,
+        first_video_id: Some("abcdefghijk".into()),
+    });
+    let mut cfg = Config::default();
+    cfg.backend.auth = "guest".into();
+    cfg.playback.max_resolution = "720p".into();
+    let cmd = actions::download_command(
+        &card,
+        &cfg,
+        std::path::Path::new("/tmp/yute-download-fixture"),
+    );
+    let args = cmd
+        .as_std()
+        .get_args()
+        .map(|s| s.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(args.contains(&"--ignore-config".into()));
+    assert!(args.windows(2).any(|w| w == ["--js-runtimes", "node"]));
+    assert!(args.contains(&"--no-overwrites".into()));
+    assert!(args.contains(&"--yes-playlist".into()));
+    assert!(!args.contains(&"--cookies".into()));
+    assert!(args.iter().any(|s| s.contains("height<=?720")));
+    assert_eq!(args[args.len() - 2], "--");
+    assert_eq!(
+        args.last().unwrap(),
+        "https://www.youtube.com/watch?v=abcdefghijk&list=RDabcdefghijk"
+    );
+}

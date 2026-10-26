@@ -45,6 +45,9 @@ yute setup-mpv           # optional MPV scripts
 | --- | --- |
 | `h/j/k/l` | Move between cards; h/l stay within the row |
 | `Enter` | Open the selected entity |
+| `Shift-Enter` | Item actions: play, browser, copy, queue, save, download |
+| `o` | Open the selected video/channel/playlist in the browser |
+| `g,` | Settings (`go` remains a compatibility shortcut) |
 | `Shift-J/K` | Next/previous content filter |
 | `Shift-H/L` | Back/forward through route history |
 | `Alt-e` | Show/focus sidebar; press again to hide |
@@ -140,3 +143,30 @@ continuation remain incomplete. Mix playback uses the current returned batch.
 No account writes are performed by the tests.
 
 MIT. See [LICENSE](LICENSE).
+
+
+## Item actions and focus
+
+The route label and result filters share the top row. Navigation and content have
+separate frames: the keyboard-focused pane uses the accent border, while the
+active sidebar route keeps its marker. Tab cycles pane focus; Alt+E shows/focuses
+or hides navigation. Card gutters are two terminal columns, with no large empty
+column slots when navigation is hidden.
+
+Shift+Enter opens an item menu. j/k or arrows select, Enter runs the action, and
+Esc/q closes the menu. Menu shortcuts are p play/open, v browse playlist, o browser,
+y copy link, t copy title, a queue, s save video to playlist, d download, and x
+cancel a running download. Options depend on entity type; channels never offer
+playback. Ordinary Enter still opens normal playlists internally.
+
+Saving requests the account's actual available playlist destinations, excluding
+already-saved entries, and waits for YouTube to confirm the edit. A valid YouTube
+session is required; no success is simulated when the endpoint is unavailable.
+
+Downloads use an external yt-dlp process at the current quality limit and write
+to `~/Videos/Yute`, which Local also scans. Node support is enabled alongside
+any default yt-dlp runtime. Only one job runs at a time; cancel it from the menu.
+Exiting Yute terminates an unfinished download; yt-dlp partial files can resume
+on a later attempt. Playlist/Mix downloads use their collection URL. No shell is
+used to execute entity URLs or filenames. Account cookies are only supplied for
+non-guest sessions with an existing cookie file.
