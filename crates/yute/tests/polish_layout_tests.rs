@@ -478,3 +478,24 @@ fn truncation_respects_graphemes_and_ellipsis_width() {
         }
     }
 }
+
+#[test]
+fn completion_popup_is_framed_and_keeps_footer_clear() {
+    let mut app = app();
+    app.focus = Focus::CommandLine;
+    app.cmd_input = "acc".into();
+    for (w, h) in [(80, 24), (113, 28), (200, 60)] {
+        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+        terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let rect = app.overlay_area.unwrap();
+        assert!(rect.bottom() < h);
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(rect.x, rect.y)].symbol(), "┌");
+        assert_eq!(buffer[(rect.right() - 1, rect.bottom() - 1)].symbol(), "┘");
+        assert_eq!(buffer[(rect.right() - 1, rect.y + 1)].symbol(), "│");
+    }
+    assert_eq!(
+        yute::commands::completions_with_accounts("account Al", &["Alice".into()]),
+        vec!["account Alice"]
+    );
+}

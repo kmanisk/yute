@@ -259,6 +259,13 @@ pub enum WatchRightMode {
 }
 
 impl App {
+    pub fn command_choices(&self) -> Vec<String> {
+        crate::commands::completions_with_accounts(
+            self.completion_base.as_deref().unwrap_or(&self.cmd_input),
+            &[self.account_name.clone()],
+        )
+    }
+
     pub fn new(config: Config, picker: Picker) -> Self {
         let theme = Theme::load(&config.general.theme);
         let font_size = picker.font_size();

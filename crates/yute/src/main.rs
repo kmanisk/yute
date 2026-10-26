@@ -335,6 +335,94 @@ fn init_performance_trace() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn handle_command_input(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
+    use crossterm::event::KeyModifiers;
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let choices = app.command_choices();
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('c') if key.code == KeyCode::Esc || ctrl => {
+            app.focus = Focus::Content;
+            app.cmd_input.clear();
+            app.command_history.reset();
+            app.completion_base = None;
+            app.completion_index = 0;
+            app.input_cursor = None;
+        }
+        KeyCode::Backspace if app.cmd_input.is_empty() => {
+            app.focus = Focus::Content;
+            app.completion_base = None;
+            app.input_cursor = None;
+        }
+        KeyCode::Enter => {
+            if yute::commands::parse(&app.cmd_input).is_err() {
+                if let Some(choice) =
+                    choices.get(app.completion_index.min(choices.len().saturating_sub(1)))
+                {
+                    app.cmd_input = choice.clone();
+                }
+            }
+            app.focus = Focus::Content;
+            execute_command(app, tx);
+            app.cmd_input.clear();
+            app.completion_base = None;
+            app.completion_index = 0;
+            app.input_cursor = None;
+            app.command_history.reset();
+        }
+        KeyCode::Char('r' | 's') if ctrl => {
+            app.cmd_input = if key.code == KeyCode::Char('r') {
+                app.command_history.previous(&app.cmd_input)
+            } else {
+                app.command_history.next_entry()
+            };
+            app.completion_base = None;
+            app.completion_index = 0;
+            app.input_cursor = None;
+        }
+        KeyCode::Up
+        | KeyCode::Down
+        | KeyCode::Tab
+        | KeyCode::BackTab
+        | KeyCode::Char('n' | 'p')
+            if !matches!(key.code, KeyCode::Char(_)) || ctrl =>
+        {
+            if choices.is_empty()
+                || (app.cmd_input.is_empty() && matches!(key.code, KeyCode::Up | KeyCode::Down))
+            {
+                app.cmd_input = if key.code == KeyCode::Up {
+                    app.command_history.previous(&app.cmd_input)
+                } else if key.code == KeyCode::Down {
+                    app.command_history.next_entry()
+                } else {
+                    app.cmd_input.clone()
+                };
+            } else {
+                let previous = matches!(
+                    key.code,
+                    KeyCode::Up | KeyCode::BackTab | KeyCode::Char('p')
+                );
+                let started = app.completion_base.is_some();
+                app.completion_base
+                    .get_or_insert_with(|| app.cmd_input.clone());
+                app.completion_index = if previous {
+                    (app.completion_index + choices.len() - 1) % choices.len()
+                } else if started {
+                    (app.completion_index + 1) % choices.len()
+                } else {
+                    0
+                };
+                if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                    app.cmd_input = choices[app.completion_index].clone();
+                }
+            }
+            app.input_cursor = None;
+        }
+        _ => {
+            edit_input(app, key);
+        }
+    }
+}
+
 async fn refresh_terminal_cells(app: &mut App) {
     // TIOCGWINSZ never reads stdin; EventStream retains exclusive input ownership.
     let query = tokio::task::spawn_blocking(crossterm::terminal::window_size);
@@ -388,7 +476,11 @@ async fn handle_key_event(
         }
         return;
     }
-    if matches!(app.focus, Focus::CommandLine | Focus::SearchInput) && edit_input(app, key) {
+    if app.focus == Focus::CommandLine {
+        handle_command_input(app, key, tx);
+        return;
+    }
+    if app.focus == Focus::SearchInput && edit_input(app, key) {
         return;
     }
     if app.confirming_logout {
@@ -437,81 +529,7 @@ async fn handle_key_event(
     }
 
     if app.focus == Focus::CommandLine {
-        match key.code {
-            KeyCode::Enter => {
-                app.focus = Focus::Content;
-                execute_command(app, tx);
-                app.cmd_input.clear();
-                app.completion_base = None;
-                app.completion_index = 0;
-                app.command_history.reset();
-            }
-            KeyCode::Esc => {
-                app.focus = Focus::Content;
-                app.cmd_input.clear();
-                app.completion_base = None;
-                app.completion_index = 0;
-                app.command_history.reset();
-            }
-            KeyCode::Tab | KeyCode::BackTab => {
-                let repeated = app.completion_base.is_some();
-                let base = app
-                    .completion_base
-                    .get_or_insert_with(|| app.cmd_input.clone());
-                let choices = yute::commands::completions(base);
-                if !choices.is_empty() {
-                    app.completion_index = if repeated {
-                        (app.completion_index + 1) % choices.len()
-                    } else {
-                        0
-                    };
-                    app.cmd_input = choices[app.completion_index].clone();
-                }
-            }
-            KeyCode::Up => {
-                app.cmd_input = app.command_history.previous(&app.cmd_input);
-                app.completion_base = None;
-                app.completion_index = 0;
-            }
-            KeyCode::Down => {
-                app.cmd_input = app.command_history.next_entry();
-                app.completion_base = None;
-                app.completion_index = 0;
-            }
-            KeyCode::Backspace => {
-                app.cmd_input.pop();
-                app.completion_base = None;
-                app.completion_index = 0;
-            }
-            KeyCode::Char('u')
-                if key
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                app.cmd_input.clear();
-                app.completion_base = None;
-                app.completion_index = 0;
-            }
-            KeyCode::Char('w')
-                if key
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
-            {
-                delete_word(&mut app.cmd_input);
-                app.completion_base = None;
-                app.completion_index = 0;
-            }
-            KeyCode::Char(c)
-                if !key.modifiers.intersects(
-                    crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::ALT,
-                ) =>
-            {
-                app.cmd_input.push(c);
-                app.completion_base = None;
-                app.completion_index = 0;
-            }
-            _ => {}
-        }
+        handle_command_input(app, key, tx);
         return;
     }
     if app.focus == Focus::SearchInput {
@@ -3737,6 +3755,36 @@ mod feed_ui_tests {
         assert_eq!(app.settings_index, 0);
         handle_key_event(&mut app, &mut keymap, key, tx).await;
         assert!(!app.sidebar_expanded);
+        assert_eq!(app.focus, Focus::Content);
+    }
+
+    #[tokio::test]
+    async fn command_enter_accepts_alias_fuzzy_and_never_opens_underlying_card() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        for input in ["acc", "a", "acount"] {
+            let (mut app, cards) = app_and_cards();
+            app.items = cards;
+            app.focus = Focus::CommandLine;
+            app.cmd_input = input.into();
+            let (tx, _) = channel(4);
+            handle_key_event(
+                &mut app,
+                &mut KeymapState::new(),
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+                tx,
+            )
+            .await;
+            assert_eq!(app.screen, Screen::Accounts);
+            assert!(!app.player.is_alive());
+        }
+        let (mut app, _) = app_and_cards();
+        app.focus = Focus::CommandLine;
+        let (tx, _) = channel(4);
+        handle_command_input(
+            &mut app,
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            tx,
+        );
         assert_eq!(app.focus, Focus::Content);
     }
 

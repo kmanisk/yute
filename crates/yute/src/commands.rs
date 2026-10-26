@@ -137,7 +137,7 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"queue", aliases:&[], usage:"queue [add|next|remove|clear]", description:"Open the local queue; add selected video, prepend it, remove selected queue entry, or clear. Example: :queue add", parse:queue },
     Spec { name:"local", aliases:&[], usage:"local", description:"Browse configured local videos.", parse:|a| no_args(a,Command::Navigate(Screen::LocalVideos)) },
     Spec { name:"settings", aliases:&[], usage:"settings", description:"Open settings.", parse:|a| no_args(a,Command::Navigate(Screen::Settings)) },
-    Spec { name:"account", aliases:&["accounts"], usage:"account [switch]", description:"Show the active session. Account switching is not implemented.", parse:|a| match a { ""=>Ok(Command::Navigate(Screen::Accounts)),"switch"=>Ok(Command::AccountSwitch),_=>Err("Usage: :account [switch]".into()) } },
+    Spec { name:"account", aliases:&["accounts", "acc", "a"], usage:"account [switch]", description:"Show the active session. Account switching is not implemented.", parse:|a| match a { ""=>Ok(Command::Navigate(Screen::Accounts)),"switch"=>Ok(Command::AccountSwitch),_=>Err("Usage: :account [switch]".into()) } },
     Spec { name:"search", aliases:&[], usage:"search <query>", description:"Search YouTube. Example: :search linux kernel", parse:|a| if a.is_empty(){Err("Usage: :search <query>".into())}else{Ok(Command::Search(a.into()))} },
     Spec { name:"channel", aliases:&[], usage:"channel", description:"Open the selected item's channel when its channel ID is available.", parse:|a| no_args(a,Command::Channel) },
     Spec { name:"playlist", aliases:&[], usage:"playlist", description:"Open the selected playlist, without autoplay.", parse:|a| no_args(a,Command::Playlist) },
@@ -195,8 +195,13 @@ pub fn parse(input: &str) -> Result<Command, String> {
     (spec.parse)(args.trim())
 }
 pub fn completions(input: &str) -> Vec<String> {
+    completions_with_accounts(input, &[])
+}
+
+pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String> {
     let input = input.trim_start();
     let subcommands: &[(&str, &[&str])] = &[
+        ("account", &["add", "remove", "anon", "whoami"]),
         ("queue", &["add", "next", "remove", "clear"]),
         (
             "filter",
@@ -216,6 +221,16 @@ pub fn completions(input: &str) -> Vec<String> {
         ("copy", &["url", "title", "channel"]),
         ("open", &["video", "channel"]),
     ];
+    let (head, tail) = input.split_once(' ').unwrap_or((input, ""));
+    if matches!(head, "account" | "accounts" | "acc" | "a") && input.contains(' ') {
+        return ["add", "remove", "anon", "whoami"]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(accounts.iter().cloned())
+            .filter(|s| s.starts_with(tail))
+            .map(|s| format!("{head} {s}"))
+            .collect();
+    }
     let candidates: Vec<String> = if input.starts_with("goto ") {
         REGISTRY
             .iter()
@@ -232,10 +247,30 @@ pub fn completions(input: &str) -> Vec<String> {
     } else {
         REGISTRY.iter().map(|s| s.name.to_string()).collect()
     };
-    candidates
+    let mut matches: Vec<_> = candidates
         .into_iter()
-        .filter(|s| s.starts_with(input))
-        .collect()
+        .filter_map(|name| {
+            if name.starts_with(input) {
+                return Some((0, name));
+            }
+            if !input.contains(' ') {
+                if spec(input).is_some_and(|s| s.name == name) {
+                    return Some((0, name));
+                }
+                let mut chars = name.chars();
+                if input.chars().all(|ch| chars.by_ref().any(|c| c == ch)) {
+                    return Some((1, name));
+                }
+            }
+            None
+        })
+        .collect();
+    matches.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.len().cmp(&b.1.len()))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    matches.into_iter().map(|(_, name)| name).collect()
 }
 pub fn help(topic: Option<&str>) -> Result<String, String> {
     if let Some(topic) = topic {

@@ -1,8 +1,11 @@
 # Command mode
 
 Press `:` to edit the bottom command row. Enter executes, Esc cancels, Tab completes
-names and queue subcommands, and Up/Down recalls session history. Multiple matches
-appear in a small list above the input. History holds at most 100 successfully
+names and arguments. Up/Down, Shift-Tab and Ctrl-n/p cycle ranked suggestions;
+Enter accepts the highlighted match (including prefixes such as :acc). Ctrl-r/s
+recall session history; Up/Down also recall history when there are no suggestions.
+Esc cancels, and Backspace on an empty line exits. All keys are captured while
+editing. Matches and bounded descriptions appear in a framed popup above the input. History holds at most 100 successfully
 parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 `?` is keyboard help; `:help` is command help, and `:help search` explains one command.
 
@@ -10,7 +13,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 
 | Group | Syntax | Behavior |
 | --- | --- | --- |
-| Navigation | `home`, `subscriptions` (`subs`), `history`, `watch-later` (`wl`), `liked`, `playlists`, `queue`, `local`, `settings`, `account` (`accounts`) | Open the corresponding route. |
+| Navigation | `home`, `subscriptions` (`subs`), `history`, `watch-later` (`wl`), `liked`, `playlists`, `queue`, `local`, `settings`, `account` (`accounts`, `acc`, `a`) | Open the corresponding route. |
 | Search | `search <query>` | YouTube search; preserves the previous route. |
 | Entities | `channel`, `playlist` | Open the selected item's channel ID or selected playlist. Missing identity is reported. |
 | Playback | `play`, `pause`, `toggle`, `stop`, `next`, `prev`, `mute` | External yute-managed MPV only. `next` consumes the next queued video; `prev` uses bounded session playback history. |

@@ -6,7 +6,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 use unicode_width::UnicodeWidthStr;
@@ -86,17 +86,15 @@ pub fn popup_area(app: &App, area: Rect) -> Option<Rect> {
     if app.focus != Focus::CommandLine || app.cmd_input.is_empty() {
         return None;
     }
-    let choices = commands::completions(app.completion_base.as_deref().unwrap_or(&app.cmd_input));
+    let choices = app.command_choices();
     if choices.is_empty() || (choices.len() == 1 && choices[0] == app.cmd_input) {
         return None;
     }
-    let height = (choices.len() as u16)
-        .min(5)
-        .min(area.height.saturating_sub(2));
+    let height = (choices.len().min(5) as u16 * 2 + 2).min(area.height.saturating_sub(2));
     Some(Rect::new(
         area.x + 1,
         area.bottom().saturating_sub(height + 1),
-        area.width.saturating_sub(2).min(46),
+        area.width.saturating_sub(2).min(80),
         height,
     ))
 }
@@ -139,40 +137,47 @@ pub fn render_cmdline(f: &mut Frame, app: &App) {
     if app.focus != Focus::CommandLine || app.cmd_input.is_empty() {
         return;
     }
-    let base = app.completion_base.as_deref().unwrap_or(&app.cmd_input);
-    let choices = commands::completions(base);
-    if choices.is_empty() || (choices.len() == 1 && choices[0] == app.cmd_input) {
-        return;
-    }
+    let choices = app.command_choices();
     let Some(rect) = app.overlay_area else {
         return;
     };
-    let h = rect.height;
+    if choices.is_empty() {
+        return;
+    }
     f.render_widget(Clear, rect);
-    let start = app.completion_index.saturating_sub(4);
-    let lines = choices
-        .iter()
-        .enumerate()
-        .skip(start)
-        .take(h as usize)
-        .map(|(i, s)| {
-            Line::from(Span::styled(
-                format!(
-                    " {s:<18} {}",
-                    commands::spec(s).map_or("", |spec| spec.description)
-                ),
-                if i == app.completion_index {
-                    Style::default()
-                        .fg(app.theme.accent)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(app.theme.text_secondary)
-                },
-            ))
-        })
-        .collect::<Vec<_>>();
-    f.render_widget(
-        Paragraph::new(lines).style(Style::default().bg(app.theme.surface)),
-        rect,
-    );
+    let block = Block::default()
+        .title(" Commands ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent))
+        .style(Style::default().bg(app.theme.surface));
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+    let rows = (inner.height / 2).max(1) as usize;
+    let start = app.completion_index.saturating_sub(rows - 1);
+    let mut lines = Vec::new();
+    for (i, name) in choices.iter().enumerate().skip(start).take(rows) {
+        let selected = i == app.completion_index;
+        let style = if selected {
+            Style::default()
+                .fg(app.theme.accent)
+                .bg(app.theme.surface_hover)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(app.theme.text)
+        };
+        lines.push(Line::from(Span::styled(
+            super::text::truncate_str(
+                &format!(" {}{name}", if selected { "▸ " } else { "  " }),
+                inner.width as usize,
+            ),
+            style,
+        )));
+        let description = commands::spec(name.split_whitespace().next().unwrap_or(name))
+            .map_or("Account or command argument", |s| s.description);
+        lines.push(Line::from(Span::styled(
+            super::text::truncate_str(description, inner.width as usize),
+            style.remove_modifier(Modifier::BOLD),
+        )));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
 }
