@@ -4,30 +4,22 @@
   <img src="assets/yute.png" alt="Yute icon" width="120">
 </p>
 
-```text
-$ yute
+<p align="center">
+  <strong>YouTube, treated like a terminal application.</strong>
+</p>
 
-> / rust programming
-  130 results
+<p align="center">
+  A keyboard-first YouTube client written in Rust with Ratatui and Tokio.<br>
+  Discovery stays in the terminal; video playback stays in external MPV.
+</p>
 
-  hjkl     move
-  enter    open
-  :        command
-  /        search
-
-  browse here. play in mpv.
-```
-
-> **YouTube, treated like a terminal application.**
-
-[![Rust](https://img.shields.io/badge/Rust-2021-b7410e?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/kmanisk/yute?style=flat)](https://github.com/kmanisk/yute/stargazers)
-[![Last commit](https://img.shields.io/github/last-commit/kmanisk/yute)](https://github.com/kmanisk/yute/commits/main)
-[![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20Unix-lightgrey)](#install)
-
-Yute is a keyboard-first YouTube client written in Rust with Ratatui and Tokio.
-Discovery stays inside the terminal; actual video playback stays in external MPV.
+<p align="center">
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-2021-b7410e?logo=rust&logoColor=white" alt="Rust 2021"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License"></a>
+  <a href="https://github.com/kmanisk/yute/stargazers"><img src="https://img.shields.io/github/stars/kmanisk/yute?style=flat" alt="GitHub stars"></a>
+  <a href="https://github.com/kmanisk/yute/commits/main"><img src="https://img.shields.io/github/last-commit/kmanisk/yute" alt="Last commit"></a>
+  <img src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20Unix-lightgrey" alt="Linux and Unix">
+</p>
 
 ![Yute subscriptions view](assets/screenshots/subscriptions.png)
 
