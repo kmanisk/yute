@@ -1,0 +1,36 @@
+# Performance measurements
+
+Opt in with `YUTE_TRACE=1 yute`. Static-name tracing spans and duration events go
+to `$XDG_STATE_HOME/yute/trace-<pid>.log` (default `~/.local/state/yute/`). Files
+are mode 0600. Only operation classes, durations and counts are logged; no URLs,
+queries, identities, tokens, cookies, headers or response bodies are included.
+Normal runs do not enable this subscriber.
+
+## Before (step 0)
+
+Release build, 113x28 pseudo-terminal, font-query responses supplied by the test
+harness. One cold-image run and one subsequent warm-cache run, with an isolated
+XDG cache directory. Existing feed metadata was copied for the experiment; user
+caches were not removed. Times start at Rust main entry (excluding process loader
+and Tokio runtime startup), and "visible" means placed in a flushed terminal
+frame, not a physical-display timestamp. These are samples, not network guarantees.
+
+| Measurement | Before |
+| --- | --- |
+| Main entry to first frame, cold/warm runs | 1.78 / 1.78 ms |
+| First frame to Home, cold feed refresh | 3,480 ms |
+| First frame to cached Home, warm | 0.02 ms |
+| Cold thumbnail request to first placement | 772–1,021 ms |
+| Warm disk thumbnail request to placement | 501 ms |
+| Subscriptions first page | 2,571 ms |
+| Subscriptions complete (this response had no continuation) | 2,571 ms |
+| Account switch | Unsupported before this work; not measurable |
+
+The warm-thumbnail delay spans two 250 ms polling ticks. Resize currently changes
+only the dirty flag; font pixel dimensions remain cached from startup. Startup
+also calls the blocking ratatui-image stdio capability query; the responsive
+pseudo-terminal benchmark does not represent an unresponsive real terminal.
+
+Raw trace samples and the measurement harness are ignored under
+`target/perf-baseline/`. Later sections record after results under matching
+conditions. No authenticated writes or media playback were used for these runs.

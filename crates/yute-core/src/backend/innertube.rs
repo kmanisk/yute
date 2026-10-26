@@ -50,6 +50,18 @@ impl InnerTubeBackend {
     }
 
     pub async fn post_endpoint(&self, endpoint: &str, body: Value) -> Result<Value> {
+        use tracing::Instrument;
+        let operation = match endpoint {
+            "browse" => "browse",
+            "next" => "next",
+            "search" => "search",
+            _ => "other",
+        };
+        self.post_endpoint_inner(endpoint, body)
+            .instrument(tracing::info_span!(target:"yute_perf","innertube_request",operation))
+            .await
+    }
+    async fn post_endpoint_inner(&self, endpoint: &str, body: Value) -> Result<Value> {
         let url = format!("{INNERTUBE_BASE}/{endpoint}");
         let headers = self.auth.lock().unwrap().build_headers();
 

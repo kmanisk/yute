@@ -66,6 +66,8 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    yute_core::trace::start();
+    init_performance_trace()?;
     let cli = Cli::parse();
 
     if let Some(Commands::SetupMpv) = cli.command {
@@ -162,11 +164,39 @@ async fn main() -> anyhow::Result<()> {
     let mut reader = EventStream::new();
     let mut ticker = tokio::time::interval(Duration::from_millis(250));
     let mut dirty = true;
+    let mut first_frame = true;
+    let mut first_home = true;
 
     while !app.should_quit {
         if dirty {
             app.refresh_channel_items();
             terminal.draw(|f| ui::draw(f, &mut app))?;
+            if first_frame {
+                yute_core::trace::since_start("first_frame");
+                first_frame = false;
+            }
+            if first_home && app.screen == Screen::Home && !app.items.is_empty() {
+                yute_core::trace::since_start("home_rendered");
+                first_home = false;
+            }
+            if app.screen == Screen::Subscriptions && !app.items.is_empty() {
+                if let Some(start) = app.trace_subscriptions.take() {
+                    yute_core::trace::duration(
+                        "subscriptions_first_page",
+                        start.elapsed(),
+                        app.items.len(),
+                    );
+                }
+                if app.continuation_token.is_none() {
+                    if let Some(start) = app.trace_subscriptions_complete.take() {
+                        yute_core::trace::duration(
+                            "subscriptions_complete",
+                            start.elapsed(),
+                            app.items.len(),
+                        );
+                    }
+                }
+            }
             maybe_continue_feed(&mut app, tx_event.clone());
             maybe_load_card_metadata(&mut app, tx_event.clone());
             dirty = false;
@@ -248,6 +278,37 @@ fn trigger_watch_fetch(app: &App, tx: Sender<AppEvent>, video_id: String) {
         let res = backend.watch(&video_id).await;
         let _ = tx.send(AppEvent::WatchDataLoaded(video_id, res)).await;
     });
+}
+
+fn init_performance_trace() -> anyhow::Result<()> {
+    if !yute_core::trace::enabled() {
+        return Ok(());
+    }
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let dir = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| yute::config::resolve_path("~/.local/state"))
+        .join("yute");
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(dir.join(format!("trace-{}.log", std::process::id())))?;
+    use tracing_subscriber::prelude::*;
+    let layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .without_time()
+        .with_writer(std::sync::Mutex::new(file))
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+        .with_filter(tracing_subscriber::filter::filter_fn(|m| {
+            m.target() == "yute_perf"
+        }));
+    let _ = tracing_subscriber::registry().with(layer).try_init();
+    Ok(())
 }
 
 async fn handle_key_event(

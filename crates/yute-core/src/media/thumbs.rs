@@ -116,6 +116,14 @@ impl ThumbnailLoader {
         loaded
     }
 
+    pub fn is_cached(&self, url: &str) -> bool {
+        self.ram_lru.contains_key(url)
+            || self
+                .cache
+                .thumbs_dir()
+                .join(format!("{}.jpg", cache_key_for_url(url)))
+                .is_file()
+    }
     pub fn get_image(&mut self, url: &str) -> Option<&DynamicImage> {
         if self.ram_lru.contains_key(url) {
             if let Some(pos) = self.lru_order.iter().position(|u| u == url) {

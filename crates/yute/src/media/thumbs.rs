@@ -14,6 +14,8 @@ use yute_core::media::cache::DiskCache;
 use yute_core::media::thumbs::ThumbnailLoader;
 
 pub struct ThumbnailManager {
+    trace_requests: HashMap<CoverKey, (std::time::Instant, bool)>,
+    trace_completed: HashSet<CoverKey>,
     picker: Picker,
     loader: ThumbnailLoader,
     ram_lru: HashMap<String, StatefulProtocol>,
@@ -31,6 +33,8 @@ impl ThumbnailManager {
     pub fn new(picker: Picker, cache: DiskCache) -> Self {
         let (cover_tx, cover_rx) = channel();
         Self {
+            trace_requests: HashMap::new(),
+            trace_completed: HashSet::new(),
             covers: HashMap::new(),
             cover_order: VecDeque::new(),
             cover_pending: HashSet::new(),
@@ -92,7 +96,24 @@ impl ThumbnailManager {
             url: url.to_string(),
             size,
         };
+        if yute_core::trace::enabled() && !self.trace_completed.contains(&key) {
+            self.trace_requests
+                .entry(key.clone())
+                .or_insert_with(|| (std::time::Instant::now(), self.loader.is_cached(url)));
+        }
         if self.covers.contains_key(&key) {
+            if let Some((start, warm)) = self.trace_requests.remove(&key) {
+                self.trace_completed.insert(key.clone());
+                yute_core::trace::duration(
+                    if warm {
+                        "thumbnail_warm_visible"
+                    } else {
+                        "thumbnail_cold_visible"
+                    },
+                    start.elapsed(),
+                    1,
+                );
+            }
             self.cover_order.retain(|k| k != &key);
             self.cover_order.push_back(key.clone());
             return self.covers.get(&key);

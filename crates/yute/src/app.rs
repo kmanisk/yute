@@ -158,6 +158,8 @@ pub struct CommentDraft {
 }
 
 pub struct App {
+    pub trace_subscriptions: Option<std::time::Instant>,
+    pub trace_subscriptions_complete: Option<std::time::Instant>,
     pub action_menu: Option<crate::actions::ActionMenu>,
     pub menu_request: u64,
     pub download_active: bool,
@@ -307,6 +309,8 @@ impl App {
             download_active: false,
             download_request: 0,
             download_task: None,
+            trace_subscriptions: None,
+            trace_subscriptions_complete: None,
             home_pages: Default::default(),
             watch_pane: WatchPane::Description,
             description_scroll: 0,
@@ -424,6 +428,11 @@ impl App {
 
     /// A new full feed request supersedes older work, including continuation loads.
     pub fn begin_feed_request(&mut self) -> u64 {
+        if self.screen == Screen::Subscriptions && yute_core::trace::enabled() {
+            let start = std::time::Instant::now();
+            self.trace_subscriptions = Some(start);
+            self.trace_subscriptions_complete = Some(start);
+        }
         self.autofill_pages = 0;
         self.feed_generation = self.feed_generation.wrapping_add(1);
         self.is_loading = true;
