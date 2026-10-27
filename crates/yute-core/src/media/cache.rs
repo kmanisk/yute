@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 pub struct DiskCache {
     base_dir: PathBuf,
     max_bytes: u64,
+    pruning: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl DiskCache {
@@ -19,9 +20,42 @@ impl DiskCache {
         Self {
             base_dir,
             max_bytes: max_mb * 1024 * 1024,
+            pruning: Default::default(),
         }
     }
 
+    pub fn new_in(base_dir: PathBuf, max_mb: u64) -> Self {
+        let _ = fs::create_dir_all(base_dir.join("thumbs"));
+        let _ = fs::create_dir_all(base_dir.join("feeds"));
+        Self {
+            base_dir,
+            max_bytes: max_mb * 1024 * 1024,
+            pruning: Default::default(),
+        }
+    }
+    pub fn prune_background(&self) {
+        use std::sync::atomic::Ordering;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            if self.pruning.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            let cache = self.clone();
+            runtime.spawn_blocking(move || {
+                let _ = cache.prune_thumbnails();
+                cache.pruning.store(false, Ordering::SeqCst);
+            });
+        }
+    }
+    pub fn with_limit(&self, max_mb: u64) -> Self {
+        Self {
+            base_dir: self.base_dir.clone(),
+            max_bytes: max_mb.clamp(16, 2048) * 1024 * 1024,
+            pruning: self.pruning.clone(),
+        }
+    }
+    pub fn encoded_dir(&self) -> PathBuf {
+        self.thumbs_dir().join("encoded")
+    }
     pub fn feeds_dir(&self) -> PathBuf {
         self.base_dir.join("feeds")
     }
@@ -72,15 +106,25 @@ impl DiskCache {
         let mut files = Vec::new();
         let mut total_bytes = 0u64;
 
-        for entry in fs::read_dir(&thumbs)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_file() {
-                let meta = entry.metadata()?;
-                let bytes = meta.len();
-                let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-                total_bytes += bytes;
-                files.push((path, bytes, mtime));
+        for directory in [thumbs, self.encoded_dir()] {
+            let Ok(entries) = fs::read_dir(directory) else {
+                continue;
+            };
+            for entry in entries {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_file()
+                    && matches!(
+                        path.extension().and_then(|s| s.to_str()),
+                        Some("jpg" | "cover")
+                    )
+                {
+                    let meta = entry.metadata()?;
+                    let bytes = meta.len();
+                    let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+                    total_bytes += bytes;
+                    files.push((path, bytes, mtime));
+                }
             }
         }
 
@@ -129,5 +173,34 @@ impl DiskCache {
             let _ = fs::create_dir_all(self.debug_dir());
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn source_and_encoded_caches_share_access_order_and_size_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = DiskCache::new_in(directory.path().to_owned(), 1);
+        fs::create_dir_all(cache.encoded_dir()).unwrap();
+        let files = [
+            cache.thumbs_dir().join("old.jpg"),
+            cache.encoded_dir().join("middle.cover"),
+            cache.encoded_dir().join("recent.cover"),
+        ];
+        for (index, path) in files.iter().enumerate() {
+            fs::write(path, vec![0; 600_000]).unwrap();
+            fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(index as u64))
+                .unwrap();
+        }
+        cache.prune_thumbnails().unwrap();
+        assert!(!files[0].exists());
+        assert!(!files[1].exists());
+        assert!(files[2].exists());
     }
 }

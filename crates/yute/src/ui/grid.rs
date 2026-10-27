@@ -209,7 +209,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
             if i < cards_to_render.len() {
                 if remaining < card_h {
-                    render_partial_card(f, app, &cards_to_render[i], card_rect);
+                    render_partial_card(f, app, &cards_to_render[i], card_rect, thumb_h);
                     continue;
                 }
                 let item_idx = start_idx + i;
@@ -281,20 +281,50 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-/// A clipped row never emits a graphics payload outside the viewport. Keep its
-/// title first so even a one-line remainder communicates the next row.
-fn render_partial_card(f: &mut Frame, app: &App, card: &Card, area: Rect) {
+/// Clip cell-based image placements; other protocols show text and a skeleton
+/// rather than emitting an image payload outside the viewport.
+fn render_partial_card(f: &mut Frame, app: &mut App, card: &Card, area: Rect, thumb_h: u16) {
     let block = Block::default()
         .borders(Borders::LEFT | Borders::RIGHT)
         .border_style(Style::default().fg(app.theme.border));
     let inner = block.inner(area);
     f.render_widget(block, area);
+    if inner.is_empty() {
+        return;
+    }
+    let title_h = inner.height.min(2);
+    let artwork_h = inner.height.saturating_sub(title_h);
+    let artwork = Rect::new(inner.x, inner.y + title_h, inner.width, artwork_h);
+    let url = yute_core::media::thumbs::card_thumbnail_url(card).into_owned();
+    let can_draw = app.thumbs.supports_partial()
+        && app.config.general.graphics != "none"
+        && app.overlay_area.is_none()
+        && !app.confirming_quit
+        && !app.confirming_logout;
+    if artwork_h > 0 {
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from("▒".repeat(inner.width as usize));
+                artwork_h as usize
+            ])
+            .style(Style::default().fg(app.theme.border)),
+            artwork,
+        );
+        if can_draw && !url.is_empty() {
+            if let Some(cover) = app
+                .thumbs
+                .get_cover_protocol(&url, ratatui::layout::Size::new(inner.width, thumb_h))
+            {
+                f.render_widget(cover, artwork);
+            }
+        }
+    }
     let title = sanitize_title(card.title(), app.config.strip_emoji());
-    let lines = wrap_and_truncate_title(&title, inner.width as usize, inner.height.min(2) as usize);
+    let lines = wrap_and_truncate_title(&title, inner.width as usize, title_h as usize);
     f.render_widget(
         Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
             .style(Style::default().fg(app.theme.text_secondary)),
-        inner,
+        Rect::new(inner.x, inner.y, inner.width, title_h),
     );
 }
 
@@ -375,7 +405,7 @@ fn render_grid_card(
             && thumb_area.y < modal_y + dialog_h
             && thumb_area.y + thumb_area.height > modal_y;
 
-    let thumb_url = card.thumb_url().to_string();
+    let thumb_url = yute_core::media::thumbs::card_thumbnail_url(card).into_owned();
     if overlaps_modal {
         let p = Paragraph::new("").style(Style::default().bg(app.theme.surface));
         f.render_widget(p, thumb_area);
@@ -386,7 +416,7 @@ fn render_grid_card(
             .thumbs
             .get_cover_protocol(&thumb_url, thumb_area.as_size())
         {
-            f.render_widget(ratatui_image::Image::new(proto), thumb_area);
+            f.render_widget(proto, thumb_area);
         } else if matches!(card, Card::Channel(_)) {
             render_monogram(f, app, card, thumb_area);
         } else {

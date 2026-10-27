@@ -345,6 +345,10 @@ impl KeymapState {
         }
     }
 
+    pub fn has_pending(&self) -> bool {
+        self.prefix_at.is_some()
+    }
+
     pub fn which_key_visible(&mut self) -> bool {
         let Some(at) = self.prefix_at else {
             return false;

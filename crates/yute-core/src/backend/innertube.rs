@@ -42,14 +42,29 @@ impl InnerTubeBackend {
         };
         let cancelled = self.auth.lock().unwrap().cancelled.clone();
         let request = self.post_endpoint_inner(endpoint, body);
-        async {
+        let started = std::time::Instant::now();
+        let result = async {
             tokio::select! {
                 _ = cancelled.cancelled() => Err(crate::accounts::AccountCancelled.into()),
                 result = request => result,
             }
         }
         .instrument(tracing::info_span!(target:"yute_perf","innertube_request",operation))
-        .await
+        .await;
+        if crate::trace::enabled() {
+            crate::trace::duration(
+                match operation {
+                    "browse" => "innertube_browse",
+                    "next" => "innertube_next",
+                    "search" => "innertube_search",
+                    _ => "innertube_other",
+                },
+                started.elapsed(),
+                1,
+            );
+            tracing::info!(target:"yute_perf", operation, success=result.is_ok(), "request_completed");
+        }
+        result
     }
     async fn post_endpoint_inner(&self, endpoint: &str, body: Value) -> Result<Value> {
         let url = format!("{INNERTUBE_BASE}/{endpoint}");

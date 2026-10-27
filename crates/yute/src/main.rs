@@ -64,8 +64,18 @@ enum Commands {
     SetupMpv,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(run());
+    // An OS keyring may be waiting for a desktop unlock prompt. Quitting must
+    // not wait indefinitely for a non-cancellable blocking credential call.
+    runtime.shutdown_timeout(Duration::from_millis(100));
+    result
+}
+
+async fn run() -> anyhow::Result<()> {
     yute_core::trace::start();
     init_performance_trace()?;
     let cli = Cli::parse();
@@ -127,7 +137,7 @@ async fn main() -> anyhow::Result<()> {
     let mut app = App::new(config, picker);
     let (tx_event, mut rx_event) = channel::<AppEvent>(64);
 
-    hydrate_accounts(&app, tx_event.clone());
+    hydrate_accounts(&mut app, tx_event.clone());
     tokio::spawn(yute_core::http::prewarm());
     tokio::task::spawn_blocking(|| {
         let _ = yute_core::config::migrate_legacy_config();
@@ -153,6 +163,7 @@ async fn main() -> anyhow::Result<()> {
         let _ = cache_clone.prune_feeds(3);
     });
 
+    let thumbnail_ready = app.thumbs.notifier();
     let mut keymap = KeymapState::new();
     let mut reader = EventStream::new();
     let mut ticker = tokio::time::interval(Duration::from_millis(250));
@@ -165,7 +176,7 @@ async fn main() -> anyhow::Result<()> {
         if dirty {
             app.refresh_channel_items();
             let next_layout = format!(
-                "{:?}:{:?}:{:?}:{}:{}:{:?}:{}:{}:{}",
+                "{:?}:{:?}:{:?}:{}:{}:{:?}:{}:{}:{}:{:?}",
                 terminal.size()?,
                 app.screen,
                 app.focus,
@@ -174,7 +185,13 @@ async fn main() -> anyhow::Result<()> {
                 app.overlay_area,
                 app.confirming_quit,
                 app.confirming_logout,
-                app.scroll_row
+                app.scroll_row,
+                (
+                    app.action_menu.is_some(),
+                    app.account_picker,
+                    app.login_modal.is_some(),
+                    app.command_help.is_some()
+                )
             );
             if next_layout != graphics_layout {
                 // Delete Kitty placements and erase Sixel cells before a structural
@@ -183,10 +200,18 @@ async fn main() -> anyhow::Result<()> {
                 terminal
                     .backend_mut()
                     .write_all(b"\x1b_Ga=d,d=a,q=2;\x1b\\")?;
-                terminal.clear()?;
+                let size = terminal.size()?;
+                terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height))?;
                 graphics_layout = next_layout;
             }
             terminal.draw(|f| ui::draw(f, &mut app))?;
+            if let Some(start) = app.trace_account_frame.take() {
+                yute_core::trace::duration(
+                    "account_switch_visible",
+                    start.elapsed(),
+                    app.items.len(),
+                );
+            }
             if first_frame {
                 yute_core::trace::since_start("first_frame");
                 first_frame = false;
@@ -219,7 +244,8 @@ async fn main() -> anyhow::Result<()> {
         }
 
         tokio::select! {
-            _ = ticker.tick() => {
+            _ = thumbnail_ready.notified() => {dirty |= app.thumbs.poll_loaded();}
+            _ = ticker.tick(), if app.needs_tick() || keymap.has_pending() => {
                 dirty |= app.tick();
                 let hint = keymap.which_key_visible();
                 if hint != app.which_key { app.which_key = hint; dirty = true; }
@@ -336,17 +362,27 @@ fn init_performance_trace() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn hydrate_accounts(app: &App, tx: Sender<AppEvent>) {
+fn hydrate_accounts(app: &mut App, tx: Sender<AppEvent>) {
+    if app.credentials_pending {
+        return;
+    }
+    app.credentials_pending = true;
     let generation = app
         .auth_generation
         .load(std::sync::atomic::Ordering::SeqCst);
     let config = app.config.clone();
     let auth = app.auth.lock().unwrap().clone();
     tokio::spawn(async move {
-        let result = tokio::task::spawn_blocking(move || {
+        let mut work = tokio::task::spawn_blocking(move || {
             yute_core::accounts::Accounts::load_session(&config, auth)
-        })
-        .await
+        });
+        let result = tokio::select! {
+            result=&mut work=>result,
+            _=tokio::time::sleep(Duration::from_secs(2))=>{
+                let _=tx.send(AppEvent::CredentialsWaiting(generation)).await;
+                work.await
+            }
+        }
         .unwrap_or_else(|_| Err(anyhow::anyhow!("Credential worker failed")));
         let _ = tx
             .send(AppEvent::CredentialsLoaded(generation, result))
@@ -426,7 +462,12 @@ fn handle_command_input(app: &mut App, key: crossterm::event::KeyEvent, tx: Send
             app.input_cursor = None;
         }
         KeyCode::Enter => {
-            if yute::commands::parse(&app.cmd_input).is_err() {
+            let choosing = app
+                .completion_base
+                .as_ref()
+                .is_some_and(|base| app.cmd_input.starts_with(base))
+                || choices.iter().any(|choice| choice == &app.cmd_input);
+            if choosing || yute::commands::parse(&app.cmd_input).is_err() {
                 if let Some(choice) =
                     choices.get(app.completion_index.min(choices.len().saturating_sub(1)))
                 {
@@ -524,6 +565,10 @@ async fn handle_key_event(
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             app.status_text = "Sign-in cancelled".into();
         }
+        return;
+    }
+    if app.focus == Focus::CommandLine {
+        handle_command_input(app, key, tx);
         return;
     }
     if app.action_menu.is_some() {
@@ -2407,7 +2452,19 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             app.thumbs.refresh_cell_size(width, height);
             yute::terminal::remember_cells(width, height);
         }
+        AppEvent::CredentialsWaiting(generation) => {
+            if generation
+                == app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                app.status_text =
+                    "Unlock the system keyring to load saved accounts · Search remains available"
+                        .into();
+            }
+        }
         AppEvent::CredentialsLoaded(generation, result) => {
+            app.credentials_pending = false;
             if generation
                 != app
                     .auth_generation
@@ -2415,7 +2472,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             {
                 return;
             }
-            app.credentials_loaded = true;
+            app.credentials_loaded = result.is_ok();
             match result {
                 Ok(accounts) => {
                     let next = accounts.current_context();
@@ -3932,6 +3989,38 @@ mod feed_ui_tests {
         handle_key_event(&mut app, &mut keymap, key, tx).await;
         assert!(!app.sidebar_expanded);
         assert_eq!(app.focus, Focus::Content);
+    }
+
+    #[tokio::test]
+    async fn command_selection_overrides_a_completed_command_and_consumes_alt_shortcuts() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let (mut app, _) = app_and_cards();
+        app.screen = Screen::Settings;
+        app.focus = Focus::CommandLine;
+        app.cmd_input = "h".into();
+        let (tx, _) = channel(4);
+        let mut keys = KeymapState::new();
+        let sidebar = app.sidebar_expanded;
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT),
+            tx.clone(),
+        )
+        .await;
+        assert_eq!(app.focus, Focus::CommandLine);
+        assert_eq!(app.sidebar_expanded, sidebar);
+        for code in [KeyCode::Tab, KeyCode::Down, KeyCode::Enter] {
+            handle_key_event(
+                &mut app,
+                &mut keys,
+                KeyEvent::new(code, KeyModifiers::NONE),
+                tx.clone(),
+            )
+            .await;
+        }
+        assert_eq!(app.screen, Screen::Home);
+        assert!(app.command_help.is_none());
     }
 
     #[tokio::test]

@@ -48,6 +48,10 @@ impl Player {
         }
     }
 
+    pub fn has_session(&self) -> bool {
+        self.child_process.is_some()
+    }
+
     pub fn is_alive(&self) -> bool {
         self.child_process.is_some()
             && self.status.is_alive

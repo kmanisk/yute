@@ -32,7 +32,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Graphics | `set graphics sixel`, `kitty`, `halfblocks`, `none`, `auto` | Save the chosen graphics preference; restart required. |
 | Sidebar | `sidebar`, `sidebar show`, `sidebar hide`, `sidebar toggle` | Toggle or explicitly set visibility; hidden reclaims all width. |
 | Help | `help`, `help <command>`, `keys` | Concise command help; Esc, q or Enter closes it. |
-| Quit | `quit` (`q`), `quit!` (`q!`) | Confirm application quit or quit immediately. Normal-mode q remains Back. |
+| Quit | `quit` (`q`), `quit!` (`q!`) | Confirm application quit or quit immediately. Outside text input, q quits. |
 
 Prefix commands with `:` in the application. Empty, malformed, unknown and
 non-finite numeric arguments produce status errors rather than launching a process.

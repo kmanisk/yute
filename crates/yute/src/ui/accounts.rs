@@ -69,6 +69,9 @@ pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
         )));
     }
     lines.push(Line::default());
+    if app.credentials_pending {
+        lines.push(Line::from("Waiting for the system keyring to unlock."));
+    }
     lines.push(Line::from(Span::styled(
         "j/k select · Enter/1-9 switch · a add · d remove",
         Style::default().fg(app.theme.text_secondary),

@@ -101,6 +101,7 @@ impl ShellLayout {
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
+    app.thumbs.begin_frame();
     app.overlay_area = signin::modal_area(app, size)
         .or_else(|| accounts::picker_area(app, size))
         .or_else(|| super::actions::menu_rect(app, size))
@@ -191,6 +192,32 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     crate::actions::render_menu(f, app);
     accounts::render_picker(f, app);
     signin::render(f, app);
+
+    let prefetch = app.config.thumbnails.prefetch_pages.min(3);
+    let columns = app.rendered_columns.max(1);
+    let rows = app.rendered_rows.max(1);
+    let start = (app.scroll_row + rows.saturating_sub(1)) * columns;
+    let preloads = if app.config.general.graphics != "none" {
+        app.filtered_items()
+            .into_iter()
+            .skip(start)
+            .take(rows * columns * prefetch)
+            .map(|c| yute_core::media::thumbs::card_thumbnail_url(c).into_owned())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let geometry = grid::GridGeometry::new(
+        shell.content,
+        &app.config.grid,
+        app.cell_w_px,
+        app.cell_h_px,
+    );
+    app.thumbs.finish_frame(
+        preloads,
+        geometry.thumbnail_width as u32 * app.cell_w_px as u32,
+        geometry.thumbnail_height as u32 * app.cell_h_px as u32,
+    );
 
     // Render quit confirmation modal
     if app.confirming_quit || app.confirming_logout {

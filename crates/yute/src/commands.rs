@@ -152,7 +152,7 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"volume", aliases:&["vol"], usage:"volume <0..100|+change|-change>", description:"Set or adjust MPV volume. Example: :volume +5", parse:volume },
     Spec { name:"mute", aliases:&[], usage:"mute", description:"Toggle MPV mute.", parse:|a| no_args(a,Command::Mute) },
     Spec { name:"login", aliases:&["auth"], usage:"login", description:"Start YouTube TV device-code login.", parse:|a| no_args(a,Command::Login) },
-    Spec { name:"logout", aliases:&[], usage:"logout", description:"Confirm local sign-out and persist guest mode. Encrypted saved credentials are retained.", parse:|a| no_args(a,Command::Logout) },
+    Spec { name:"logout", aliases:&[], usage:"logout [name|index|prefix]", description:"Confirm removal of the selected saved account, or the active account when omitted.", parse:|a| if a.trim().is_empty() { Ok(Command::Logout) } else { Ok(Command::Account(format!("remove {}", a.trim()))) } },
     Spec { name:"subscribe", aliases:&[], usage:"subscribe", description:"Subscribe to the selected channel using the authenticated backend.", parse:|a| no_args(a,Command::Subscribe(true)) },
     Spec { name:"unsubscribe", aliases:&[], usage:"unsubscribe", description:"Unsubscribe from the selected channel using the authenticated backend.", parse:|a| no_args(a,Command::Subscribe(false)) },
     Spec { name:"like", aliases:&[], usage:"like", description:"Like the selected video using the authenticated backend.", parse:|a| no_args(a,Command::Like(true)) },

@@ -160,7 +160,7 @@ fn render_list_row(
     };
 
     // Render thumbnail or skeleton
-    let thumb_url = card.thumb_url().to_string();
+    let thumb_url = yute_core::media::thumbs::card_thumbnail_url(card).into_owned();
     if matches!(card, Card::Channel(_)) && thumb_url.is_empty() {
         f.render_widget(
             Paragraph::new(card.title().chars().next().unwrap_or('?').to_string())
@@ -178,7 +178,7 @@ fn render_list_row(
             .thumbs
             .get_cover_protocol(&thumb_url, thumb_area.as_size())
         {
-            f.render_widget(ratatui_image::Image::new(proto), thumb_area);
+            f.render_widget(proto, thumb_area);
         } else {
             let skeleton_line = "▒".repeat(thumb_area.width as usize);
             let mut skel_lines = Vec::new();

@@ -90,7 +90,7 @@ impl Accounts {
                 .storage
                 .active_account
                 .clone()
-                .unwrap_or_else(|| ANONYMOUS.into()),
+                .unwrap_or_else(|| self.active.clone()),
         })
         .unwrap_or_default()
     }
@@ -197,6 +197,8 @@ impl Accounts {
                     account_id: Some(id.clone()),
                     needs_login: account.needs_login,
                     auth_file_path: Some(path.clone()),
+                    cancelled: tokio_util::sync::CancellationToken::new(),
+                    refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
                     ..current.clone()
                 },
             );
@@ -214,6 +216,7 @@ impl Accounts {
             });
             let mut cookie_session = current.clone();
             cookie_session.auth_file_path = None;
+            cookie_session.cancelled = tokio_util::sync::CancellationToken::new();
             sessions.insert("cookies".into(), cookie_session);
         }
         let active = if anonymous {
@@ -456,6 +459,25 @@ impl Accounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hydrated_identity_never_reuses_the_previous_cancellation_token() {
+        let template = AuthContext::default();
+        let mut storage = AuthStorage::default();
+        storage.accounts.insert(
+            "account".into(),
+            crate::backend::auth::AuthAccount {
+                access_token: "fixture".into(),
+                refresh_token: "fixture".into(),
+                ..Default::default()
+            },
+        );
+        storage.active_account = Some("account".into());
+        let accounts = Accounts::from_storage(PathBuf::new(), storage, &template, false);
+        let hydrated = accounts.current_context();
+        template.cancelled.cancel();
+        assert!(!hydrated.cancelled.is_cancelled());
+    }
+
     #[test]
     fn switching_isolates_identity_cache_and_cancels_old_requests() {
         let auth = Arc::new(Mutex::new(AuthContext::default()));

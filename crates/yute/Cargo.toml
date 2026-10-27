@@ -22,7 +22,7 @@ path = "src/lib.rs"
 
 [dependencies]
 yute-core = { version = "0.1.0", path = "../yute-core" }
-ratatui = "0.30"
+ratatui = { version = "0.30", features = ["serde"] }
 crossterm = { version = "0.29", features = ["event-stream"] }
 ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "sync", "time", "io-util", "fs", "signal"] }

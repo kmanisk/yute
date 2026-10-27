@@ -379,3 +379,17 @@ use their page-id header. Use `:account add`, `:account <name|index|prefix>`,
 `:account remove <name>`, `:account anon`, or `:account whoami`.
 Set `[general] start_anonymous = true` to start anonymously instead of restoring
 the last used account. Cached feeds are isolated by account; thumbnails are shared.
+
+Thumbnail settings are shared across accounts:
+
+```toml
+[thumbnails]
+cache_mb = 256
+prefetch_pages = 1
+```
+
+The cache includes source JPEGs and encoded terminal payloads. Visible cards take
+priority over prefetch work. Terminal capability hints and cached cell dimensions
+avoid blocking startup on a stdin probe; unknown terminals can select a graphics
+protocol explicitly. [Performance measurements](docs/performance.md) describe the
+trace and its verification limits.

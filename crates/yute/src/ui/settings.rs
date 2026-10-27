@@ -16,6 +16,8 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Autoplay next", "Play the next queued video when the current video ends."),
     ("Shorts", "Hidden outside Shorts also hides saved Shorts. Explicit Shorts tabs always work without changing this preference."),
     ("Start as", "Choose the last used account or Anonymous for the next launch."),
+    ("Thumbnail cache", "Shared source and encoded thumbnail cache budget on disk. Oldest accessed entries are pruned."),
+    ("Thumbnail prefetch", "Preload 0-3 pages after visible cards. Visible requests always have priority."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -62,6 +64,8 @@ fn value(app: &App, index: usize) -> String {
             "‹ Last used ›"
         }
         .into(),
+        9 => format!("‹ {} MiB ›", app.config.thumbnails.cache_mb),
+        10 => format!("‹ {} pages ›", app.config.thumbnails.prefetch_pages),
         _ => String::new(),
     }
 }
@@ -203,7 +207,24 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
             app.scroll_row = 0;
         }
         8 => app.config.general.start_anonymous = !app.config.general.start_anonymous,
+        9 => {
+            app.config.thumbnails.cache_mb = step(
+                &[32, 64, 128, 256, 512, 1024],
+                &app.config.thumbnails.cache_mb,
+                forward,
+            )
+        }
+        10 => {
+            app.config.thumbnails.prefetch_pages = step(
+                &[0, 1, 2, 3],
+                &app.config.thumbnails.prefetch_pages,
+                forward,
+            )
+        }
         _ => return,
+    }
+    if app.settings_index == 9 {
+        app.thumbs.set_budget(app.config.thumbnails.cache_mb);
     }
     app.status_text = format!(
         "{}: {}",

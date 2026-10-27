@@ -4,11 +4,12 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
-use yute_core::media::thumbs::cache_key_for_url;
+use yute_core::media::thumbs::source_cache_key;
 
 #[derive(Clone)]
 pub struct ThumbnailLoader {
     cache_dir: PathBuf,
+    cache: yute_core::media::cache::DiskCache,
     ram_cache: Rc<RefCell<HashMap<String, gdk::Texture>>>,
     lru_order: Rc<RefCell<VecDeque<String>>>,
     max_ram_items: usize,
@@ -22,11 +23,16 @@ impl Default for ThumbnailLoader {
 
 impl ThumbnailLoader {
     pub fn new(max_ram_items: usize) -> Self {
-        let cache_dir = yute_core::config::cache_dir().join("thumbs");
+        Self::new_with_budget(max_ram_items, 256)
+    }
+    pub fn new_with_budget(max_ram_items: usize, cache_mb: u64) -> Self {
+        let cache = yute_core::media::cache::DiskCache::new(cache_mb).with_limit(cache_mb);
+        let cache_dir = cache.thumbs_dir();
         let _ = std::fs::create_dir_all(&cache_dir);
 
         Self {
             cache_dir,
+            cache,
             ram_cache: Rc::new(RefCell::new(HashMap::new())),
             lru_order: Rc::new(RefCell::new(VecDeque::new())),
             max_ram_items,
@@ -48,7 +54,7 @@ impl ThumbnailLoader {
             return;
         }
 
-        let key = cache_key_for_url(url);
+        let key = source_cache_key(url, 480, 360);
         let disk_path = self.cache_dir.join(format!("{key}.jpg"));
 
         // 2. Check disk cache
@@ -71,21 +77,14 @@ impl ThumbnailLoader {
 
         crate::async_runtime::spawn_task(
             async move {
-                let client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(8))
-                    .build()
-                    .unwrap_or_default();
-
-                if let Ok(resp) = client.get(&url_task).send().await {
-                    if let Ok(bytes) = resp.bytes().await {
-                        let _ = std::fs::write(&path_task, &bytes);
-                        return true;
-                    }
-                }
-                false
+                let path = path_task.clone();
+                yute_core::media::thumbs::fetch_thumbnail(&url_task, 480, 360, &path)
+                    .await
+                    .is_some()
             },
             move |success| {
                 if success {
+                    loader_clone.cache.prune_background();
                     let file = gio::File::for_path(&path_owned);
                     if let Ok(texture) = gdk::Texture::from_file(&file) {
                         loader_clone.insert_ram(url_owned, texture.clone());

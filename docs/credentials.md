@@ -10,7 +10,8 @@ A process lock serializes readers/migrations/updates between running clients.
 
 The master key normally lives in the OS keyring: Secret Service on Linux,
 Keychain on macOS, or Credential Manager on Windows. Access is lazy and runs on
-blocking workers. Existing keyring-backed files require their original keyring;
+blocking workers. A delayed unlock is reported without blocking input, and quit
+does not wait indefinitely for an OS keyring prompt. Existing keyring-backed files require their original keyring;
 an unavailable keyring never causes them to be overwritten with a new key.
 
 For a new store without a usable keyring, Yute creates a random 32-byte keyfile

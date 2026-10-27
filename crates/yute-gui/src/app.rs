@@ -98,7 +98,7 @@ impl GuiApp {
 
         let player = Arc::new(EmbeddedPlayer::new(&cfg)?);
         let video_area = VideoArea::new(Arc::clone(&player));
-        let thumbnail_loader = ThumbnailLoader::default();
+        let thumbnail_loader = ThumbnailLoader::new_with_budget(150, cfg.thumbnails.cache_mb);
         let config = Rc::new(RefCell::new(cfg));
 
         let window = ApplicationWindow::builder()

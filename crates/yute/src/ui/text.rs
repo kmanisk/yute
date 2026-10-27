@@ -74,93 +74,57 @@ pub fn wrap_and_truncate_title(
     max_width: usize,
     max_lines: usize,
 ) -> Vec<String> {
-    if max_width == 0 || max_lines == 0 || clean_title.is_empty() {
+    if max_width == 0 || max_lines == 0 {
         return Vec::new();
     }
-
-    let words: Vec<&str> = clean_title.split_whitespace().collect();
-    if words.is_empty() {
-        return Vec::new();
-    }
-
+    let text = clean_title.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut remaining = text.as_str();
     let mut lines = Vec::new();
-    let mut current_line = String::new();
-    let mut current_width = 0;
-    let mut word_idx = 0;
-
-    while word_idx < words.len() {
-        let word = words[word_idx];
-        let word_w = word.width();
-
-        let space_w = if current_line.is_empty() { 0 } else { 1 };
-
-        if current_width + space_w + word_w <= max_width {
-            if !current_line.is_empty() {
-                current_line.push(' ');
-                current_width += 1;
-            }
-            current_line.push_str(word);
-            current_width += word_w;
-            word_idx += 1;
-        } else if lines.len() + 1 < max_lines {
-            // Move to next line
-            if current_line.is_empty() {
-                // Word alone is wider than max_width, truncate it
-                let mut fit_word = String::new();
-                let mut fit_w = 0;
-                for ch in word.graphemes(true) {
-                    let ch_w = ch.width();
-                    if fit_w + ch_w <= max_width {
-                        fit_word.push_str(ch);
-                        fit_w += ch_w;
-                    } else {
-                        break;
-                    }
+    while !remaining.is_empty() && lines.len() < max_lines {
+        if remaining.width() <= max_width {
+            lines.push(remaining.to_owned());
+            break;
+        }
+        if lines.len() + 1 == max_lines {
+            let mut final_line = String::new();
+            for word in remaining.split_whitespace() {
+                let spacing = usize::from(!final_line.is_empty());
+                if final_line.width() + spacing + word.width() > max_width.saturating_sub(1) {
+                    break;
                 }
-                lines.push(fit_word);
-                word_idx += 1;
-            } else {
-                lines.push(current_line);
-                current_line = String::new();
-                current_width = 0;
-            }
-        } else {
-            // We are on the last allowed line and cannot fit the next word
-            // Check if we need to add ellipsis
-            let ellipsis_w = 1;
-
-            if current_width + ellipsis_w <= max_width {
-                current_line.push('…');
-            } else {
-                // Back up words until ellipsis fits
-                let line_words: Vec<&str> = current_line.split_whitespace().collect();
-                let mut rebuilt = String::new();
-                let mut r_width = 0;
-                for lw in line_words {
-                    let lw_w = lw.width();
-                    let s_w = if rebuilt.is_empty() { 0 } else { 1 };
-                    if r_width + s_w + lw_w + ellipsis_w <= max_width {
-                        if !rebuilt.is_empty() {
-                            rebuilt.push(' ');
-                            r_width += 1;
-                        }
-                        rebuilt.push_str(lw);
-                        r_width += lw_w;
-                    } else {
-                        break;
-                    }
+                if spacing > 0 {
+                    final_line.push(' ');
                 }
-                rebuilt.push('…');
-                current_line = rebuilt;
+                final_line.push_str(word);
+            }
+            if final_line.is_empty() {
+                lines.push(truncate_str(remaining, max_width));
+            } else {
+                final_line.push('…');
+                lines.push(final_line);
             }
             break;
         }
+        let mut width = 0;
+        let mut end = 0;
+        for (offset, grapheme) in remaining.grapheme_indices(true) {
+            if width + grapheme.width() > max_width {
+                break;
+            }
+            width += grapheme.width();
+            end = offset + grapheme.len();
+        }
+        if end == 0 {
+            lines.push(truncate_str(remaining, max_width));
+            break;
+        }
+        let split = remaining[..end]
+            .rfind(' ')
+            .filter(|offset| *offset > 0)
+            .unwrap_or(end);
+        lines.push(remaining[..split].trim_end().to_owned());
+        remaining = remaining[split..].trim_start();
     }
-
-    if !current_line.is_empty() && lines.len() < max_lines {
-        lines.push(current_line);
-    }
-
     lines
 }
 

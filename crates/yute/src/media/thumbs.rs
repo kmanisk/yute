@@ -1,9 +1,11 @@
+use super::encoded::EncodedCover;
 use ratatui::layout::Size;
 use ratatui_image::picker::Picker;
-use ratatui_image::protocol::Protocol;
 use ratatui_image::protocol::StatefulProtocol;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::Arc;
+use tokio::sync::Notify;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct CoverKey {
@@ -23,18 +25,26 @@ pub struct ThumbnailManager {
     ram_lru: HashMap<String, StatefulProtocol>,
     lru_order: VecDeque<String>,
     max_ram_entries: usize,
-    covers: HashMap<CoverKey, Protocol>,
+    covers: HashMap<CoverKey, EncodedCover>,
     cover_order: VecDeque<CoverKey>,
     cover_pending: HashSet<CoverKey>,
     cover_failed: HashSet<CoverKey>,
-    cover_tx: Sender<(CoverKey, Option<Protocol>)>,
-    cover_rx: Receiver<(CoverKey, Option<Protocol>)>,
+    disk_checked: HashSet<CoverKey>,
+    wanted: HashSet<String>,
+    notify: Arc<Notify>,
+    cover_tx: Sender<(CoverKey, Option<EncodedCover>, bool)>,
+    cover_rx: Receiver<(CoverKey, Option<EncodedCover>, bool)>,
 }
 
 impl ThumbnailManager {
     pub fn new(picker: Picker, cache: DiskCache) -> Self {
         let (cover_tx, cover_rx) = channel();
+        let loader = ThumbnailLoader::new(cache);
+        let notify = loader.notifier();
         Self {
+            disk_checked: HashSet::new(),
+            wanted: HashSet::new(),
+            notify,
             trace_requests: HashMap::new(),
             trace_completed: HashSet::new(),
             covers: HashMap::new(),
@@ -45,13 +55,53 @@ impl ThumbnailManager {
             cover_rx,
             generation: 0,
             picker,
-            loader: ThumbnailLoader::new(cache),
+            loader,
             ram_lru: HashMap::new(),
             lru_order: VecDeque::new(),
             max_ram_entries: 200,
         }
     }
 
+    pub fn set_budget(&mut self, mb: u64) {
+        self.loader.set_budget(mb);
+    }
+    pub fn notifier(&self) -> Arc<Notify> {
+        self.notify.clone()
+    }
+    pub fn supports_partial(&self) -> bool {
+        matches!(
+            self.picker.protocol_type(),
+            ratatui_image::picker::ProtocolType::Kitty
+                | ratatui_image::picker::ProtocolType::Halfblocks
+        )
+    }
+    pub fn begin_frame(&mut self) {
+        self.wanted.clear();
+    }
+    pub fn finish_frame(&mut self, preloads: Vec<String>, width: u32, height: u32) {
+        for url in preloads {
+            self.wanted.insert(url.clone());
+            self.loader.prefetch(&url, width, height);
+        }
+        self.loader.retain_wanted(&self.wanted);
+    }
+    fn encoded_path(&self, key: &CoverKey) -> std::path::PathBuf {
+        let font = self.picker.font_size();
+        let descriptor = format!(
+            "encoded-v1:{:?}:{}:{}:{}:{}:{}:{}",
+            self.picker.protocol_type(),
+            font.width,
+            font.height,
+            key.size.width,
+            key.size.height,
+            self.picker.tmux_detected(),
+            key.url
+        );
+        self.loader.cache().encoded_dir().join(format!(
+            "{}.cover",
+            yute_core::media::thumbs::opaque_cache_key(&descriptor)
+        ))
+    }
     pub fn compute_thumbnail_rows(&self, card_cols: u16) -> u16 {
         let font_size = self.picker.font_size();
         let (cell_w, cell_h) = if font_size.width > 0 && font_size.height > 0 {
@@ -67,7 +117,7 @@ impl ThumbnailManager {
     pub fn poll_loaded(&mut self) -> bool {
         let loaded_images = self.loader.poll_loaded();
         let mut has_loaded = !loaded_images.is_empty();
-        while let Ok((key, protocol)) = self.cover_rx.try_recv() {
+        while let Ok((key, protocol, disk)) = self.cover_rx.try_recv() {
             if key.generation != self.generation {
                 continue;
             }
@@ -82,11 +132,15 @@ impl ThumbnailManager {
                 self.cover_order.push_back(key.clone());
                 self.covers.insert(key, protocol);
             } else {
-                self.cover_failed.insert(key);
+                if disk {
+                    self.disk_checked.insert(key);
+                } else {
+                    self.cover_failed.insert(key);
+                }
             }
         }
         for (url, img) in loaded_images {
-            let proto = self.picker.new_resize_protocol(img);
+            let proto = self.picker.new_resize_protocol((*img).clone());
             self.insert_lru(url, proto);
         }
         has_loaded
@@ -94,19 +148,46 @@ impl ThumbnailManager {
 
     /// Decode cache is shared with other views. Exact-size cover preparation and
     /// graphics encoding run only on a cache miss, away from the UI thread.
-    pub fn get_cover_protocol(&mut self, url: &str, size: Size) -> Option<&Protocol> {
+    pub fn get_cover_protocol(&mut self, url: &str, size: Size) -> Option<&EncodedCover> {
         if size.width == 0 || size.height == 0 {
             return None;
         }
+        self.wanted.insert(url.into());
         let key = CoverKey {
             url: url.to_string(),
             size,
             generation: self.generation,
         };
+        let font = self.picker.font_size();
+        let encoded_path = self.encoded_path(&key);
+        if self.cover_pending.len() >= 16 && !self.covers.contains_key(&key) {
+            return None;
+        }
+        if !self.disk_checked.contains(&key)
+            && !self.covers.contains_key(&key)
+            && !self.cover_pending.contains(&key)
+        {
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                self.cover_pending.insert(key.clone());
+                let key = key.clone();
+                let tx = self.cover_tx.clone();
+                let notify = self.notify.clone();
+                runtime.spawn_blocking(move || {
+                    let result = EncodedCover::load(&encoded_path, key.size);
+                    let _ = tx.send((key, result, true));
+                    notify.notify_one();
+                });
+            }
+        }
         if yute_core::trace::enabled() && !self.trace_completed.contains(&key) {
+            let warm = self.loader.is_cached_for(
+                url,
+                size.width as u32 * font.width as u32,
+                size.height as u32 * font.height as u32,
+            ) || self.encoded_path(&key).is_file();
             self.trace_requests
                 .entry(key.clone())
-                .or_insert_with(|| (std::time::Instant::now(), self.loader.is_cached(url)));
+                .or_insert((std::time::Instant::now(), warm));
         }
         if self.covers.contains_key(&key) {
             if let Some((start, warm)) = self.trace_requests.remove(&key) {
@@ -131,13 +212,20 @@ impl ThumbnailManager {
         {
             return None;
         }
-        let image = self.loader.get_image(url)?.clone();
+        let image = self.loader.get_shared(
+            url,
+            u32::from(size.width) * u32::from(font.width),
+            u32::from(size.height) * u32::from(font.height),
+        )?;
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return None;
         };
         self.cover_pending.insert(key.clone());
         let picker = self.picker.clone();
         let tx = self.cover_tx.clone();
+        let notify = self.notify.clone();
+        let encoded_path = self.encoded_path(&key);
+        let cache = self.loader.cache().clone();
         runtime.spawn_blocking(move || {
             let font = picker.font_size();
             let image = cover_image(
@@ -147,8 +235,14 @@ impl ThumbnailManager {
             );
             let protocol = picker
                 .new_protocol(image, size, ratatui_image::Resize::Crop(None))
-                .ok();
-            let _ = tx.send((key, protocol));
+                .ok()
+                .map(|protocol| EncodedCover::new(&protocol, size));
+            if let Some(protocol) = &protocol {
+                protocol.save(&encoded_path);
+                cache.prune_background();
+            }
+            let _ = tx.send((key, protocol, false));
+            notify.notify_one();
         });
         None
     }
@@ -167,6 +261,7 @@ impl ThumbnailManager {
     }
 
     pub fn get_protocol(&mut self, url: &str) -> Option<&mut StatefulProtocol> {
+        self.wanted.insert(url.into());
         if self.ram_lru.contains_key(url) {
             if let Some(pos) = self.lru_order.iter().position(|u| u == url) {
                 self.lru_order.remove(pos);
@@ -199,6 +294,9 @@ impl ThumbnailManager {
     }
 
     pub fn refresh_cell_size(&mut self, width: u16, height: u16) {
+        if self.picker.font_size().width == width && self.picker.font_size().height == height {
+            return;
+        }
         let kind = self.picker.protocol_type();
         #[allow(deprecated)]
         let mut picker = Picker::from_fontsize((width, height).into());
@@ -212,6 +310,7 @@ impl ThumbnailManager {
         self.cover_order.clear();
         self.cover_pending.clear();
         self.cover_failed.clear();
+        self.disk_checked.clear();
         self.trace_requests.clear();
         self.trace_completed.clear();
         self.picker = picker;
@@ -224,11 +323,7 @@ pub use yute_core::media::thumbs::cache_key_for_url;
 
 /// Center crop while retaining aspect ratio; no blur, stretch or synthetic canvas.
 fn cover_image(image: &image::DynamicImage, width: u32, height: u32) -> image::DynamicImage {
-    image.resize_to_fill(
-        width.max(1),
-        height.max(1),
-        image::imageops::FilterType::Triangle,
-    )
+    yute_core::media::thumbs::resize(image, width, height, true)
 }
 
 #[cfg(test)]

@@ -152,6 +152,7 @@ pub struct CommentDraft {
 
 pub struct App {
     pub trace_subscriptions: Option<std::time::Instant>,
+    pub trace_account_frame: Option<std::time::Instant>,
     pub trace_subscriptions_complete: Option<std::time::Instant>,
     pub action_menu: Option<crate::actions::ActionMenu>,
     pub menu_request: u64,
@@ -234,6 +235,7 @@ pub struct App {
     pub account_store: yute_core::accounts::Accounts,
     pub account_picker: bool,
     pub credentials_loaded: bool,
+    pub credentials_pending: bool,
     pub login_modal: Option<crate::ui::signin::LoginModal>,
     pub pending_remove: Option<usize>,
     pub active_account_index: usize,
@@ -277,7 +279,8 @@ impl App {
             (10.0, 25.0)
         };
         let disk_cache = DiskCache::new(config.cache.max_mb);
-        let thumbs = ThumbnailManager::new(picker, disk_cache);
+        let thumbs =
+            ThumbnailManager::new(picker, disk_cache.with_limit(config.thumbnails.cache_mb));
         let player = Player::new(&config);
 
         let mut auth = AuthContext::default();
@@ -324,6 +327,7 @@ impl App {
             download_request: 0,
             download_task: None,
             trace_subscriptions: None,
+            trace_account_frame: None,
             trace_subscriptions_complete: None,
             home_pages: Default::default(),
             watch_pane: WatchPane::Description,
@@ -401,6 +405,7 @@ impl App {
             account_store,
             account_picker: false,
             credentials_loaded: false,
+            credentials_pending: false,
             login_modal: None,
             pending_remove: None,
             active_account_index,
@@ -507,6 +512,9 @@ impl App {
         self.status_text = format!("Switched to {}", self.account_name);
         // Trace measures cached state availability; first-frame placement is measured separately.
         yute_core::trace::duration("account_switch", start.elapsed(), self.items.len());
+        if yute_core::trace::enabled() {
+            self.trace_account_frame = Some(start);
+        }
         true
     }
 
@@ -806,6 +814,12 @@ impl App {
             self.sidebar_index =
                 crate::ui::sidebar::index_of(self.screen).unwrap_or(self.sidebar_index);
         }
+    }
+
+    pub fn needs_tick(&self) -> bool {
+        self.player.has_session()
+            || self.status_text != self.status_seen
+            || self.status_deadline.is_some()
     }
 
     pub fn tick(&mut self) -> bool {

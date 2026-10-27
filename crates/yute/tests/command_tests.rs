@@ -64,6 +64,11 @@ fn completion_and_aliases_are_unambiguous() {
     assert!(commands::completions("q").contains(&"quit".to_string()));
     assert_eq!(commands::completions("queue a"), vec!["queue add"]);
     assert_eq!(commands::parse(":q").unwrap(), Command::Quit(false));
+    assert_eq!(commands::parse(":logout").unwrap(), Command::Logout);
+    assert_eq!(
+        commands::parse(":logout second account").unwrap(),
+        Command::Account("remove second account".into())
+    );
 }
 #[test]
 fn session_history_preserves_draft_and_is_bounded() {

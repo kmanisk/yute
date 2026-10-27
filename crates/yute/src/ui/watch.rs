@@ -400,15 +400,16 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
             );
         }
         let image_area = Rect::new(rect.x, rect.y, thumb_w, thumb_h);
-        if !item.thumb_url().is_empty()
+        let thumbnail_url = yute_core::media::thumbs::card_thumbnail_url(item);
+        if !thumbnail_url.is_empty()
             && app.config.general.graphics != "none"
             && !app.overlay_area.is_some_and(|a| a.intersects(image_area))
         {
             if let Some(protocol) = app
                 .thumbs
-                .get_cover_protocol(item.thumb_url(), image_area.as_size())
+                .get_cover_protocol(&thumbnail_url, image_area.as_size())
             {
-                f.render_widget(ratatui_image::Image::new(protocol), image_area);
+                f.render_widget(protocol, image_area);
             }
         }
         let x = image_area.right() + 1;

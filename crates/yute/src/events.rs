@@ -28,6 +28,7 @@ pub enum AppEvent {
     SuggestionsLoaded(anyhow::Result<Vec<String>>),
     AccountProfiles(u64, anyhow::Result<Vec<yute_core::accounts::Account>>),
     AccountLoaded(u64, anyhow::Result<(String, String)>),
+    CredentialsWaiting(u64),
     CredentialsLoaded(u64, anyhow::Result<yute_core::accounts::Accounts>),
     AccountRemoved(String, anyhow::Result<()>),
     LoginDisplay(u64, yute_core::oauth::LoginEvent),

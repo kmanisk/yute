@@ -21,6 +21,8 @@ pub struct Config {
     #[serde(default)]
     pub cache: CacheConfig,
     #[serde(default)]
+    pub thumbnails: ThumbnailConfig,
+    #[serde(default)]
     pub local: LocalConfig,
     #[serde(default)]
     pub ui: UiConfig,
@@ -264,6 +266,21 @@ impl Default for ChatConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThumbnailConfig {
+    pub cache_mb: u64,
+    pub prefetch_pages: usize,
+}
+impl Default for ThumbnailConfig {
+    fn default() -> Self {
+        Self {
+            cache_mb: 256,
+            prefetch_pages: 1,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CacheConfig {
     pub max_mb: u64,
     pub home_ttl_min: u64,
@@ -302,6 +319,7 @@ impl Default for Config {
             playback: PlaybackConfig::default(),
             chat: ChatConfig::default(),
             cache: CacheConfig::default(),
+            thumbnails: ThumbnailConfig::default(),
             local: LocalConfig::default(),
             ui: UiConfig::default(),
         }
