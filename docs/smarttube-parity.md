@@ -128,3 +128,65 @@ shelves were unrelated. yute now resolves RD collections through next and filter
 those endpoint identities before exposing a playable Mix batch. Canonical and
 opaque Mix IDs both returned 20 matching videos in read-only probes. This is a
 small protocol fix, without changes to authentication or account state.
+
+## Backend pass, 2026-10-28 (partial)
+
+Current static reference: SmartTube revision
+`4b3f333e540a1403429d1a9d86dec758e59288f9`, root LICENSE MIT.
+The checked-out `MediaServiceCore/` submodule is empty and the sibling directory
+is absent. The historical reference directory mentioned above was also absent.
+For this pass, its currently pinned revision
+`40fec843eb24bc264e9c8b429fcee25068e230e2` was fetched into ignored
+`target/smarttube-reference`; its root LICENSE is MIT too. Neither source tree was
+modified. No source, comments, strings or implementation structure were copied.
+
+Inspected paths:
+
+- SmartTube `settings.gradle`, `.gitmodules`, `LICENSE`.
+- `ST app/presenters/YTSignInPresenter.java`: displays activation data and
+  disposes the sign-in subscription when the view is destroyed.
+- `YT browse/v2/BrowseApiHelper.kt`: TV Home uses `default`; subscriptions use
+  `FEsubscriptions`; history uses `FEhistory`; special list IDs include `VLWL`
+  and `VLLL`. Watch Later also has a client-specific `FEmy_youtube` route.
+- `YT browse/v2/BrowseService2.kt`: client-aware browse dispatch.
+- `YT auth/V2/AuthService.java` was located; no new OAuth protocol claims are
+  made from that file in this pass.
+
+### Implemented in this pass
+
+- `yute doctor`: bounded network/tool/session checks; existing encrypted store
+  authentication without migration, token refresh or account writes. Token and
+  visitor values, headers, response bodies and account identifiers are omitted.
+  A successful HTTP JSON response is request acceptance, not proof of personalized
+  feed correctness. Terminal graphics are explicitly environment hints.
+- yt-dlp feed subprocess deadline and kill-on-drop; raw resolver stderr is no
+  longer propagated. Removed implicit Brave browser-cookie discovery. Explicit
+  cookie configuration still exists and needs a separate removal pass.
+- Shorts reel item/sequence errors propagate rather than becoming fake empty
+  pages. This repairs an observed error-swallowing path; no live claim about the
+  reported Shorts hang is made without a sanitized reproducing response.
+- Typed yt-dlp JSON formats, current-video five-minute cache, cancellation,
+  available video/audio overlays, exact selectors and automatic audio pairing.
+  Manual selections affect one playback only. Resolution ceilings no longer have
+  an unbounded `/best` fallback. Unknown heights are excluded under a ceiling.
+- New encrypted stores require an OS-keyring master key. Legacy keyfile and
+  passphrase stores remain readable with their original key; they are not yet
+  migrated to keyring-only storage.
+
+Format field units and selectors are independently based on yt-dlp's public
+structured output contract:
+<https://github.com/yt-dlp/yt-dlp#format-selection>.
+No SmartTube media selection implementation was translated.
+
+### Remaining requested work
+
+This is not the completed 0–27 feature set. Existing TV OAuth/refresh/account
+switching has not been replaced or live validated. Cookie-mode removal, a single
+client-profile module, full OAuth mock lifecycle tests, all feed/write/history
+parity, semantic glyphs, layout changes, expanded settings/integrations, download
+and playlist quality menus/progress/counts/archive/conversions remain outstanding.
+GTK still contains its pre-existing embedded player; only compilation was checked.
+Format probing currently runs anonymously; it does not export cookies/tokens to
+resolve private or age-restricted videos. New format menus do not remember codec
+preferences. The quality ceiling helper supports codec preferences in core, but
+those preferences have not yet been added to settings.

@@ -140,3 +140,17 @@ Anonymous is the default on a fresh installation. Subscriptions, Liked, Watch
 Later, library playlists and account History show `Sign in with :account add`
 without issuing authenticated requests. Search, public playlists, Local, Queue
 and external MPV playback remain available.
+
+## Available media formats
+
+`:play-select` opens Play as (Video / Audio only / Best automatically) for the
+selected YouTube video. Video and audio lists contain actual yt-dlp JSON formats;
+`:audio` opens the audio list directly. Shift-Enter also exposes these actions.
+Use j/k or arrows, Enter to choose, Esc/q to cancel. `:quality <height>` continues
+to set the saved automatic ceiling. Manual format choices override it for one
+playback only. There is no transcoding or download before playback.
+
+`yute doctor` is a shell command, not a colon command. It checks tools, network,
+InnerTube/session acceptance, encrypted storage, directories and terminal hints.
+Failures return a nonzero exit status; optional missing tools produce warnings.
+No credential values or account identifiers are displayed.

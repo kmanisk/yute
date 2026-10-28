@@ -79,8 +79,9 @@ yute/
 The terminal frontend uses `actions::activation(Card)` to return Play, OpenChannel,
 OpenPlaylist or Unavailable. InnerTube renderer types and typed endpoints determine
 Card variants. Titles and row positions do not classify entities. Main's
-`dispatch_open` owns transitions; `start_playback` is the single TUI call site for
-`Player::play_video`. Mixes remain playlists and upcoming streams are not launched.
+`dispatch_open` owns transitions; `start_playback` handles default playback and
+the media overlay supplies a one-playback configuration for explicit formats.
+Mixes remain playlists and upcoming streams are not launched.
 
 `commands::REGISTRY` shares canonical names, aliases, syntax, descriptions and parse
 functions with completion and help. Parsed Commands dispatch through application
@@ -102,3 +103,23 @@ restore normal text diffing for badge cells. The request channel is asynchronous
 so waiting for thumbnails cannot occupy a Tokio worker. There is no thumbnail
 helper process. Settings mutation is separate from persistence in the key handler,
 so renderer tests do not save live user settings.
+
+## Diagnostics and structured formats
+
+`yute-core::doctor` checks bounded network/process operations and existing
+credentials without login, refresh or migration. Terminal information is added by
+the CLI without entering raw mode. Graphics output describes environment hints.
+
+`media::formats::FormatResolver` owns a single current-video metadata cache with a
+five-minute TTL and serialized async probes. Cancellation drops a kill-on-drop
+subprocess. Structured JSON is mapped into typed media kinds/codecs/dimensions,
+bit rates, HDR, languages and optional sizes; signed URLs are not cached. Unknown
+fields are ignored. Unsafe format IDs, DRM and non-media entries are excluded.
+
+The action overlay routes through Play as and the available video/audio list.
+Request IDs reject late results, and dropping the overlay cancels its probe.
+Selectors identify an exact stream and pair video-only streams with original
+audio. External MPV resolves those selectors through yt-dlp; the TUI never embeds
+MPV. Normal playback resets the format selector on reused MPV IPC sessions, so
+an explicit audio action does not persist. GTK's pre-existing embedded player is
+still present and needs migration to meet the external-only requirement.

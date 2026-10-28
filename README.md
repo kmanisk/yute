@@ -248,6 +248,11 @@ Press `:` from Normal mode.
 
 Commands support completion and history, so the command line can expose power-user actions without filling the main UI with permanent controls.
 
+Use `:play-select` or Shift-Enter → Play / quality to choose real available
+video formats; `:audio` opens original audio streams. Playback stays in external
+MPV, with no pre-download or conversion. Manual choices apply to one playback.
+Run `yute doctor` from your shell for bounded diagnostics without token output.
+
 See [`docs/commands.md`](docs/commands.md) for the complete command reference.
 
 ---
@@ -393,3 +398,10 @@ priority over prefetch work. Terminal capability hints and cached cell dimension
 avoid blocking startup on a stdin probe; unknown terminals can select a graphics
 protocol explicitly. [Performance measurements](docs/performance.md) describe the
 trace and its verification limits.
+
+The SmartTube backend pass is partial. See [current scope](docs/smarttube-parity.md#backend-pass-2026-10-28-partial),
+[configuration notes](docs/configuration.md), and [manual QA](docs/qa.md).
+Specialized video/audio and playlist download menus, audio conversions and
+playlist progress/archive accounting are not implemented yet. The existing generic
+item downloader remains available. ffmpeg is needed to merge separate streams;
+no conversion choices are currently offered.

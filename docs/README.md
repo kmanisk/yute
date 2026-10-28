@@ -18,3 +18,6 @@ This directory contains technical documentation for `yute` and `yute-core`.
 
 1. `yute-core`: Pure Rust engine containing the InnerTube API client, TV OAuth device-code flow, feed parsers, playback tracking, queue manager, and MPV process controller. It contains zero terminal dependencies.
 2. `yute`: Terminal user interface implemented with Ratatui and Crossterm, utilizing `ratatui-image` for hardware-negotiated Kitty and Sixel thumbnail rendering.
+
+- [Manual QA](qa.md): Human verification checklist, including outstanding features.
+- [Configuration notes](configuration.md): Quality ceilings, paths and current limitations.
