@@ -1,16 +1,12 @@
-# yute
-
 <p align="center">
-  <img src="assets/yute.png" alt="Yute icon" width="120">
+  <img src="assets/yute.svg" alt="Yute terminal icon" width="132">
 </p>
 
-<p align="center">
-  <strong>YouTube, treated like a terminal application.</strong>
-</p>
+<h1 align="center">Yute</h1>
 
 <p align="center">
-  A keyboard-first YouTube client written in Rust with Ratatui and Tokio.<br>
-  Discovery stays in the terminal; video playback stays in external MPV.
+  <strong>A keyboard-first YouTube client for the terminal.</strong><br>
+  Browse in the TUI. Play in MPV.
 </p>
 
 <p align="center">
@@ -21,102 +17,49 @@
   <img src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20Unix-lightgrey" alt="Linux and Unix">
 </p>
 
-![Yute subscriptions view](assets/screenshots/subscriptions.png)
+<p align="center">
+  Rust + Ratatui + Tokio · InnerTube browsing · Sixel/Kitty thumbnails · external MPV
+</p>
 
----
+![Yute search results](assets/screenshots/search.png)
 
-## Why I built it this way
+Yute keeps discovery, navigation, account views and queue management inside the terminal while delegating actual video playback to external MPV over Unix JSON IPC. It is designed for keyboard-heavy workflows rather than reproducing `youtube.com` inside a terminal.
 
-I wanted a YouTube client that fits the same workflow as Neovim, tmux, yazi and other terminal tools: open it instantly, keep my hands on the keyboard, find something, play it, and keep moving.
+## Highlights
 
-That led to a few deliberate choices:
+- **Keyboard first** — Vim-style movement, `g` navigation, `/` search and a `:` command line.
+- **Real YouTube browsing** — Home, Subscriptions, Search, History, Watch Later, Liked videos, playlists and channels where the active session exposes them.
+- **Entity-aware routing** — videos, Shorts and playable live streams go to MPV; channels and playlists open inside Yute.
+- **Terminal graphics** — asynchronous Sixel and Kitty thumbnails with Unicode halfblock fallback.
+- **External MPV** — playback stays in a real media player while Yute remains responsive and browsable.
+- **Account-aware feeds** — Anonymous, cookie-backed and saved TV identities are isolated cleanly.
+- **Command mode** — completion and history expose power-user actions without filling the UI with permanent chrome.
+- **No daemon, webview or Electron** — an event-driven terminal client with near-zero idle redraw overhead.
 
-- **the terminal is for browsing, not pretending to be a video player** — Yute sends playback to MPV
-- **keyboard first** — Vim-style movement, `g` navigation, `/` search and a `:` command line
-- **no permanent service** — no daemon or background watcher just to browse YouTube
-- **no embedded browser** — no Chromium, Electron or webview hidden behind a TUI
-- **real terminal graphics** — Sixel and Kitty when available, halfblocks everywhere else
-- **minimal chrome** — content gets the space; help and actions appear when needed
-- **typed navigation** — a channel opens as a channel, a playlist as a playlist, playable media goes to MPV
+## Screenshots
 
-The goal is not to recreate `youtube.com` cell-for-cell.
+### Search and content browsing
 
-The goal is to make YouTube feel native to a keyboard-driven terminal workflow.
+The content pane uses YouTube-style thumbnail hierarchy while keeping terminal-native navigation and filters.
 
----
+![Yute search view](assets/screenshots/search.png)
 
-## What Yute does
+### Sidebar navigation
 
-```text
-YouTube / InnerTube
-        │
-        ▼
-┌────────────────────────────┐
-│            yute            │
-│                            │
-│  Home       Subscriptions  │
-│  Search     History        │
-│  Channels   Playlists      │
-│  Queue      Local media    │
-└─────────────┬──────────────┘
-              │ Unix JSON IPC
-              ▼
-             MPV
-```
+The sidebar can be shown when needed and gives fast access to Home, Subscriptions, History, Watch Later, Liked videos, playlists, the queue, local media, accounts and settings.
 
-| Part | Yute's choice |
-| --- | --- |
-| UI | Ratatui + Crossterm |
-| Input | Vim-style navigation + command mode |
-| YouTube data | InnerTube, with `yt-dlp` as resolver/fallback |
-| Images | Sixel / Kitty graphics / halfblocks |
-| Playback | external MPV |
-| MPV control | Unix-domain JSON IPC |
-| Async runtime | Tokio |
-| Background service | none |
-
----
-
-## Features
-
-- **Personalized browsing** — Home recommendations, Subscriptions, Search, History, Watch Later, Liked videos and playlists where the authenticated session exposes them.
-- **Entity-aware navigation** — videos, Shorts and live streams play in MPV; channels and playlists stay inside Yute.
-- **Terminal thumbnails** — asynchronous image loading with Sixel, Kitty graphics and Unicode halfblock fallback.
-- **Keep browsing while video plays** — leaving Watch does not kill the MPV session.
-- **Command mode** — Vim-like `:` commands with completion and history.
-- **Route history** — move into a channel or playlist and return to the same search/feed position.
-- **Queue and local media** — keep a playback queue and browse configured local video directories.
-- **Playback tuning** — resolution limits, hardware decoding, stream buffering, autoplay and optional user MPV config.
-- **Low idle overhead** — event-driven UI with no animation/redraw loop when nothing changes.
-
----
-
-## A terminal workflow, not a website clone
+![Yute navigation sidebar](assets/screenshots/navigation.png)
 
 <table>
   <tr>
-    <td><img src="assets/screenshots/search.png" alt="Yute search results"></td>
-    <td><img src="assets/screenshots/command.png" alt="Yute command mode"></td>
+    <td width="50%"><img src="assets/screenshots/settings.png" alt="Yute settings"></td>
+    <td width="50%"><img src="assets/screenshots/account.png" alt="Yute account picker"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Search, mixed entities and keyboard navigation</sub></td>
-    <td align="center"><sub>Commands live in the bottom line</sub></td>
-  </tr>
-  <tr>
-    <td><img src="assets/screenshots/watch.png" alt="Yute watch view"></td>
-    <td><img src="assets/screenshots/settings.png" alt="Yute settings"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Details stay in Yute; playback stays in MPV</sub></td>
-    <td align="center"><sub>Settings stay keyboard-driven too</sub></td>
+    <td align="center"><sub>Keyboard-driven playback, grid, Shorts and cache settings</sub></td>
+    <td align="center"><sub>Anonymous and saved account/session selection</sub></td>
   </tr>
 </table>
-
-Playback remains visible as lightweight state while you browse:
-
-![Yute active playback](assets/screenshots/active-playback.png)
-
----
 
 ## Install
 
@@ -141,7 +84,7 @@ sudo pacman -S mpv yt-dlp
 cargo install --git https://github.com/kmanisk/yute yute
 ```
 
-### Build it
+### Build from source
 
 ```sh
 git clone https://github.com/kmanisk/yute.git
@@ -152,21 +95,19 @@ install -Dm755 target/release/yute ~/.local/bin/yute
 
 `cargo install yute` will become the shortest path after the first crates.io release.
 
----
-
 ## First run
 
 ```sh
 yute
 ```
 
-Yute can browse as a guest. For personalized account-backed views:
+Guest browsing works without an account. For personalized account-backed views:
 
 ```sh
 yute login
 ```
 
-This uses YouTube TV/device-code authentication.
+Yute supports YouTube TV/device-code authentication and account/session selection inside the TUI.
 
 Optional MPV helper/profile setup:
 
@@ -174,17 +115,15 @@ Optional MPV helper/profile setup:
 yute setup-mpv
 ```
 
-Config lives at:
+Configuration lives under:
 
 ```text
 ~/.config/yute/
 ```
 
-Legacy `ytui` settings are imported without overwriting Yute settings. Tokens and cookies migrate into the encrypted XDG data store; see [credential storage](docs/credentials.md).
+Legacy `ytui` settings can be imported without overwriting Yute settings. Tokens and cookies migrate into the encrypted XDG data store; see [credential storage](docs/credentials.md).
 
----
-
-## Keyboard
+## Keyboard workflow
 
 Normal mode is the default.
 
@@ -200,24 +139,25 @@ Normal mode is the default.
 | --- | --- |
 | `h/j/k/l` | Move through cards and lists |
 | `Enter` | Open the selected entity |
-| `Shift-Enter` | Item actions: play, copy, queue, save, download |
-| `o` | Open the selected entity in the browser |
+| `Shift-Enter` | Open item actions |
+| `/` | Search |
+| `:` | Command mode |
+| `g` | Navigation prefix |
+| `ga` | Accounts |
 | `g,` | Settings (`go` remains compatible) |
-| `Alt-e` | Show/focus sidebar; press again to hide |
+| `Alt-e` / `b` | Show, focus or hide the sidebar |
+| `Tab` | Cycle pane focus |
 | `gg` / `G` | First / last item |
 | `Ctrl-d` / `Ctrl-u` | Half-page down / up |
 | `Shift-J/K` | Next / previous content filter |
 | `Shift-H/L` | Back / forward through route history |
-| `/` | Search |
-| `:` | Command mode |
-| `g` | Navigation prefix; delayed hints show destinations |
 | `a` | Add selected video to queue |
 | `y` | Copy selected URL |
-| `b` | Toggle sidebar |
+| `o` | Open selected entity in the browser |
 | `?` | Contextual help |
-| `Esc` / `q` | Previous route / quit |
+| `Esc` / `q` | Previous route / quit at root |
 
-`Enter` is based on the selected entity, not the card that happened to render it:
+`Enter` is driven by the selected entity type:
 
 ```text
 video / Short / live  ──▶ MPV
@@ -225,20 +165,42 @@ channel               ──▶ Channel view
 playlist              ──▶ Playlist view
 ```
 
----
+## Item actions
+
+`Shift-Enter` opens the contextual item menu. Available actions depend on the selected entity.
+
+Typical actions include:
+
+```text
+p   play / open
+v   browse playlist
+o   open in browser
+y   copy URL
+t   copy title
+a   add to queue
+s   save to playlist
+d   download
+x   cancel active download
+```
+
+Channels never expose playback actions. Playlist and account writes are only reported as successful when YouTube confirms them.
+
+Downloads use external `yt-dlp`, respect the current quality limit and default to `~/Videos/Yute`. Local media scanning includes that directory.
 
 ## Command line
 
 Press `:` from Normal mode.
 
 ```text
-:search rust programming
+:search linux racing
 :filter videos
 :shorts off
 :quality 1080p
 :quality best
 :queue add
 :sidebar toggle
+:account
+:account whoami
 :copy url
 :open
 :settings
@@ -246,17 +208,37 @@ Press `:` from Normal mode.
 :q
 ```
 
-Commands support completion and history, so the command line can expose power-user actions without filling the main UI with permanent controls.
+Commands support completion and history. See [`docs/commands.md`](docs/commands.md) for the full reference.
 
-See [`docs/commands.md`](docs/commands.md) for the complete command reference.
+## Accounts
 
----
+Open the account picker with `ga` or `:account`.
+
+```text
+:account
+:account add
+:account <name|index|prefix>
+:account remove <name>
+:account anon
+:account whoami
+```
+
+The picker can contain Anonymous plus saved account identities. Returned brand profiles use their page-id header when available. Feed caches are isolated per account; thumbnail caches are shared.
+
+Set this if Yute should always start anonymously instead of restoring the last used account:
+
+```toml
+[general]
+start_anonymous = true
+```
 
 ## Configuration
 
 ```text
 ~/.config/yute/config.toml
 ```
+
+Example:
 
 ```toml
 [content]
@@ -274,19 +256,40 @@ stream_cache_seconds = 20
 use_user_mpv_config = false
 osd_bar = false
 autoplay = true
+
+[thumbnails]
+cache_mb = 256
+prefetch_pages = 1
 ```
 
-Shorts behavior:
+Shorts modes:
 
 - `never` — hide Shorts outside explicit Shorts filters/tabs, including saved feeds and suggestions
 - `hide` — hide them in ordinary feeds but allow explicit Shorts/saved content
 - `show` — show normally
 
-Filtering happens at the view layer; the underlying data remains cached.
-
----
+Visible thumbnails take priority over prefetch work. The cache stores source images and encoded terminal payloads.
 
 ## Architecture
+
+```text
+YouTube / InnerTube
+        │
+        ▼
+┌────────────────────────────┐
+│            yute            │
+│                            │
+│  Home       Subscriptions  │
+│  Search     History        │
+│  Channels   Playlists      │
+│  Queue      Local media    │
+└─────────────┬──────────────┘
+              │ Unix JSON IPC
+              ▼
+             MPV
+```
+
+Workspace layout:
 
 ```text
 crates/
@@ -295,7 +298,7 @@ crates/
 └── yute-gui    optional GTK frontend
 ```
 
-The core and TUI are deliberately separated. Rendering does not decide what an item does, and MPV is not embedded into the terminal renderer.
+Rendering does not decide what an item does. Content is routed through typed actions before reaching navigation or the player:
 
 ```text
 ContentItem ──▶ Action ──▶ Router / Player
@@ -305,17 +308,15 @@ ContentItem ──▶ Action ──▶ Router / Player
                     └── Play
 ```
 
-That separation is what prevents a channel result from accidentally being treated as a video just because both appear in the same grid.
-
-### Docs
+### Documentation
 
 - [Architecture](docs/architecture.md)
 - [Commands](docs/commands.md)
+- [Credential storage](docs/credentials.md)
 - [MPV tuning](docs/mpv-tuning.md)
+- [Performance measurements](docs/performance.md)
 - [SmartTube protocol notes](docs/smarttube-parity.md)
 - [UI verification](docs/ui-polish-review.md)
-
----
 
 ## Development
 
@@ -326,70 +327,16 @@ cargo test --workspace
 cargo build --release
 ```
 
----
+## Current limitations
 
-## Still in progress
-
-Yute is early software. The parts I would rather mark incomplete than fake are:
+Yute is still early software. Known incomplete areas include:
 
 - full cross-client history/resume parity
 - endless Mix-radio continuation
 - some authenticated mutations when YouTube does not return usable action parameters
 
-Mix playback currently uses the returned batch.
-
-If YouTube does not expose a working account action, Yute reports that limitation instead of pretending the write succeeded.
-
----
+Mix playback currently uses the returned batch. If YouTube does not expose a working account action, Yute reports the limitation instead of pretending the write succeeded.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-
-## Item actions and focus
-
-The route label and result filters share the top row. Navigation and content have
-separate frames: the keyboard-focused pane uses the accent border, while the
-active sidebar route keeps its marker. Tab cycles pane focus; Alt+E shows/focuses
-or hides navigation. Card gutters are two terminal columns, with no large empty
-column slots when navigation is hidden.
-
-Shift+Enter opens an item menu. j/k or arrows select, Enter runs the action, and
-Esc/q closes the menu. Menu shortcuts are p play/open, v browse playlist, o browser,
-y copy link, t copy title, a queue, s save video to playlist, d download, and x
-cancel a running download. Options depend on entity type; channels never offer
-playback. Ordinary Enter still opens normal playlists internally.
-
-Saving requests the account's actual available playlist destinations, excluding
-already-saved entries, and waits for YouTube to confirm the edit. A valid YouTube
-session is required; no success is simulated when the endpoint is unavailable.
-
-Downloads use an external yt-dlp process at the current quality limit and write
-to `~/Videos/Yute`, which Local also scans. Node support is enabled alongside
-any default yt-dlp runtime. Only one job runs at a time; cancel it from the menu.
-Exiting Yute terminates an unfinished download; yt-dlp partial files can resume
-on a later attempt. Playlist/Mix downloads use their collection URL. No shell is
-used to execute entity URLs or filenames. Account cookies are only supplied for
-non-guest sessions with an existing cookie file.
-
-Account switching is available through `:account` (`:acc`, `:a`) or `ga`.
-The picker includes Anonymous and saved TV identities; returned brand profiles
-use their page-id header. Use `:account add`, `:account <name|index|prefix>`,
-`:account remove <name>`, `:account anon`, or `:account whoami`.
-Set `[general] start_anonymous = true` to start anonymously instead of restoring
-the last used account. Cached feeds are isolated by account; thumbnails are shared.
-
-Thumbnail settings are shared across accounts:
-
-```toml
-[thumbnails]
-cache_mb = 256
-prefetch_pages = 1
-```
-
-The cache includes source JPEGs and encoded terminal payloads. Visible cards take
-priority over prefetch work. Terminal capability hints and cached cell dimensions
-avoid blocking startup on a stdin probe; unknown terminals can select a graphics
-protocol explicitly. [Performance measurements](docs/performance.md) describe the
-trace and its verification limits.
