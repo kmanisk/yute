@@ -121,5 +121,35 @@ Request IDs reject late results, and dropping the overlay cancels its probe.
 Selectors identify an exact stream and pair video-only streams with original
 audio. External MPV resolves those selectors through yt-dlp; the TUI never embeds
 MPV. Normal playback resets the format selector on reused MPV IPC sessions, so
-an explicit audio action does not persist. GTK's pre-existing embedded player is
-still present and needs migration to meet the external-only requirement.
+an explicit audio action does not persist. GTK retains its libmpv player. Both
+frontends use the same OAuth account/configuration/backend models; neither
+player receives cookie-based YouTube authentication.
+
+
+## Authoritative account feeds and visible state
+
+InnerTube is the authoritative backend for account libraries, account playlist
+continuations, identity and mutations. yt-dlp remains an anonymous public fallback
+and media resolver. Account errors propagate from the first backend; an empty
+fallback cannot hide them. Account continuations retain an internal provenance
+prefix so they cannot be dispatched to yt-dlp. Recognized successful empty
+renderers are distinct from unknown response shapes and logged-out responses.
+
+The TUI stores feed errors separately from transient footer messages. Grid and
+list use the same empty/loading/sign-in/re-login/error decision. Cached content
+can stay visible after a failed refresh, with a persistent error in the footer.
+Account cancellation and feed generations prevent late responses crossing views.
+
+Visible synthetic channel cards asynchronously request public channel metadata
+with two concurrency slots. Feed/account navigation cancels superseded hydration;
+generation checks discard late results. Avatars reuse the shared priority-aware
+image pipeline, cache and decoding workers. Google avatar sizing rewrites only
+recognized s/w/h numeric suffixes on supported hosts, preserving opaque IDs,
+crop/privacy flags and queries. Unknown forms are unchanged.
+
+Automatic grid geometry uses the content pane after sidebar allocation, 30-cell
+minimum slots, two-cell gutters and 1–8 columns. Artwork height follows terminal
+cell pixel dimensions. Typed cards keep video/channel/playlist activation separate.
+Semantic icons are centralized in `ui/icons.rs`; display width governs padding.
+Input editing and truncation use grapheme boundaries, including legacy cursor
+positions inside multibyte text.

@@ -32,7 +32,7 @@ Yute keeps discovery, navigation, account views and queue management inside the 
 - **Entity-aware routing** — videos, Shorts and playable live streams go to MPV; channels and playlists open inside Yute.
 - **Terminal graphics** — asynchronous Sixel and Kitty thumbnails with Unicode halfblock fallback.
 - **External MPV** — playback stays in a real media player while Yute remains responsive and browsable.
-- **Account-aware feeds** — Anonymous, cookie-backed and saved TV identities are isolated cleanly.
+- **Account-aware feeds** — Anonymous, saved TV OAuth identities and explicit re-login states are isolated cleanly.
 - **Command mode** — completion and history expose power-user actions without filling the UI with permanent chrome.
 - **No daemon, webview or Electron** — an event-driven terminal client with near-zero idle redraw overhead.
 
@@ -121,7 +121,7 @@ Configuration lives under:
 ~/.config/yute/
 ```
 
-Legacy `ytui` settings can be imported without overwriting Yute settings. Tokens and cookies migrate into the encrypted XDG data store; see [credential storage](docs/credentials.md).
+Legacy `ytui` settings can be imported without overwriting Yute settings. OAuth tokens migrate into the encrypted XDG data store; legacy cookie data is never used as a signed-in account; see [credential storage](docs/credentials.md).
 
 ## Keyboard workflow
 
@@ -228,6 +228,13 @@ Open the account picker with `ga` or `:account`.
 :account whoami
 ```
 
+TV OAuth is the only authenticated account mechanism. `:account add` (or `:login`)
+shows an activation URL, code, QR and expiry countdown; Esc cancels. Legacy
+cookie-only profiles require TV-code re-login. Status shows Anonymous,
+OAuth, or Needs re-login. yt-dlp extraction and downloads do not receive cookies
+or OAuth credentials. Account-library errors remain visible and are never
+replaced with an empty yt-dlp fallback.
+
 The picker can contain Anonymous plus saved account identities. Returned brand profiles use their page-id header when available. Feed caches are isolated per account; thumbnail caches are shared.
 
 Set this if Yute should always start anonymously instead of restoring the last used account:
@@ -246,12 +253,15 @@ start_anonymous = true
 Example:
 
 ```toml
+[general]
+icons = "auto"           # auto | nerd | unicode | ascii | none
+
 [content]
 shorts = "never"          # never | hide | show
 
 [grid]
-columns = 3               # 0 = automatic
-min_card_width = 26
+columns = 0               # automatic; fixed 1–8 also supported
+min_card_width = 30
 sidebar_expanded = false
 
 [playback]
@@ -331,6 +341,13 @@ cargo clippy --workspace --all-targets --all-features
 cargo test --workspace
 cargo build --release
 ```
+
+Automatic grid mode fills the content width with 1–8 columns and two-cell gaps.
+Settings offers Auto and fixed 1–8 columns. Resize preserves selected content.
+Nerd glyphs use verified semantic mappings; auto conservatively uses Unicode
+unless `YUTE_NERD_FONT=1` is set. Use `nerd` explicitly with a supported font.
+See [configuration](docs/configuration.md), [icon verification](docs/icons.md),
+and the [manual QA checklist](docs/qa.md).
 
 ## Current limitations
 

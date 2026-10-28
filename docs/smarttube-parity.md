@@ -190,3 +190,31 @@ Format probing currently runs anonymously; it does not export cookies/tokens to
 resolve private or age-restricted videos. New format menus do not remember codec
 preferences. The quality ceiling helper supports codec preferences in core, but
 those preferences have not yet been added to settings.
+
+
+## OAuth/UI delivery, 2026-10-29
+
+The follow-up retires selectable cookie sessions, cookie request headers and
+cookie-bearing resolver/player/download options in both frontends. Legacy cookie
+files remain untouched at startup; cookie-only stored identities require TV
+re-login. OAuth profiles use TV context even when inherited from older Web config.
+Missing expiry now triggers refresh instead of assuming validity indefinitely.
+Request deadlines cover refresh/keyring waits as well as HTTP transport.
+
+Account libraries, account continuations and mutations retain authoritative
+InnerTube errors. Known successful empty renderers are accepted; unknown or
+logged-out responses become explicit errors. Both presentation modes share
+persistent failure state and sign-in/re-login messaging. Writes require OAuth
+and backend acknowledgement; no fallback simulates success.
+
+Channel avatar extraction handles classic/header/view-model shapes. Visible
+synthetic channels hydrate through bounded cancellable public metadata requests;
+avatars use the shared priority cache. A real anonymous public-channel/CDN decode
+check and generated-media/null-output MPV tests were run successfully. These are
+not personalized account validation. Subscriptions/history/list IDs remain based
+on the inspected protocol reference; real TV OAuth/account responses still need
+interactive authorization to validate for the user's identity.
+
+Grid Auto uses 1–8 content-width columns; settings supports each fixed choice.
+Semantic icon mappings were verified against the installed Iosevka Nerd cmap;
+Unicode and ASCII remain portable fallbacks. See [icons](icons.md).

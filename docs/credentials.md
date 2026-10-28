@@ -23,13 +23,16 @@ master key remains outstanding; preserve their original keys until that happens.
 No credentials silently fall back to plaintext. Key material and owned secret
 strings use zeroizing allocations, and Debug redacts them.
 
-Legacy `~/.config/yute/auth.json`, `~/.config/ytui/auth.json`, and configured
-Netscape cookie files are merged without replacing existing accounts/settings.
+Legacy `~/.config/yute/auth.json` and `~/.config/ytui/auth.json` are merged
+without replacing existing accounts/settings. Normal startup leaves legacy
+Netscape cookie files untouched. Previously encrypted cookie jars remain opaque
+compatibility data; they never authorize requests or create a signed-in profile.
+Cookie-only profiles become Needs re-login and require TV OAuth.
 The old machine-derived AES format is accepted only for migration. The encrypted
 copy is read and authenticated before old files are unlinked. Physical secure
 erasure cannot be guaranteed on SSDs, copy-on-write filesystems, snapshots, or
 backups. Restart older running clients so they cannot recreate legacy files.
-Yute no longer automatically extracts browser cookies into plaintext files.
+Yute never passes cookies to InnerTube, MPV, libmpv or yt-dlp.
 
 Automated tests use explicit temporary stores and fixture keys. They cover
 round-trip, wrong keys, header/ciphertext tampering, nonce uniqueness, mode 0600,

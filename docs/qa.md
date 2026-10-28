@@ -61,3 +61,17 @@ implementation and must not be described as passing.
 - [ ] Final completed/failed/skipped totals and useful sanitized details.
 - [ ] Playlist retry/archive skips completed IDs; safe directory ordering.
 - [ ] Filenames/URLs containing shell metacharacters remain literal arguments.
+
+## Follow-up delivery evidence, 2026-10-29
+
+The automated suite covers legacy-cookie re-login state, authoritative account
+errors, recognized empty feeds, account continuation provenance, avatar variants
+and sizing, priority/cancellation, automatic grid bounds, selection retention,
+Unicode/grapheme/cursor safety and icon fallbacks. The live anonymous channel
+avatar/CDN decode test and three native MPV tests (generated local media with
+null audio/video outputs) passed explicitly.
+
+Interactive TV OAuth and personalized Subscriptions/History/Watch Later/Liked/
+Playlists/writes still require the user's authorization. No cookie session was
+used to substitute for that validation. Kitty/Sixel visual review also remains
+human QA; environment hints are not graphics-negotiation proof.

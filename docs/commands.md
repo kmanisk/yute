@@ -154,3 +154,16 @@ playback only. There is no transcoding or download before playback.
 InnerTube/session acceptance, encrypted storage, directories and terminal hints.
 Failures return a nonzero exit status; optional missing tools produce warnings.
 No credential values or account identifiers are displayed.
+
+
+## Session and library states
+
+`:account add` and `:login` use TV OAuth only; there is no selectable Cookie
+session. Use `:account anon` for public browsing. Legacy or revoked accounts show
+Needs re-login and require a new TV-code login. Library requests and mutations
+preserve OAuth errors; yt-dlp never supplies a fake empty account library.
+Both list and grid distinguish sign-in, re-login, loading, backend errors and
+successful empty responses. Press r to retry a failed view.
+
+Settings offers Auto or fixed 1–8 grid columns, and auto/nerd/unicode/ascii/none
+icons. The sidebar and item menu share semantic glyphs with width-aware alignment.

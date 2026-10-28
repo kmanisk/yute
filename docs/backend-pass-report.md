@@ -1,4 +1,8 @@
-# SmartTube backend pass: partial implementation
+# Historical backend pass: 2026-10-28
+
+This report records the earlier partial pass. The OAuth/UI delivery on 2026-10-29
+supersedes its cookie, avatar, icon and grid limitations; see
+[the current architecture](architecture.md) and [QA](qa.md).
 
 The complete requested 0–27 feature set is not finished. This report describes
 only the implemented and checked subset. No push, PR, tag or SmartTube mutation.
