@@ -23,9 +23,13 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             "Shift-Enter more",
         ],
         Some(Card::Video(_)) => vec!["Enter play", "a queue", "d download", "Shift-Enter more"],
-        Some(Card::Channel(_)) if app.is_authenticated() => {
+        Some(Card::Channel(channel))
+            if app.is_authenticated()
+                && crate::backend::models::youtube_channel_id(&channel.id).is_some() =>
+        {
             vec!["Enter open", "S subscribe", "Shift-Enter more"]
         }
+        Some(Card::Channel(_)) => vec!["Enter open", "Shift-Enter more"],
         Some(Card::Playlist(_)) => vec![
             "Enter open",
             "p play all",

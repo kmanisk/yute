@@ -46,6 +46,9 @@ pub fn channel_of(card: &Card) -> Option<ChannelCard> {
 
 pub fn url(card: &Card) -> String {
     match card {
+        Card::Channel(c) if crate::backend::models::subscription_tab_params(&c.id).is_some() => {
+            "https://www.youtube.com/feed/subscriptions".into()
+        }
         Card::Channel(c) => format!("https://www.youtube.com/channel/{}", c.id),
         Card::Playlist(p)
             if p.is_mix && p.first_video_id.as_deref().is_some_and(|id| !id.is_empty()) =>
@@ -430,7 +433,9 @@ pub fn menu_entries(card: &Card, authenticated: bool, downloading: bool) -> Vec<
                 });
             }
         }
-        if channel_of(card).is_some() {
+        if channel_of(card).is_some_and(|channel| {
+            crate::backend::models::youtube_channel_id(&channel.id).is_some()
+        }) {
             entries.push(MenuEntry {
                 label: "Subscribe / Unsubscribe",
                 key: 'S',

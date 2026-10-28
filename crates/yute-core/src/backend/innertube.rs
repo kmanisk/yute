@@ -581,7 +581,12 @@ impl Backend for InnerTubeBackend {
             extra["params"] = json!(params);
         }
         let value = self.post_endpoint("browse", self.make_body(extra)).await?;
-        Ok(crate::backend::parse::parse_channel_page(&value, id))
+        let mut page = crate::backend::parse::parse_channel_page(&value, id);
+        if id == crate::backend::models::SUBSCRIPTIONS_BROWSE_ID && params.is_some() {
+            // These are sibling subscribed channels, not tabs of the selected channel.
+            page.tabs.clear();
+        }
+        Ok(page)
     }
 
     async fn live_chat(&self, token: &str) -> Result<ChatBatch> {
@@ -1024,6 +1029,9 @@ mod account_feed_tests {
 
 /// TV subscriptions expose channel tabs, independently of Home video shelves.
 pub fn parse_subscribed_channels(value: &Value) -> Result<FeedPage> {
+    use crate::backend::models::{
+        subscription_tab_card_id, Card, ChannelCard, SUBSCRIPTIONS_BROWSE_ID,
+    };
     if crate::backend::parse::find_json_key(value, "loggedOut").and_then(Value::as_bool)
         == Some(true)
     {
@@ -1031,58 +1039,65 @@ pub fn parse_subscribed_channels(value: &Value) -> Result<FeedPage> {
     }
     let mut items = vec![];
     let mut ids = std::collections::HashSet::new();
-    fn visit(
-        v: &Value,
-        out: &mut Vec<crate::backend::models::Card>,
-        ids: &mut std::collections::HashSet<String>,
-    ) {
-        if let Some(crate::backend::models::Card::Channel(c)) = crate::backend::parse::parse_card(v)
-        {
+    fn visit(v: &Value, out: &mut Vec<Card>, ids: &mut std::collections::HashSet<String>) {
+        if let Some(Card::Channel(c)) = crate::backend::parse::parse_card(v) {
             if ids.insert(c.id.clone()) {
-                out.push(crate::backend::models::Card::Channel(c));
+                out.push(Card::Channel(c));
             }
         }
-        for key in ["tabRenderer", "guideEntryRenderer"] {
-            if let Some(tab) = v.get(key) {
-                let endpoint = tab
-                    .get("endpoint")
-                    .or_else(|| tab.get("navigationEndpoint"));
-                if let Some(id) = endpoint
-                    .and_then(|e| e.pointer("/browseEndpoint/browseId"))
-                    .and_then(Value::as_str)
-                    .filter(|s| s.starts_with("UC"))
-                {
-                    if ids.insert(id.into()) {
-                        let avatar = crate::backend::parse::extract_best_thumbnail(tab);
-                        out.push(crate::backend::models::Card::Channel(
-                            crate::backend::models::ChannelCard {
-                                id: id.into(),
-                                title: tab
-                                    .get("title")
-                                    .map(crate::backend::parse::extract_text)
-                                    .unwrap_or_default(),
-                                handle: None,
-                                subscribers: None,
-                                avatar_url: (!avatar.is_empty()).then_some(avatar),
-                                verified: false,
-                            },
-                        ));
-                    }
+        if let Some(tab) = v.get("tabRenderer") {
+            let endpoint = tab
+                .get("endpoint")
+                .or_else(|| tab.get("navigationEndpoint"));
+            let browse = endpoint.and_then(|e| e.get("browseEndpoint"));
+            let browse_id = browse
+                .and_then(|e| e.get("browseId"))
+                .and_then(Value::as_str);
+            let params = browse.and_then(|e| e.get("params")).and_then(Value::as_str);
+            let title = tab
+                .get("title")
+                .map(crate::backend::parse::extract_text)
+                .unwrap_or_default();
+            let avatar = crate::backend::parse::extract_best_thumbnail(tab);
+
+            // Older TV responses advertised a normal UC endpoint. Current TV
+            // responses advertise subscribed channels as FEsubscriptions tabs with
+            // per-channel opaque params. Both are real browse endpoints.
+            let identity = browse_id
+                .filter(|id| id.starts_with("UC"))
+                .map(str::to_owned)
+                .or_else(|| {
+                    (browse_id == Some(SUBSCRIPTIONS_BROWSE_ID)
+                        && params.is_some()
+                        && !title.is_empty()
+                        && !avatar.is_empty())
+                    .then(|| subscription_tab_card_id(params.unwrap_or_default()))
+                });
+            if let Some(id) = identity {
+                if ids.insert(id.clone()) {
+                    out.push(Card::Channel(ChannelCard {
+                        id,
+                        title,
+                        handle: None,
+                        subscribers: None,
+                        avatar_url: (!avatar.is_empty()).then_some(avatar),
+                        verified: false,
+                    }));
                 }
             }
         }
         match v {
             Value::Object(m) => {
-                for v in m.values() {
-                    visit(v, out, ids)
+                for child in m.values() {
+                    visit(child, out, ids);
                 }
             }
             Value::Array(a) => {
-                for v in a {
-                    visit(v, out, ids)
+                for child in a {
+                    visit(child, out, ids);
                 }
             }
-            _ => (),
+            _ => {}
         }
     }
     visit(value, &mut items, &mut ids);

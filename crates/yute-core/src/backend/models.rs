@@ -102,6 +102,25 @@ pub struct ChannelCard {
     pub verified: bool,
 }
 
+/// Current TV subscriptions expose channel tabs as FEsubscriptions + opaque params
+/// instead of a UC browse id. Keep that endpoint typed without pretending it is a
+/// normal YouTube channel identity.
+pub const SUBSCRIPTION_TAB_PREFIX: &str = "yute:subscription-tab:";
+pub const SUBSCRIPTIONS_BROWSE_ID: &str = "FEsubscriptions";
+
+pub fn subscription_tab_card_id(params: &str) -> String {
+    format!("{SUBSCRIPTION_TAB_PREFIX}{params}")
+}
+
+pub fn subscription_tab_params(id: &str) -> Option<&str> {
+    id.strip_prefix(SUBSCRIPTION_TAB_PREFIX)
+        .filter(|p| !p.is_empty())
+}
+
+pub fn youtube_channel_id(id: &str) -> Option<&str> {
+    (id.starts_with("UC") && id.len() == 24).then_some(id)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Card {
     Video(VideoCard),

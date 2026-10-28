@@ -2246,14 +2246,25 @@ fn fetch_channel(app: &mut App, tx: Sender<AppEvent>) {
     let Some(yute::app::DetailRoute::Channel(route)) = &app.detail_route else {
         return;
     };
-    let id = route.channel.id.clone();
-    let params = route.tabs.get(route.active).and_then(|t| t.params.clone());
+    let route_id = route.channel.id.clone();
+    let (browse_id, params) =
+        if let Some(params) = yute::backend::models::subscription_tab_params(&route_id) {
+            (
+                yute::backend::models::SUBSCRIPTIONS_BROWSE_ID.to_string(),
+                Some(params.to_string()),
+            )
+        } else {
+            (
+                route_id.clone(),
+                route.tabs.get(route.active).and_then(|t| t.params.clone()),
+            )
+        };
     let backend = Arc::clone(&app.backend);
     let generation = app.begin_feed_request();
     tokio::spawn(async move {
-        let result = backend.channel_page(&id, params.as_deref()).await;
+        let result = backend.channel_page(&browse_id, params.as_deref()).await;
         let _ = tx
-            .send(AppEvent::ChannelLoaded(generation, id, result))
+            .send(AppEvent::ChannelLoaded(generation, route_id, result))
             .await;
     });
 }
@@ -4301,13 +4312,16 @@ fn mutate_card(app: &mut App, card: Card, action: yute::actions::ItemAction, tx:
             let Some(channel) = yute::actions::channel_of(&card) else {
                 return;
             };
-            let current = app
-                .subscriptions
-                .get(&channel.id)
-                .copied()
-                .unwrap_or_else(|| app.subscribed_channels.iter().any(|c| c.id() == channel.id));
+            let Some(channel_id) =
+                yute::backend::models::youtube_channel_id(&channel.id).map(str::to_owned)
+            else {
+                app.status_text =
+                    "Subscription action unavailable for this subscriptions-tab endpoint".into();
+                return;
+            };
+            let current = app.subscriptions.get(&channel_id).copied().unwrap_or(false);
             AccountMutation::Subscribe {
-                channel_id: channel.id,
+                channel_id,
                 subscribed: !current,
             }
         }

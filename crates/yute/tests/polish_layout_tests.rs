@@ -103,12 +103,18 @@ fn shell_geometry_and_rendering_matrix() {
             // Complete row count follows physical image geometry, without forcing
             // a shallow thumbnail to satisfy a fixed row count.
             if app.rendered_columns > 1 && screen != Screen::ChannelView {
-                let geometry = GridGeometry::new(
-                    shell.content,
-                    &app.config.grid,
-                    app.cell_w_px,
-                    app.cell_h_px,
-                );
+                let grid_area = if screen == Screen::PlaylistView {
+                    Rect::new(
+                        shell.content.x,
+                        shell.content.y + 1,
+                        shell.content.width,
+                        shell.content.height.saturating_sub(1),
+                    )
+                } else {
+                    shell.content
+                };
+                let geometry =
+                    GridGeometry::new(grid_area, &app.config.grid, app.cell_w_px, app.cell_h_px);
                 if !matches!(screen, Screen::Settings | Screen::Help) {
                     assert_eq!(app.rendered_rows, geometry.visible_rows);
                 }
@@ -128,7 +134,7 @@ fn shell_geometry_and_rendering_matrix() {
     }
 }
 #[test]
-fn selected_card_tint_never_reaches_gutters_or_border() {
+fn selected_grid_card_uses_border_only_without_fill_tint() {
     let mut app = app();
     app.theme = yute::theme::Theme::youtube_dark();
     let shell = ShellLayout::new(Rect::new(0, 0, 135, 31), &app);
@@ -140,20 +146,17 @@ fn selected_card_tint_never_reaches_gutters_or_border() {
     );
     let mut terminal = Terminal::new(TestBackend::new(135, 31)).unwrap();
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
-    let inner = Rect::new(
-        shell.content.x + g.first_column_offset + 1,
-        shell.content.y + 1,
-        g.card_width - 2,
-        g.card_height - 2,
-    );
+    let buffer = terminal.backend().buffer();
+    let selected_x = shell.content.x + g.first_column_offset;
+    let selected_y = shell.content.y;
+    assert_eq!(buffer[(selected_x, selected_y)].fg, app.theme.accent);
     for y in shell.content.y..shell.content.bottom() {
         for x in shell.content.x..shell.content.right() {
-            if terminal.backend().buffer()[(x, y)].bg == app.theme.surface_hover {
-                assert!(
-                    inner.contains((x, y).into()),
-                    "tint at {x},{y} outside {inner:?}"
-                );
-            }
+            assert_ne!(
+                buffer[(x, y)].bg,
+                app.theme.surface_hover,
+                "selection fill leaked into grid at {x},{y}"
+            );
         }
     }
 }
@@ -309,6 +312,14 @@ fn home_and_search_share_framed_two_row_layout_at_screenshot_geometry() {
             buffer[(x + g.card_width - 1, y + g.card_height - 1)].symbol(),
             "┘"
         );
+        assert!(
+            g.complete_rows >= 2,
+            "screenshot geometry must fit two complete rows"
+        );
+        let second_y = y + g.row_stride;
+        assert_eq!(buffer[(x, second_y)].symbol(), "┌");
+        assert_eq!(buffer[(x, second_y + g.card_height - 1)].symbol(), "└");
+        assert!(second_y + g.card_height <= shell.content.bottom());
         if screen == Screen::Search {
             let header = (0..113)
                 .map(|x| buffer[(x, 0)].symbol())
@@ -441,7 +452,7 @@ fn focus_frames_and_single_row_header_stay_clear_with_hidden_sidebar() {
 }
 
 #[test]
-fn grid_bounds_complete_and_partial_rows_across_terminal_sizes() {
+fn grid_bounds_render_complete_rows_only_across_terminal_sizes() {
     let mut app = app();
     for width in (80..=300).step_by(5) {
         for height in 24..=80 {
@@ -449,14 +460,11 @@ fn grid_bounds_complete_and_partial_rows_across_terminal_sizes() {
                 app.sidebar_expanded = sidebar;
                 let shell = ShellLayout::new(Rect::new(0, 0, width, height), &app);
                 let g = GridGeometry::new(shell.content, &app.config.grid, 15., 38.);
-                assert!(g.visible_rows >= g.complete_rows);
+                assert_eq!(g.visible_rows, g.complete_rows);
                 assert!(
                     g.card_width * g.columns as u16 + 2 * (g.columns - 1) as u16
                         <= shell.content.width
                 );
-                let used = g.row_stride * (g.visible_rows - 1) as u16;
-                assert!(used < shell.content.height);
-                assert!(shell.content.height - used <= g.row_stride);
                 assert_eq!(
                     g.complete_rows,
                     if shell.content.height >= g.card_height {
@@ -465,6 +473,13 @@ fn grid_bounds_complete_and_partial_rows_across_terminal_sizes() {
                         1
                     }
                 );
+                if shell.content.height >= g.card_height {
+                    let last_bottom =
+                        g.card_height + g.row_stride * g.visible_rows.saturating_sub(1) as u16;
+                    assert!(last_bottom <= shell.content.height);
+                    let next_bottom = g.card_height + g.row_stride * g.visible_rows as u16;
+                    assert!(next_bottom > shell.content.height);
+                }
             }
         }
     }

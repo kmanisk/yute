@@ -41,15 +41,34 @@ impl GridGeometry {
             .width
             .saturating_sub(2 * columns.saturating_sub(1) as u16)
             / columns as u16;
-        let card_width = slot_width.clamp(1, 40);
+        let natural_width = slot_width.clamp(1, 40);
+        let minimum_width = 28.min(natural_width);
+        let aspect_height_for = |width: u16| {
+            (width.saturating_sub(2) as f32 * cell_w / cell_h.max(1.0) * 9.0 / 16.0).round() as u16
+        };
+
+        // Prefer two complete rows at normal desktop heights. Wide terminals can
+        // otherwise grow cards to 40 cells, making the second row only half-visible
+        // even though two slightly narrower cards fit cleanly. Column count still uses
+        // the configured minimum width; only the rendered cards may contract to the
+        // safe 28-cell floor. Keep the thumbnail's physical 16:9 ratio.
+        let mut card_width = natural_width;
+        let minimum_height = aspect_height_for(minimum_width).max(1).saturating_add(6);
+        if area.height >= minimum_height.saturating_mul(2) {
+            while card_width > minimum_width {
+                let current_height = aspect_height_for(card_width).max(1).saturating_add(6);
+                if area.height >= current_height.saturating_mul(2) {
+                    break;
+                }
+                card_width -= 1;
+            }
+        }
+
         let column_stride = card_width.saturating_add(2);
         let occupied = card_width * columns as u16 + 2 * columns.saturating_sub(1) as u16;
         let first_column_offset = area.width.saturating_sub(occupied) / 2;
         let thumbnail_width = card_width.saturating_sub(2);
-        let aspect_height =
-            (thumbnail_width as f32 * cell_w / cell_h.max(1.0) * 9.0 / 16.0).round() as u16;
-        // Preserve the thumbnail rectangle's physical 16:9 aspect ratio. The
-        // viewport controls visible rows, rather than cropping artwork to force rows.
+        let aspect_height = aspect_height_for(card_width);
         let thumbnail_height = aspect_height.max(1);
         let title_rows = 2;
         let card_height = thumbnail_height.saturating_add(6);
@@ -72,7 +91,9 @@ impl GridGeometry {
             thumbnail_height,
             title_rows,
             card_height,
-            visible_rows: area.height.div_ceil(row_stride.max(1)) as usize,
+            // Never advertise/render a clipped trailing row. Navigation scrolls the
+            // next row fully into view instead of showing thumbnail/title fragments.
+            visible_rows: complete_rows as usize,
             complete_rows: complete_rows as usize,
             row_stride,
         }
@@ -350,13 +371,6 @@ fn render_grid_card(
         height: area.height.saturating_sub(2),
     };
 
-    if is_selected {
-        f.render_widget(
-            Block::default().style(Style::default().patch(app.theme.style("selection"))),
-            inner,
-        );
-    }
-
     if inner.width < 8 || inner.height < 4 {
         return;
     }
@@ -613,11 +627,7 @@ fn render_grid_card(
         )));
     }
     f.render_widget(
-        Paragraph::new(line_spans).style(if is_selected {
-            app.theme.style("selection")
-        } else {
-            app.theme.style("text")
-        }),
+        Paragraph::new(line_spans).style(app.theme.style("text")),
         title_area,
     );
 
