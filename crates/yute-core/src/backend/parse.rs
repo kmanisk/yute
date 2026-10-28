@@ -54,8 +54,15 @@ pub fn extract_text(val: &Value) -> String {
 }
 
 fn thumbnail_source(sources: &[Value]) -> Option<&Value> {
+    let valid = |value: &&Value| {
+        value
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|url| !url.trim().is_empty())
+    };
     sources
         .iter()
+        .filter(valid)
         .filter(|v| {
             v.get("width")
                 .and_then(Value::as_u64)
@@ -75,7 +82,7 @@ fn thumbnail_source(sources: &[Value]) -> Option<&Value> {
                 .total_cmp(&score(b))
                 .then_with(|| b["width"].as_u64().cmp(&a["width"].as_u64()))
         })
-        .or_else(|| sources.last())
+        .or_else(|| sources.iter().rev().find(valid))
 }
 
 pub fn extract_best_thumbnail(val: &Value) -> String {
@@ -851,11 +858,8 @@ pub fn parse_card(val: &Value) -> Option<Card> {
         let id = cr.get("channelId").and_then(|s| s.as_str())?.to_string();
         let title = extract_text(cr.get("title")?);
         let subscribers = cr.get("subscriberCountText").map(extract_text);
-        let avatar_url = cr
-            .get("thumbnail")
-            .or_else(|| cr.get("avatar"))
-            .map(extract_best_thumbnail)
-            .filter(|s| !s.is_empty());
+        let avatar = extract_best_thumbnail(cr);
+        let avatar_url = (!avatar.is_empty()).then_some(avatar);
         return Some(Card::Channel(ChannelCard {
             id,
             title,

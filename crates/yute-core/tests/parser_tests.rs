@@ -784,3 +784,18 @@ fn nested_avatar_views_and_unknown_sizing_urls_are_safe() {
         "https://yt3.ggpht.com/opaque=w200-h200-c-k-no-rj?x=1"
     );
 }
+
+#[test]
+fn channel_avatar_view_model_ignores_empty_sources() {
+    let card = yute_core::backend::parse::parse_card(&serde_json::json!({
+        "channelRenderer": {"channelId":"UCfixture", "title":{"simpleText":"Channel"},
+            "avatarViewModel":{"image":{"sources":[{"url":"//yt3.ggpht.com/valid=s88-c-k-no-rj"},{"url":""}]}}}
+    })).unwrap();
+    let yute_core::backend::models::Card::Channel(channel) = card else {
+        panic!("typed channel expected");
+    };
+    assert_eq!(
+        channel.avatar_url.as_deref(),
+        Some("https://yt3.ggpht.com/valid=s88-c-k-no-rj")
+    );
+}
