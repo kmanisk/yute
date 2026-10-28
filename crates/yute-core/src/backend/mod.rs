@@ -143,6 +143,14 @@ impl Backend for BackendChain {
     }
 
     async fn continue_feed(&self, token: &str) -> anyhow::Result<FeedPage> {
+        if token.starts_with("yute:account:") {
+            return self
+                .backends
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("No backend"))?
+                .continue_feed(token)
+                .await;
+        }
         let mut last_err = anyhow::anyhow!("No backends configured");
         for b in &self.backends {
             match b.continue_feed(token).await {
@@ -155,54 +163,27 @@ impl Backend for BackendChain {
     }
 
     async fn subscriptions(&self) -> anyhow::Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let mut last_err = anyhow::anyhow!("No backends configured");
-        let mut empty_res = None;
-        for b in &self.backends {
-            match b.subscriptions().await {
-                Ok(res) if !res.items.is_empty() => return Ok(res),
-                Ok(res) => empty_res = Some(res),
-                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
-                Err(e) => last_err = e,
-            }
-        }
-        empty_res.map(Ok).unwrap_or(Err(last_err))
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No backend"))?
+            .subscriptions()
+            .await
     }
 
     async fn history(&self) -> anyhow::Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let mut last_err = anyhow::anyhow!("No backends configured");
-        let mut empty_res = None;
-        for b in &self.backends {
-            match b.history().await {
-                Ok(res) if !res.items.is_empty() => return Ok(res),
-                Ok(res) => empty_res = Some(res),
-                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
-                Err(e) => last_err = e,
-            }
-        }
-        empty_res.map(Ok).unwrap_or(Err(last_err))
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No backend"))?
+            .history()
+            .await
     }
 
     async fn watch_later(&self) -> anyhow::Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let mut last_err = anyhow::anyhow!("No backends configured");
-        let mut empty_res = None;
-        for b in &self.backends {
-            match b.watch_later().await {
-                Ok(res) if !res.items.is_empty() => return Ok(res),
-                Ok(res) => empty_res = Some(res),
-                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
-                Err(e) => last_err = e,
-            }
-        }
-        empty_res.map(Ok).unwrap_or(Err(last_err))
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No backend"))?
+            .watch_later()
+            .await
     }
 
     async fn playlist_destinations(&self, video: &str) -> anyhow::Result<FeedPage> {
@@ -220,25 +201,21 @@ impl Backend for BackendChain {
             .await
     }
     async fn playlists(&self) -> anyhow::Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let mut last_err = anyhow::anyhow!("No backends configured");
-        let mut empty_res = None;
-        for b in &self.backends {
-            match b.playlists().await {
-                Ok(res) if !res.items.is_empty() => return Ok(res),
-                Ok(res) => empty_res = Some(res),
-                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
-                Err(e) => last_err = e,
-            }
-        }
-        empty_res.map(Ok).unwrap_or(Err(last_err))
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No backend"))?
+            .playlists()
+            .await
     }
 
     async fn playlist(&self, id: &str) -> anyhow::Result<FeedPage> {
-        if self.is_anonymous() && matches!(id, "LL" | "WL" | "VLLL" | "VLWL") {
-            return Ok(FeedPage::default());
+        if !self.is_anonymous() || matches!(id, "LL" | "WL" | "VLLL" | "VLWL") {
+            return self
+                .backends
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("No backend"))?
+                .playlist(id)
+                .await;
         }
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
@@ -374,57 +351,51 @@ impl Backend for BackendChain {
     }
 
     async fn account_info(&self) -> anyhow::Result<(String, String)> {
-        for b in &self.backends {
-            if let Ok(info) = b.account_info().await {
-                return Ok(info);
-            }
-        }
-        anyhow::bail!("No backend could provide account info")
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .account_info()
+            .await
     }
 
     async fn like_video(&self, video_id: &str) -> anyhow::Result<bool> {
-        for b in &self.backends {
-            if let Ok(res) = b.like_video(video_id).await {
-                return Ok(res);
-            }
-        }
-        anyhow::bail!("Failed to like video")
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .like_video(video_id)
+            .await
     }
 
     async fn dislike_video(&self, video_id: &str) -> anyhow::Result<bool> {
-        for b in &self.backends {
-            if let Ok(res) = b.dislike_video(video_id).await {
-                return Ok(res);
-            }
-        }
-        anyhow::bail!("Failed to dislike video")
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .dislike_video(video_id)
+            .await
     }
 
     async fn remove_rating(&self, video_id: &str) -> anyhow::Result<()> {
-        for b in &self.backends {
-            if let Ok(()) = b.remove_rating(video_id).await {
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Failed to remove rating")
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .remove_rating(video_id)
+            .await
     }
 
     async fn subscribe_channel(&self, channel_id: &str) -> anyhow::Result<()> {
-        for b in &self.backends {
-            if let Ok(()) = b.subscribe_channel(channel_id).await {
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Failed to subscribe to channel")
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .subscribe_channel(channel_id)
+            .await
     }
 
     async fn unsubscribe_channel(&self, channel_id: &str) -> anyhow::Result<()> {
-        for b in &self.backends {
-            if let Ok(()) = b.unsubscribe_channel(channel_id).await {
-                return Ok(());
-            }
-        }
-        anyhow::bail!("Failed to unsubscribe from channel")
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .unsubscribe_channel(channel_id)
+            .await
     }
 
     async fn fetch_ryd_votes(&self, video_id: &str) -> anyhow::Result<(u64, u64, f64)> {
@@ -437,27 +408,21 @@ impl Backend for BackendChain {
     }
 
     async fn comment_action(&self, action: &str) -> anyhow::Result<()> {
-        let mut error = anyhow::anyhow!("Comment reactions unavailable");
-        for backend in &self.backends {
-            match backend.comment_action(action).await {
-                Ok(()) => return Ok(()),
-                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
-                Err(e) => error = e,
-            }
-        }
-        Err(error)
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .comment_action(action)
+            .await
     }
+
     async fn submit_comment(&self, params: &str, text: &str, reply: bool) -> anyhow::Result<()> {
-        let mut error = anyhow::anyhow!("Comment posting unavailable");
-        for backend in &self.backends {
-            match backend.submit_comment(params, text, reply).await {
-                Ok(()) => return Ok(()),
-                Err(e) if e.is::<crate::accounts::AccountCancelled>() => return Err(e),
-                Err(e) => error = e,
-            }
-        }
-        Err(error)
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .submit_comment(params, text, reply)
+            .await
     }
+
     async fn fetch_comments(&self, continuation: &str) -> anyhow::Result<CommentsBatch> {
         for b in &self.backends {
             if let Ok(res) = b.fetch_comments(continuation).await {

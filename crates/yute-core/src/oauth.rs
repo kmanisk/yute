@@ -155,7 +155,7 @@ pub async fn ensure_fresh(
     if force && context.access_token != original {
         return Ok(());
     }
-    if !force && context.token_expires_at.is_none_or(|exp| exp > now() + 60) {
+    if !force && context.token_expires_at.is_some_and(|exp| exp > now() + 60) {
         return Ok(());
     }
     let result = context.refresh_access_token(client).await;

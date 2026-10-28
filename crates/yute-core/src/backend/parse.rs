@@ -119,6 +119,19 @@ pub fn extract_best_thumbnail(val: &Value) -> String {
             return u;
         }
     }
+    for key in [
+        "avatar",
+        "avatarViewModel",
+        "thumbnail",
+        "thumbnailViewModel",
+    ] {
+        if let Some(nested) = val.get(key) {
+            let url = extract_best_thumbnail(nested);
+            if !url.is_empty() {
+                return url;
+            }
+        }
+    }
     String::new()
 }
 
@@ -838,7 +851,11 @@ pub fn parse_card(val: &Value) -> Option<Card> {
         let id = cr.get("channelId").and_then(|s| s.as_str())?.to_string();
         let title = extract_text(cr.get("title")?);
         let subscribers = cr.get("subscriberCountText").map(extract_text);
-        let avatar_url = cr.get("thumbnail").map(extract_best_thumbnail);
+        let avatar_url = cr
+            .get("thumbnail")
+            .or_else(|| cr.get("avatar"))
+            .map(extract_best_thumbnail)
+            .filter(|s| !s.is_empty());
         return Some(Card::Channel(ChannelCard {
             id,
             title,
@@ -895,7 +912,9 @@ pub fn parse_chips(val: &Value) -> Vec<Chip> {
 
 pub fn parse_continuation(val: &Value) -> Option<String> {
     if let Some(token) = val
-        .pointer("/continuationEndpoint/continuationCommand/token")
+        .pointer("/nextContinuationData/continuation")
+        .or_else(|| val.pointer("/reloadContinuationData/continuation"))
+        .or_else(|| val.pointer("/continuationEndpoint/continuationCommand/token"))
         .or_else(|| {
             val.pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
         })
@@ -1642,6 +1661,8 @@ pub fn parse_channel_page(value: &Value, id: &str) -> crate::backend::models::Ch
         avatar_url: metadata
             .get("avatar")
             .or_else(|| header.get("avatar"))
+            .or_else(|| header.get("thumbnail"))
+            .or_else(|| find(value, "avatarViewModel").and_then(|v| v.get("image")))
             .map(extract_best_thumbnail)
             .filter(|s| !s.is_empty()),
         verified: false,

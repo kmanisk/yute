@@ -72,12 +72,37 @@ impl Accounts {
         );
         if let Ok(bytes) = std::fs::read(crate::credentials::data_dir().join("accounts.json")) {
             if let Ok(snapshot) = serde_json::from_slice::<Bootstrap>(&bytes) {
-                accounts.profiles = snapshot.profiles;
+                accounts.profiles = snapshot
+                    .profiles
+                    .into_iter()
+                    .map(|mut profile| {
+                        if profile.id == "cookies" {
+                            profile.id = "legacy-relogin".into();
+                            profile.name = "Legacy account".into();
+                            profile.status = AccountStatus::NeedsLogin;
+                        }
+                        profile
+                    })
+                    .collect();
                 if !accounts.profiles.iter().any(|p| p.id == ANONYMOUS) {
                     accounts.profiles.insert(0, Account::anonymous());
                 }
-                if !anonymous && accounts.profiles.iter().any(|p| p.id == snapshot.active) {
-                    accounts.active = snapshot.active;
+                let active = if snapshot.active == "cookies" {
+                    "legacy-relogin".into()
+                } else {
+                    snapshot.active
+                };
+                if !anonymous && accounts.profiles.iter().any(|p| p.id == active) {
+                    if active == "legacy-relogin" {
+                        accounts.sessions.insert(
+                            active.clone(),
+                            AuthContext {
+                                needs_login: true,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    accounts.active = active;
                 }
             }
         }
@@ -102,10 +127,7 @@ impl Accounts {
                 legacy.clone(),
                 crate::config::resolve_path("~/.config/ytui/auth.json"),
             ],
-            &[
-                cookies.clone(),
-                crate::config::resolve_path("~/.config/ytui/cookies.txt"),
-            ],
+            &[],
         )?;
         auth.load_auth_with_mode(&crate::credentials::path(), &cookies, &config.backend.auth)?;
         let mut accounts = Self::from_storage(
@@ -195,7 +217,7 @@ impl Accounts {
                     sapisid: None,
                     page_id: account.page_id.clone(),
                     account_id: Some(id.clone()),
-                    needs_login: account.needs_login,
+                    needs_login: account.needs_login || account.refresh_token.is_empty(),
                     auth_file_path: Some(path.clone()),
                     cancelled: tokio_util::sync::CancellationToken::new(),
                     refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -203,26 +225,33 @@ impl Accounts {
                 },
             );
         }
-        // Imported cookie sessions are selectable without inventing OAuth tokens.
-        if current.cookie_header.is_some() {
+        // A migration marker has no credentials and can only request TV re-login.
+        if profiles.len() == 1
+            && (current.needs_login
+                || current.cookie_header.is_some()
+                || !storage.cookie_jars.is_empty())
+        {
             profiles.push(Account {
-                id: "cookies".into(),
-                name: "Cookie session".into(),
+                id: "legacy-relogin".into(),
+                name: "Legacy account".into(),
                 handle: String::new(),
-                initial: "C".into(),
+                initial: "L".into(),
                 channel_id: None,
                 avatar_url: None,
-                status: AccountStatus::Ok,
+                status: AccountStatus::NeedsLogin,
             });
-            let mut cookie_session = current.clone();
-            cookie_session.auth_file_path = None;
-            cookie_session.cancelled = tokio_util::sync::CancellationToken::new();
-            sessions.insert("cookies".into(), cookie_session);
+            sessions.insert(
+                "legacy-relogin".into(),
+                AuthContext {
+                    needs_login: true,
+                    hl: current.hl.clone(),
+                    gl: current.gl.clone(),
+                    ..Default::default()
+                },
+            );
         }
         let active = if anonymous {
             ANONYMOUS.into()
-        } else if current.cookie_header.is_some() && current.access_token.is_none() {
-            "cookies".into()
         } else {
             storage
                 .active_account
@@ -612,11 +641,11 @@ mod anonymous_tests {
         assert!(auth.access_token.is_none() && auth.cookie_header.is_none());
         let chain = BackendChain::new(vec![Box::new(InnerTubeBackend::new(auth))]);
         assert!(chain.is_anonymous());
-        assert!(chain.subscriptions().await.unwrap().items.is_empty());
-        assert!(chain.history().await.unwrap().items.is_empty());
-        assert!(chain.watch_later().await.unwrap().items.is_empty());
-        assert!(chain.playlists().await.unwrap().items.is_empty());
-        assert!(chain.playlist("LL").await.unwrap().items.is_empty());
+        assert!(chain.subscriptions().await.is_err());
+        assert!(chain.history().await.is_err());
+        assert!(chain.watch_later().await.is_err());
+        assert!(chain.playlists().await.is_err());
+        assert!(chain.playlist("LL").await.is_err());
         assert_eq!(crate::config::Config::default().backend.auth, "guest");
     }
 }
@@ -625,4 +654,28 @@ mod anonymous_tests {
 struct Bootstrap {
     profiles: Vec<Account>,
     active: String,
+}
+
+#[cfg(test)]
+mod legacy_session_tests {
+    use super::*;
+    #[test]
+    fn preserved_cookie_store_requires_tv_relogin() {
+        let mut storage = AuthStorage::default();
+        storage
+            .cookie_jars
+            .insert("old".into(), "legacy-data".into());
+        let accounts = Accounts::from_storage(
+            PathBuf::from("unused"),
+            storage,
+            &AuthContext::default(),
+            false,
+        );
+        assert_eq!(accounts.active_id(), "legacy-relogin");
+        assert_eq!(accounts.profiles[1].status, AccountStatus::NeedsLogin);
+        assert!(accounts.current_context().needs_login);
+        assert!(!accounts.current_context().has_oauth());
+        assert!(accounts.current_context().cookie_header.is_none());
+        assert_eq!(accounts.storage.cookie_jars.len(), 1);
+    }
 }

@@ -4,7 +4,6 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, Result};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, COOKIE, ORIGIN, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
-use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -177,6 +176,38 @@ impl Default for AuthContext {
 }
 
 impl AuthContext {
+    /// Shared frontend configuration. OAuth always uses a coherent TV context.
+    pub fn from_config(config: &crate::config::Config) -> Self {
+        let mut auth = Self {
+            hl: config.backend.hl.clone(),
+            gl: config.backend.gl.clone(),
+            ..Default::default()
+        };
+        if config.backend.client == "web" && config.backend.auth == "guest" {
+            auth.client_name = "WEB".into();
+            auth.client_version = "2.20240101.00.00".into();
+        } else {
+            if !config.backend.client_name.is_empty() {
+                auth.client_name = config.backend.client_name.clone();
+            }
+            if !config.backend.client_version.is_empty() {
+                auth.client_version = config.backend.client_version.clone();
+            }
+        }
+        auth
+    }
+    fn client_identity(&self) -> (&str, &str) {
+        if self.has_oauth() && self.client_name != "TVHTML5" {
+            ("TVHTML5", DEFAULT_CLIENT_VERSION)
+        } else {
+            (&self.client_name, &self.client_version)
+        }
+    }
+    pub fn has_oauth(&self) -> bool {
+        self.access_token.as_ref().is_some_and(|t| !t.is_empty())
+            || self.refresh_token.as_ref().is_some_and(|t| !t.is_empty())
+    }
+
     pub fn load_auth(&mut self, auth_path: &Path, cookies_path: &Path) -> Result<()> {
         self.load_auth_with_mode(auth_path, cookies_path, "tv_oauth")
     }
@@ -187,32 +218,27 @@ impl AuthContext {
         cookies_path: &Path,
         auth_mode: &str,
     ) -> Result<()> {
+        // Legacy material stays on disk/in the encrypted store, but is never sent.
+        self.cookies.clear();
+        self.cookie_header = None;
+        self.sapisid = None;
         self.auth_file_path = Some(auth_path.to_path_buf());
-        match auth_mode {
-            "guest" => {
-                self.auth_file_path = None;
-                self.visitor_data = None;
-                self.page_id = None;
-                self.account_id = None;
-                self.needs_login = false;
-                self.sapisid = None;
-                self.token_expires_at = None;
-                self.access_token = None;
-                self.refresh_token = None;
-                self.cookies.clear();
-                self.cookie_header = None;
-            }
-            "cookies" => {
-                self.load_cookies_from_path(cookies_path)?;
-            }
-            _ => {
-                if auth_path.exists() || crate::credentials::path().exists() {
-                    self.load_auth_file(auth_path)?;
-                }
-                if self.access_token.is_none() {
-                    self.load_cookies_from_path(cookies_path)?;
-                }
-            }
+        if auth_mode == "guest" {
+            self.auth_file_path = None;
+            self.visitor_data = None;
+            self.page_id = None;
+            self.account_id = None;
+            self.needs_login = false;
+            self.token_expires_at = None;
+            self.access_token = None;
+            self.refresh_token = None;
+            return Ok(());
+        }
+        if auth_path.exists() || crate::credentials::path().exists() {
+            self.load_auth_file(auth_path)?;
+        }
+        if self.access_token.is_none() && self.refresh_token.is_none() {
+            self.needs_login = cookies_path.exists() || auth_mode == "cookies";
         }
         Ok(())
     }
@@ -339,14 +365,7 @@ impl AuthContext {
                 crate::config::resolve_path("~/.config/ytui/cookies.txt"),
             ],
         )?;
-        let key = crate::credentials::cookie_key(path);
-        if let Some(text) = storage
-            .cookie_jars
-            .get(&key)
-            .or_else(|| storage.cookie_jars.values().next())
-        {
-            self.parse_netscape_cookies(text.expose());
-        }
+        self.needs_login = !storage.cookie_jars.is_empty();
         Ok(())
     }
 
@@ -400,22 +419,6 @@ impl AuthContext {
                 .join("; ");
             self.cookie_header = Some(header_str.into());
         }
-    }
-
-    pub fn generate_sapisid_hash(&self) -> Option<String> {
-        let sapisid = self.sapisid.as_ref()?;
-        let now_sec = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let payload =
-            zeroize::Zeroizing::new(format!("{} {} {}", now_sec, sapisid.expose(), TV_ORIGIN));
-        let mut hasher = Sha1::new();
-        hasher.update(payload.as_bytes());
-        let hash = format!("{:x}", hasher.finalize());
-
-        Some(format!("SAPISIDHASH {}_{}", now_sec, hash))
     }
 
     pub async fn request_device_code(client: &reqwest::Client) -> Result<DeviceCodeResponse> {
@@ -525,17 +528,14 @@ impl AuthContext {
         headers.insert(REFERER, HeaderValue::from_static(TV_REFERER));
         headers.insert("X-Origin", HeaderValue::from_static(TV_ORIGIN));
 
-        let client_name_id = if self.client_name == "TVHTML5" {
-            "7"
-        } else {
-            "1"
-        };
+        let (name, version) = self.client_identity();
+        let client_name_id = if name == "TVHTML5" { "7" } else { "1" };
         headers.insert(
             "X-YouTube-Client-Name",
             HeaderValue::from_static(client_name_id),
         );
 
-        if let Ok(val) = HeaderValue::from_str(&self.client_version) {
+        if let Ok(val) = HeaderValue::from_str(version) {
             headers.insert("X-YouTube-Client-Version", val);
         }
 
@@ -557,18 +557,6 @@ impl AuthContext {
             if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", token.expose())) {
                 headers.insert(AUTHORIZATION, val);
             }
-        } else {
-            if let Some(ref cookie_str) = self.cookie_header {
-                if let Ok(val) = HeaderValue::from_str(cookie_str) {
-                    headers.insert(COOKIE, val);
-                }
-            }
-
-            if let Some(auth_hash) = self.generate_sapisid_hash() {
-                if let Ok(val) = HeaderValue::from_str(&auth_hash) {
-                    headers.insert(AUTHORIZATION, val);
-                }
-            }
         }
 
         for key in [
@@ -584,10 +572,11 @@ impl AuthContext {
     }
 
     pub fn build_client_context(&self) -> serde_json::Value {
-        let is_tv = self.client_name == "TVHTML5";
+        let (name, version) = self.client_identity();
+        let is_tv = name == "TVHTML5";
         let mut client_obj = serde_json::json!({
-            "clientName": self.client_name,
-            "clientVersion": self.client_version,
+            "clientName": name,
+            "clientVersion": version,
             "hl": self.hl,
             "gl": self.gl,
             "utcOffsetMinutes": 330,

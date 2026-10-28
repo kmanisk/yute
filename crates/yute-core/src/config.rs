@@ -64,7 +64,7 @@ impl Default for GeneralConfig {
         Self {
             start_anonymous: false,
             graphics: "auto".to_string(),
-            icons: "ascii".to_string(),
+            icons: "auto".to_string(),
             theme: "youtube-dark".to_string(),
             mouse: false,
             stop_mpv_on_quit: true,
@@ -155,7 +155,7 @@ pub struct GridConfig {
 }
 
 fn default_columns() -> u16 {
-    3
+    0
 }
 
 fn default_show_shorts() -> bool {
@@ -165,8 +165,8 @@ fn default_show_shorts() -> bool {
 impl Default for GridConfig {
     fn default() -> Self {
         Self {
-            columns: 3,
-            min_card_width: 26,
+            columns: 0,
+            min_card_width: 30,
             show_shorts: true,
             sidebar_expanded: false,
         }
@@ -357,6 +357,11 @@ pub fn cache_dir() -> PathBuf {
 
 impl Config {
     pub fn load() -> Self {
+        Self::load_checked().unwrap_or_default()
+    }
+
+    /// Diagnostic callers must not mistake malformed configuration for defaults.
+    pub fn load_checked() -> anyhow::Result<Self> {
         let dir = config_dir();
         let preferred = dir.join("config.toml");
         let path = if preferred.exists() {
@@ -364,19 +369,24 @@ impl Config {
         } else {
             resolve_path("~/.config/ytui/config.toml")
         };
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(mut cfg) = toml::from_str::<Config>(&content) {
-                    if cfg.backend.cookies_file == "~/.config/ytui/cookies.txt"
-                        && dir.join("cookies.txt").exists()
-                    {
-                        cfg.backend.cookies_file = "~/.config/yute/cookies.txt".into();
-                    }
-                    return cfg;
-                }
-            }
+        if !path.exists() {
+            return Ok(Self::default());
         }
-        Config::default()
+        let content = fs::read_to_string(&path)
+            .map_err(|_| anyhow::anyhow!("Cannot read config.toml; check file permissions"))?;
+        let mut cfg = Self::parse_checked(&content)?;
+        if cfg.backend.auth == "cookies" {
+            cfg.backend.auth = "tv_oauth".into();
+        }
+        if cfg.backend.cookies_file == "~/.config/ytui/cookies.txt"
+            && dir.join("cookies.txt").exists()
+        {
+            cfg.backend.cookies_file = "~/.config/yute/cookies.txt".into();
+        }
+        Ok(cfg)
+    }
+    pub fn parse_checked(content: &str) -> anyhow::Result<Self> {
+        toml::from_str(content).map_err(|_| anyhow::anyhow!("Invalid config.toml: malformed TOML, invalid field types or missing required fields (values redacted)"))
     }
 
     #[allow(dead_code)]

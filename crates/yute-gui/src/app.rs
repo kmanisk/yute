@@ -80,19 +80,12 @@ pub struct GuiAppInner {
 
 impl GuiApp {
     pub fn new(app: &Application, cfg: Config) -> anyhow::Result<Self> {
-        let auth = AuthContext::default();
+        let auth = AuthContext::from_config(&cfg);
         let credentials_config = cfg.clone();
-
-        let cookies_from_browser =
-            if cfg.backend.auth == "cookies" && !cfg.backend.cookies_from_browser.is_empty() {
-                Some(cfg.backend.cookies_from_browser.clone())
-            } else {
-                None
-            };
 
         let auth_arc = Arc::new(Mutex::new(auth));
         let inner_backend = Box::new(InnerTubeBackend::from_arc(Arc::clone(&auth_arc)));
-        let ytdlp_backend = Box::new(YtDlpBackend::new(None, cookies_from_browser));
+        let ytdlp_backend = Box::new(YtDlpBackend::new(None, None));
         let backend: Arc<dyn Backend> =
             Arc::new(BackendChain::new(vec![inner_backend, ytdlp_backend]));
 
@@ -231,7 +224,7 @@ impl GuiApp {
                 tokio::task::spawn_blocking(move || {
                     yute_core::accounts::Accounts::load_session(
                         &credentials_config,
-                        AuthContext::default(),
+                        AuthContext::from_config(&credentials_config),
                     )
                 })
                 .await

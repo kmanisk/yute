@@ -48,17 +48,12 @@ fn published_text(item: &Value, now: u64) -> Option<String> {
         .map(|date| format!("{}-{}-{}", &date[..4], &date[4..6], &date[6..]))
 }
 
-pub struct YtDlpBackend {
-    cookies_path: Option<PathBuf>,
-    cookies_from_browser: Option<String>,
-}
+/// Public extraction fallback; never receives authenticated session material.
+pub struct YtDlpBackend;
 
 impl YtDlpBackend {
-    pub fn new(cookies_path: Option<PathBuf>, cookies_from_browser: Option<String>) -> Self {
-        Self {
-            cookies_path,
-            cookies_from_browser,
-        }
+    pub fn new(_legacy_cookies: Option<PathBuf>, _legacy_browser: Option<String>) -> Self {
+        Self
     }
 
     async fn run_ytdlp(&self, target: &str) -> Result<Value> {
@@ -75,31 +70,6 @@ impl YtDlpBackend {
             .arg(target)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-
-        let mut cookie_set = false;
-        if let Some(ref browser) = self.cookies_from_browser {
-            if !browser.is_empty() {
-                cmd.arg("--cookies-from-browser").arg(browser);
-                cookie_set = true;
-            }
-        }
-
-        if !cookie_set {
-            if let Some(ref p) = self.cookies_path {
-                if p.exists() {
-                    let has_auth = std::fs::read_to_string(p)
-                        .map(|s| {
-                            s.contains("LOGIN_INFO")
-                                || s.contains("SAPISID")
-                                || s.contains("__Secure")
-                        })
-                        .unwrap_or(false);
-                    if has_auth {
-                        cmd.arg("--cookies").arg(p);
-                    }
-                }
-            }
-        }
 
         let output = tokio::time::timeout(std::time::Duration::from_secs(45), cmd.output())
             .await
@@ -281,48 +251,25 @@ impl Backend for YtDlpBackend {
     }
 
     async fn subscriptions(&self) -> Result<FeedPage> {
-        let val = self.run_ytdlp(":ytsubs").await?;
-        let items = self.parse_entries(&val);
-        Ok(FeedPage {
-            chips: Vec::new(),
-            items,
-            continuation: None,
-        })
+        anyhow::bail!("Account feeds require TV OAuth; sign in with :account add")
     }
 
     async fn history(&self) -> Result<FeedPage> {
-        let val = self.run_ytdlp(":ythistory").await?;
-        let items = self.parse_entries(&val);
-        Ok(FeedPage {
-            chips: Vec::new(),
-            items,
-            continuation: None,
-        })
+        anyhow::bail!("Account feeds require TV OAuth; sign in with :account add")
     }
 
     async fn watch_later(&self) -> Result<FeedPage> {
-        let val = self.run_ytdlp(":ytwatchlater").await?;
-        let items = self.parse_entries(&val);
-        Ok(FeedPage {
-            chips: Vec::new(),
-            items,
-            continuation: None,
-        })
+        anyhow::bail!("Account feeds require TV OAuth; sign in with :account add")
     }
 
     async fn playlists(&self) -> Result<FeedPage> {
-        let val = self
-            .run_ytdlp("https://www.youtube.com/feed/playlists")
-            .await?;
-        let items = self.parse_entries(&val);
-        Ok(FeedPage {
-            chips: Vec::new(),
-            items,
-            continuation: None,
-        })
+        anyhow::bail!("Account feeds require TV OAuth; sign in with :account add")
     }
 
     async fn playlist(&self, id: &str) -> Result<FeedPage> {
+        if matches!(id, "LL" | "WL" | "VLLL" | "VLWL") {
+            anyhow::bail!("Account feeds require TV OAuth; sign in with :account add");
+        }
         let target = if let Some(seed) = crate::backend::models::mix_seed_video_id(id) {
             format!("https://www.youtube.com/watch?v={seed}&list={id}")
         } else {

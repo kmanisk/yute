@@ -312,8 +312,51 @@ pub fn thumbnail_candidates(url: &str, width: u32) -> Vec<String> {
         }
         urls
     } else {
-        vec![original]
+        let sized = avatar_thumbnail_url(&original, width);
+        if sized != original {
+            vec![sized, original]
+        } else {
+            vec![original]
+        }
     }
+}
+/// Only rewrite documented Google image sizing tokens, preserving crop/privacy
+/// flags, query strings, and opaque image IDs. Unknown suffixes pass through.
+pub fn avatar_thumbnail_url(url: &str, width: u32) -> String {
+    let normalized = normalize_thumbnail_url(url);
+    let Ok(mut parsed) = reqwest::Url::parse(&normalized) else {
+        return normalized.into_owned();
+    };
+    let host = parsed.host_str().unwrap_or_default();
+    if !(host == "yt3.ggpht.com"
+        || host == "yt3.googleusercontent.com"
+        || host.ends_with(".googleusercontent.com"))
+    {
+        return normalized.into_owned();
+    }
+    let size = width.clamp(88, 512).to_string();
+    if let Some((base, suffix)) = parsed.path().rsplit_once('=') {
+        let tokens = suffix
+            .split('-')
+            .map(|token| {
+                if token.len() > 1
+                    && matches!(token.as_bytes()[0], b's' | b'w' | b'h')
+                    && token[1..].bytes().all(|c| c.is_ascii_digit())
+                {
+                    format!("{}{size}", &token[..1])
+                } else {
+                    token.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("-");
+        if tokens == suffix {
+            return normalized.into_owned();
+        }
+        let path = format!("{base}={tokens}");
+        parsed.set_path(&path);
+    }
+    parsed.into()
 }
 fn video_id(url: &str) -> Option<&str> {
     let base = url.split('?').next()?;

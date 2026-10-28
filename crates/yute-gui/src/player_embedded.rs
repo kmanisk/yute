@@ -25,12 +25,6 @@ impl EmbeddedPlayer {
             &cfg.playback.hwdec
         };
 
-        let cookies_path = if !cfg.backend.cookies_file.is_empty() {
-            Some(yute_core::config::resolve_path(&cfg.backend.cookies_file))
-        } else {
-            None
-        };
-
         // libmpv strictly requires LC_NUMERIC to be "C" for parsing floating-point options
         unsafe {
             libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr());
@@ -64,18 +58,10 @@ impl EmbeddedPlayer {
             )?;
             set_opt("ytdl-format", max_res.as_str())?;
 
-            let mut raw_opts = vec![
+            let raw_opts = [
                 "no-playlist=".to_string(),
                 "extractor-args=youtube:player_client=android,web".to_string(),
             ];
-            if let Some(ref cp) = cookies_path {
-                if cp.exists() {
-                    raw_opts.push(format!("cookies={}", cp.display()));
-                    if cfg.playback.mark_watched {
-                        raw_opts.push("mark-watched=".to_string());
-                    }
-                }
-            }
             let ytdl_raw_opts_str = raw_opts.join(",");
             set_opt("ytdl-raw-options", &ytdl_raw_opts_str)?;
 

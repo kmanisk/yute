@@ -179,24 +179,6 @@ impl Player {
             }
         }
 
-        let cookies_path = crate::config::resolve_path(&cfg.backend.cookies_file);
-        if cfg.backend.auth != "guest" && cookies_path.exists() {
-            let has_auth = std::fs::read_to_string(&cookies_path)
-                .map(|s| {
-                    s.contains("LOGIN_INFO") || s.contains("SAPISID") || s.contains("__Secure")
-                })
-                .unwrap_or(false);
-            if has_auth {
-                cmd.arg(format!(
-                    "--ytdl-raw-options-append=cookies={}",
-                    cookies_path.display()
-                ));
-            }
-            if cfg.playback.mark_watched {
-                cmd.arg("--ytdl-raw-options-append=mark-watched=");
-            }
-        }
-
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;

@@ -661,3 +661,126 @@ fn playlist_destinations_only_use_actual_unsaved_server_options() {
             .is_empty()
     );
 }
+
+#[test]
+fn channel_avatar_renderer_urls_are_normalized() {
+    for renderer in [
+        "channelRenderer",
+        "gridChannelRenderer",
+        "pivotChannelRenderer",
+        "compactChannelRenderer",
+    ] {
+        let value = serde_json::json!({renderer:{"channelId":"UCchannel","title":{"simpleText":"Channel"},"thumbnail":{"thumbnails":[{"url":"//yt3.ggpht.com/avatar=s88-c-k-c0x00ffffff-no-rj","width":88,"height":88}]}}});
+        let card = yute_core::backend::parse::parse_card(&value).unwrap();
+        let Card::Channel(channel) = card else {
+            panic!("channel expected")
+        };
+        assert_eq!(
+            channel.avatar_url.as_deref(),
+            Some("https://yt3.ggpht.com/avatar=s88-c-k-c0x00ffffff-no-rj")
+        );
+    }
+}
+
+#[test]
+fn avatar_sizes_preserve_google_flags_queries_and_unknown_hosts() {
+    use yute_core::media::thumbs::avatar_thumbnail_url;
+    assert_eq!(
+        avatar_thumbnail_url("//yt3.ggpht.com/avatar=s88-c-k-c0x00ffffff-no-rj?x=1", 256),
+        "https://yt3.ggpht.com/avatar=s256-c-k-c0x00ffffff-no-rj?x=1"
+    );
+    assert_eq!(
+        avatar_thumbnail_url(
+            "https://yt3.googleusercontent.com/avatar=w88-h88-p-k-no-rj",
+            200
+        ),
+        "https://yt3.googleusercontent.com/avatar=w200-h200-p-k-no-rj"
+    );
+    assert_eq!(
+        avatar_thumbnail_url("https://example.com/id=s88", 200),
+        "https://example.com/id=s88"
+    );
+    assert_eq!(
+        avatar_thumbnail_url("https://yt3.ggpht.com/id=opaque-token", 200),
+        "https://yt3.ggpht.com/id=opaque-token"
+    );
+}
+
+#[test]
+fn legacy_cookie_material_is_never_sent_as_authentication() {
+    let mut auth = yute_core::backend::auth::AuthContext::default();
+    auth.parse_netscape_cookies(".youtube.com\tTRUE\t/\tTRUE\t0\tSAPISID\tlegacy-value\n");
+    let headers = auth.build_headers();
+    assert!(!headers.contains_key(reqwest::header::COOKIE));
+    assert!(!headers.contains_key(reqwest::header::AUTHORIZATION));
+}
+
+#[test]
+fn tv_channel_header_avatar_is_extracted_for_home_enrichment() {
+    let value = serde_json::json!({"header":{"channelHeaderRenderer":{"title":{"simpleText":"Channel"},"avatar":{"thumbnails":[{"url":"//yt3.ggpht.com/avatar=s72-c-k-no-rj","width":72,"height":72}]}}}});
+    let page = yute_core::backend::parse::parse_channel_page(&value, "UCchannel");
+    assert_eq!(
+        page.channel.avatar_url.as_deref(),
+        Some("https://yt3.ggpht.com/avatar=s72-c-k-no-rj")
+    );
+}
+
+#[tokio::test]
+#[ignore = "live anonymous YouTube/CDN check; run explicitly"]
+async fn live_public_channel_avatar_download() {
+    use yute_core::backend::{auth::AuthContext, innertube::InnerTubeBackend, Backend};
+    let backend = InnerTubeBackend::new(AuthContext::default());
+    let page = backend
+        .channel_page("UCX6OQ3DkcsbYNE6H8uQQuVA", None)
+        .await
+        .unwrap();
+    let avatar = page.channel.avatar_url.expect("TV channel header avatar");
+    let dir = tempfile::tempdir().unwrap();
+    let image = yute_core::media::thumbs::fetch_thumbnail(
+        &avatar,
+        256,
+        256,
+        &dir.path().join("avatar.jpg"),
+    )
+    .await
+    .expect("decoded CDN avatar");
+    assert!(image.width() > 0 && image.height() > 0);
+}
+
+#[test]
+fn oauth_uses_tv_identity_and_never_legacy_cookie_headers() {
+    let auth = yute_core::backend::auth::AuthContext {
+        client_name: "WEB".into(),
+        client_version: "legacy-web".into(),
+        refresh_token: Some("fixture".into()),
+        cookie_header: Some("legacy".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        auth.build_client_context()["client"]["clientName"],
+        "TVHTML5"
+    );
+    assert_eq!(auth.build_headers()["X-YouTube-Client-Name"], "7");
+    assert!(!auth.build_headers().contains_key(reqwest::header::COOKIE));
+}
+#[test]
+fn configuration_parse_errors_never_echo_values() {
+    let error = yute_core::config::Config::parse_checked("[api]\nkey = secret-fixture")
+        .unwrap_err()
+        .to_string();
+    assert!(!error.contains("secret-fixture"));
+    assert!(error.contains("Invalid config.toml"));
+}
+#[test]
+fn nested_avatar_views_and_unknown_sizing_urls_are_safe() {
+    use yute_core::{backend::parse::extract_best_thumbnail, media::thumbs::avatar_thumbnail_url};
+    let value = serde_json::json!({"avatar":{"avatarViewModel":{"image":{"sources":[{"url":"//yt3.ggpht.com/id=s88-c-k-c0x00ffffff-no-rj","width":88}]}}}});
+    assert!(extract_best_thumbnail(&value).starts_with("https://yt3.ggpht.com/"));
+    let url = "https://yt3.ggpht.com/opaque=unknown?key=preserved";
+    assert_eq!(avatar_thumbnail_url(url, 200), url);
+    let sized = avatar_thumbnail_url("//yt3.ggpht.com/opaque=w88-h88-c-k-no-rj?x=1", 200);
+    assert_eq!(
+        sized,
+        "https://yt3.ggpht.com/opaque=w200-h200-c-k-no-rj?x=1"
+    );
+}

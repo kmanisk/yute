@@ -150,13 +150,7 @@ pub async fn run(config: &Config) -> Vec<Check> {
         }),
     )
     .await;
-    let mut auth = AuthContext {
-        client_name: config.backend.client_name.clone(),
-        client_version: config.backend.client_version.clone(),
-        hl: config.backend.hl.clone(),
-        gl: config.backend.gl.clone(),
-        ..Default::default()
-    };
+    let mut auth = AuthContext::from_config(config);
     match storage {
         Ok(Ok(Ok(Some(storage)))) => {
             checks.push(Check::new("credential store", Status::Ok, "existing encrypted store authenticated"));
@@ -196,6 +190,14 @@ pub async fn run(config: &Config) -> Vec<Check> {
             "absent; acquired from subsequent responses"
         },
     ));
+    if !auth.has_oauth()
+        && !config.general.start_anonymous
+        && config.backend.auth != "guest"
+        && (config.backend.auth == "cookies"
+            || crate::config::resolve_path(&config.backend.cookies_file).is_file())
+    {
+        auth.needs_login = true;
+    }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()

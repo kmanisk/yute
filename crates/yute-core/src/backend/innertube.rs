@@ -46,7 +46,7 @@ impl InnerTubeBackend {
         let result = async {
             tokio::select! {
                 _ = cancelled.cancelled() => Err(crate::accounts::AccountCancelled.into()),
-                result = request => result,
+                result = tokio::time::timeout(std::time::Duration::from_secs(30), request) => result.map_err(|_| anyhow!("InnerTube operation timed out; check network and unlock the credential keyring"))?,
             }
         }
         .instrument(tracing::info_span!(target:"yute_perf","innertube_request",operation))
@@ -92,6 +92,14 @@ impl InnerTubeBackend {
         };
 
         let status = resp.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            let mut auth = self.auth.lock().unwrap();
+            if auth.has_oauth() {
+                auth.needs_login = true;
+                auth.access_token = None;
+                return Err(crate::oauth::NeedsLogin.into());
+            }
+        }
         if !status.is_success() {
             return Err(anyhow!("InnerTube returned HTTP {status} for {endpoint}"));
         }
@@ -104,6 +112,20 @@ impl InnerTubeBackend {
         if let Some(error) = json_val.get("error") {
             let code = error.get("code").and_then(Value::as_u64).unwrap_or(0);
             anyhow::bail!("InnerTube rejected {endpoint} request (code {code})");
+        }
+
+        if self.auth.lock().unwrap().has_oauth()
+            && (crate::backend::parse::find_json_key(&json_val, "loggedOut")
+                .and_then(Value::as_bool)
+                == Some(true)
+                || crate::backend::parse::find_json_key(&json_val, "isSignedIn")
+                    .and_then(Value::as_bool)
+                    == Some(false))
+        {
+            let mut auth = self.auth.lock().unwrap();
+            auth.needs_login = true;
+            auth.access_token = None;
+            return Err(crate::oauth::NeedsLogin.into());
         }
 
         // Capture and persist visitorData from responseContext
@@ -167,6 +189,38 @@ impl InnerTubeBackend {
         })
     }
 
+    fn require_account(&self) -> Result<()> {
+        let auth = self.auth.lock().unwrap();
+        if auth.needs_login {
+            return Err(crate::oauth::NeedsLogin.into());
+        }
+        if !auth.has_oauth() {
+            anyhow::bail!("Sign in with :account add");
+        }
+        Ok(())
+    }
+
+    async fn account_feed(&self, browse_id: &str) -> Result<FeedPage> {
+        self.require_account()?;
+        let value = self
+            .post_endpoint("browse", self.make_body(json!({"browseId": browse_id})))
+            .await?;
+        self.read_account_feed(&value)
+    }
+
+    fn read_account_feed(&self, value: &Value) -> Result<FeedPage> {
+        let result = parse_account_feed(value);
+        if result
+            .as_ref()
+            .is_err_and(|error| error.is::<crate::oauth::NeedsLogin>())
+        {
+            let mut auth = self.auth.lock().unwrap();
+            auth.needs_login = true;
+            auth.access_token = None;
+        }
+        result
+    }
+
     pub fn make_body(&self, extra: Value) -> Value {
         let client_ctx = self.auth.lock().unwrap().build_client_context();
         let mut base = json!({
@@ -186,7 +240,7 @@ impl InnerTubeBackend {
 impl Backend for InnerTubeBackend {
     fn is_anonymous(&self) -> bool {
         let auth = self.auth.lock().unwrap();
-        auth.access_token.is_none() && auth.refresh_token.is_none() && auth.cookie_header.is_none()
+        !auth.has_oauth() || auth.needs_login
     }
     async fn home(&self, chip_token: Option<&str>) -> Result<FeedPage> {
         let body = if let Some(token) = chip_token {
@@ -238,6 +292,13 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn continue_feed(&self, token: &str) -> Result<FeedPage> {
+        if let Some(token) = token.strip_prefix("yute:account:") {
+            self.require_account()?;
+            let value = self
+                .post_endpoint("browse", self.make_body(json!({"continuation":token})))
+                .await?;
+            return self.read_account_feed(&value);
+        }
         if let Some(token) = token.strip_prefix("yute:reel:") {
             return self.reel_sequence(token).await;
         }
@@ -250,42 +311,19 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn subscriptions(&self) -> Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let body = self.make_body(json!({
-            "browseId": "FEsubscriptions"
-        }));
-        let val = self.post_endpoint("browse", body).await?;
-        let page = parse_feed_page(&val);
-        Ok(page)
+        self.account_feed("FEsubscriptions").await
     }
 
     async fn history(&self) -> Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let body = self.make_body(json!({
-            "browseId": "FEhistory"
-        }));
-        let val = self.post_endpoint("browse", body).await?;
-        let page = parse_feed_page(&val);
-        Ok(page)
+        self.account_feed("FEhistory").await
     }
 
     async fn watch_later(&self) -> Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let body = self.make_body(json!({
-            "browseId": "VLWL"
-        }));
-        let val = self.post_endpoint("browse", body).await?;
-        let page = parse_feed_page(&val);
-        Ok(page)
+        self.account_feed("VLWL").await
     }
 
     async fn playlist_destinations(&self, video: &str) -> Result<FeedPage> {
+        self.require_account()?;
         let response = self
             .post_endpoint(
                 "playlist/get_add_to_playlist",
@@ -297,6 +335,7 @@ impl Backend for InnerTubeBackend {
         ))
     }
     async fn save_to_playlist(&self, playlist: &str, video: &str) -> Result<()> {
+        self.require_account()?;
         let response=self.post_endpoint("browse/edit_playlist",self.make_body(json!({"playlistId":playlist.trim_start_matches("VL"),"actions":[{"action":"ACTION_ADD_VIDEO","addedVideoId":video}]}))).await?;
         if response.get("status").and_then(Value::as_str) == Some("STATUS_SUCCEEDED")
             || crate::backend::parse::find_json_key(&response, "playlistEditVideoAddedResultData")
@@ -308,20 +347,14 @@ impl Backend for InnerTubeBackend {
         }
     }
     async fn playlists(&self) -> Result<FeedPage> {
-        if self.is_anonymous() {
-            return Ok(FeedPage::default());
-        }
-        let body = self.make_body(json!({
-            "browseId": "FElibrary"
-        }));
-        let val = self.post_endpoint("browse", body).await?;
-        let page = parse_feed_page(&val);
-        Ok(page)
+        self.account_feed("FElibrary").await
     }
 
     async fn playlist(&self, id: &str) -> Result<FeedPage> {
-        if self.is_anonymous() && matches!(id, "LL" | "WL" | "VLLL" | "VLWL") {
-            return Ok(FeedPage::default());
+        if matches!(id, "LL" | "WL" | "VLLL" | "VLWL") {
+            return self
+                .account_feed(&format!("VL{}", id.trim_start_matches("VL")))
+                .await;
         }
         if id.starts_with("RD") {
             let mut body = self.make_body(json!({"playlistId":id,"playlistIndex":0}));
@@ -344,8 +377,11 @@ impl Backend for InnerTubeBackend {
             "browseId": browse_id
         }));
         let val = self.post_endpoint("browse", body).await?;
-        let page = parse_feed_page(&val);
-        Ok(page)
+        if self.auth.lock().unwrap().has_oauth() {
+            self.read_account_feed(&val)
+        } else {
+            Ok(parse_feed_page(&val))
+        }
     }
 
     async fn search(
@@ -591,6 +627,7 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn account_info(&self) -> Result<(String, String)> {
+        self.require_account()?;
         // Try TVHTML5 accounts_list
         let tv_body = self.make_body(json!({
             "accountReadMask": {
@@ -650,6 +687,7 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn like_video(&self, video_id: &str) -> Result<bool> {
+        self.require_account()?;
         let body = self.make_body(json!({
             "target": {
                 "videoId": video_id
@@ -665,7 +703,10 @@ impl Backend for InnerTubeBackend {
                     .pointer("/payload/likeStatusEntity/likeStatus")
                     .and_then(|s| s.as_str())
                 {
-                    return Ok(status == "LIKE");
+                    if status == "LIKE" {
+                        return Ok(true);
+                    }
+                    anyhow::bail!("YouTube did not confirm the liked state");
                 }
             }
         }
@@ -676,6 +717,7 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn dislike_video(&self, video_id: &str) -> Result<bool> {
+        self.require_account()?;
         let body = self.make_body(json!({
             "target": {
                 "videoId": video_id
@@ -691,7 +733,10 @@ impl Backend for InnerTubeBackend {
                     .pointer("/payload/likeStatusEntity/likeStatus")
                     .and_then(|s| s.as_str())
                 {
-                    return Ok(status == "DISLIKE");
+                    if status == "DISLIKE" {
+                        return Ok(true);
+                    }
+                    anyhow::bail!("YouTube did not confirm the disliked state");
                 }
             }
         }
@@ -702,29 +747,32 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn remove_rating(&self, video_id: &str) -> Result<()> {
+        self.require_account()?;
         let body = self.make_body(json!({
             "target": {
                 "videoId": video_id
             }
         }));
-        let _ = self.post_endpoint("like/removelike", body).await?;
-        Ok(())
+        let response = self.post_endpoint("like/removelike", body).await?;
+        acknowledge_mutation(&response)
     }
 
     async fn subscribe_channel(&self, channel_id: &str) -> Result<()> {
+        self.require_account()?;
         let body = self.make_body(json!({
             "channelIds": [channel_id]
         }));
-        let _ = self.post_endpoint("subscription/subscribe", body).await?;
-        Ok(())
+        let response = self.post_endpoint("subscription/subscribe", body).await?;
+        acknowledge_mutation(&response)
     }
 
     async fn unsubscribe_channel(&self, channel_id: &str) -> Result<()> {
+        self.require_account()?;
         let body = self.make_body(json!({
             "channelIds": [channel_id]
         }));
-        let _ = self.post_endpoint("subscription/unsubscribe", body).await?;
-        Ok(())
+        let response = self.post_endpoint("subscription/unsubscribe", body).await?;
+        acknowledge_mutation(&response)
     }
 
     async fn fetch_ryd_votes(&self, video_id: &str) -> Result<(u64, u64, f64)> {
@@ -741,6 +789,7 @@ impl Backend for InnerTubeBackend {
     }
 
     async fn comment_action(&self, action: &str) -> Result<()> {
+        self.require_account()?;
         let response = self
             .post_endpoint(
                 "comment/perform_comment_action",
@@ -753,6 +802,7 @@ impl Backend for InnerTubeBackend {
         Ok(())
     }
     async fn submit_comment(&self, params: &str, text: &str, reply: bool) -> Result<()> {
+        self.require_account()?;
         if text.trim().is_empty() || text.chars().count() > 10000 {
             anyhow::bail!("Comment must contain 1 to 10000 characters");
         }
@@ -780,5 +830,99 @@ impl Backend for InnerTubeBackend {
         }));
         let val = self.post_endpoint("next", body).await?;
         Ok(parse_comments(&val))
+    }
+}
+
+/// Empty account pages need an explicit empty renderer/container. Unknown or
+/// signed-out responses are failures, never evidence of an empty library.
+fn acknowledge_mutation(response: &Value) -> Result<()> {
+    if response.get("responseContext").is_some() && response.get("error").is_none() {
+        Ok(())
+    } else {
+        anyhow::bail!("YouTube did not acknowledge this account update")
+    }
+}
+
+fn parse_account_feed(value: &Value) -> Result<FeedPage> {
+    use crate::backend::parse::find_json_key;
+    if find_json_key(value, "loggedOut").and_then(Value::as_bool) == Some(true)
+        || find_json_key(value, "isSignedIn").and_then(Value::as_bool) == Some(false)
+    {
+        return Err(crate::oauth::NeedsLogin.into());
+    }
+    if find_json_key(value, "alertRenderer").is_some()
+        || find_json_key(value, "backgroundPromoRenderer").is_some()
+    {
+        anyhow::bail!("YouTube rejected this account feed; use :account add or retry");
+    }
+    let mut page = parse_feed_page(value);
+    page.continuation = page
+        .continuation
+        .map(|token| format!("yute:account:{token}"));
+    if !page.items.is_empty() || page.continuation.is_some() {
+        return Ok(page);
+    }
+    let explicit_empty = ["emptyContentRenderer"]
+        .iter()
+        .any(|key| find_json_key(value, key).is_some())
+        || [
+            "gridRenderer",
+            "richGridRenderer",
+            "playlistVideoListRenderer",
+            "horizontalListRenderer",
+        ]
+        .iter()
+        .any(|key| {
+            find_json_key(value, key)
+                .and_then(|v| v.get("items").or_else(|| v.get("contents")))
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        });
+    if explicit_empty {
+        Ok(page)
+    } else {
+        anyhow::bail!("YouTube returned an unrecognized account feed; press r to retry")
+    }
+}
+
+#[cfg(test)]
+mod account_feed_tests {
+    use super::*;
+    #[test]
+    fn account_responses_distinguish_empty_error_and_tv_continuation() {
+        assert!(parse_account_feed(&json!({"responseContext":{}})).is_err());
+        assert!(parse_account_feed(&json!({"responseContext":{"mainAppWebResponseContext":{"loggedOut":true}},"contents":{"messageRenderer":{"text":{"simpleText":"Sign in"}}}})).is_err());
+        assert!(parse_account_feed(&json!({"alertRenderer":{"type":"ERROR"}})).is_err());
+        assert!(
+            parse_account_feed(&json!({"contents":{"gridRenderer":{"items":[]}}}))
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        let response = json!({"continuationContents":{"gridContinuation":{"items":[{"gridVideoRenderer":{"videoId":"abcdefghijk","title":{"simpleText":"Subscribed video"}}}],"continuations":[{"nextContinuationData":{"continuation":"next-subs-page"}}]}}});
+        let page = parse_account_feed(&response).unwrap();
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(
+            page.continuation.as_deref(),
+            Some("yute:account:next-subs-page")
+        );
+    }
+    #[tokio::test]
+    async fn legacy_session_cannot_fetch_account_libraries() {
+        let auth = AuthContext {
+            needs_login: true,
+            cookie_header: Some("legacy".into()),
+            ..Default::default()
+        };
+        let backend = InnerTubeBackend::new(auth);
+        assert!(backend
+            .subscriptions()
+            .await
+            .unwrap_err()
+            .is::<crate::oauth::NeedsLogin>());
+        assert!(backend.history().await.is_err());
+        assert!(backend.watch_later().await.is_err());
+        assert!(backend.playlists().await.is_err());
+        assert!(backend.playlist("LL").await.is_err());
     }
 }
