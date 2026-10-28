@@ -23,6 +23,7 @@ pub fn normalize_thumbnail_url(url: &str) -> std::borrow::Cow<'_, str> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Priority {
     Prefetch,
+    NearVisible,
     Visible,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -90,11 +91,11 @@ impl ThumbnailLoader {
                         if job.cancelled.is_cancelled() { continue; }
                         // Reserve eight slots for visible work even when disk-cache
                         // checks delay its admission by a few milliseconds.
-                        if job.priority == Priority::Prefetch && prefetch_running >= 4 {
+                        if job.priority != Priority::Visible && prefetch_running >= 4 {
                             queue.push(job);
                             break;
                         }
-                        if job.priority == Priority::Prefetch { prefetch_running += 1; }
+                        if job.priority != Priority::Visible { prefetch_running += 1; }
                         let results = results.clone();
                         let notify = notify.clone();
                         running.spawn(async move {
@@ -250,6 +251,11 @@ impl ThumbnailLoader {
         let key = Self::key(url, 480, 360);
         self.request(&key, Priority::Visible);
         self.ram.get(&key).map(Arc::as_ref)
+    }
+    pub fn near_visible(&mut self, url: &str, width: u32, height: u32) {
+        if !url.is_empty() {
+            self.request(&Self::key(url, width, height), Priority::NearVisible);
+        }
     }
     pub fn prefetch(&mut self, url: &str, width: u32, height: u32) {
         if !url.is_empty() {
@@ -428,7 +434,7 @@ pub async fn fetch_thumbnail(
         }
         let path = path.to_owned();
         let image = tokio::task::spawn_blocking(move || {
-            let image = image::load_from_memory(&bytes).ok()?;
+            let image = remove_thumbnail_bars(&image::load_from_memory(&bytes).ok()?);
             let image = if image.width() > width || image.height() > height {
                 let ratio = (width as f64 / image.width() as f64)
                     .min(height as f64 / image.height() as f64);
@@ -696,4 +702,32 @@ mod pipeline_tests {
         assert_eq!(loaded[0].0, visible);
         server.await.unwrap();
     }
+}
+
+/// Conservative detection for symmetric baked bars in 4:3 YouTube thumbnails.
+/// Never applied to a 16:9 source or a uniformly dark scene.
+pub fn remove_thumbnail_bars(image: &DynamicImage) -> DynamicImage {
+    let (w, h) = (image.width(), image.height());
+    if w < 160 || h < 100 || ((w as f64 / h as f64) - 4. / 3.).abs() > 0.03 {
+        return image.clone();
+    }
+    let rgb = image.to_rgb8();
+    let dark = |y: u32| (0..w).all(|x| rgb.get_pixel(x, y).0.iter().all(|c| *c < 20));
+    let top = (0..h / 5).take_while(|y| dark(*y)).count() as u32;
+    let bottom = (0..h / 5).take_while(|y| dark(h - 1 - *y)).count() as u32;
+    if top < h / 20 || top.abs_diff(bottom) > 2 {
+        return image.clone();
+    }
+    let inner = h - top - bottom;
+    if ((w as f64 / inner as f64) - 16. / 9.).abs() > 0.04 {
+        return image.clone();
+    }
+    if !(top..h - bottom).step_by(3).any(|y| {
+        (0..w)
+            .step_by(3)
+            .any(|x| rgb.get_pixel(x, y).0.iter().any(|c| *c > 60))
+    }) {
+        return image.clone();
+    }
+    image.crop_imm(0, top, w, inner)
 }

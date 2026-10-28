@@ -75,20 +75,29 @@ impl ThumbnailManager {
                 | ratatui_image::picker::ProtocolType::Halfblocks
         )
     }
+    pub fn invalidate_placements(&self) {
+        for cover in self.covers.values() {
+            cover.invalidate();
+        }
+    }
     pub fn begin_frame(&mut self) {
         self.wanted.clear();
     }
     pub fn finish_frame(&mut self, preloads: Vec<String>, width: u32, height: u32) {
-        for url in preloads {
+        for (index, url) in preloads.into_iter().enumerate() {
             self.wanted.insert(url.clone());
-            self.loader.prefetch(&url, width, height);
+            if index < 8 {
+                self.loader.near_visible(&url, width, height);
+            } else {
+                self.loader.prefetch(&url, width, height);
+            }
         }
         self.loader.retain_wanted(&self.wanted);
     }
     fn encoded_path(&self, key: &CoverKey) -> std::path::PathBuf {
         let font = self.picker.font_size();
         let descriptor = format!(
-            "encoded-v1:{:?}:{}:{}:{}:{}:{}:{}",
+            "encoded-v2:{:?}:{}:{}:{}:{}:{}:{}",
             self.picker.protocol_type(),
             font.width,
             font.height,
@@ -305,6 +314,14 @@ impl ThumbnailManager {
     }
 
     pub fn set_picker(&mut self, picker: Picker) {
+        if self.picker.protocol_type() == picker.protocol_type()
+            && (
+                self.picker.font_size().width,
+                self.picker.font_size().height,
+            ) == (picker.font_size().width, picker.font_size().height)
+        {
+            return;
+        }
         self.generation = self.generation.wrapping_add(1);
         self.covers.clear();
         self.cover_order.clear();
@@ -323,7 +340,12 @@ pub use yute_core::media::thumbs::cache_key_for_url;
 
 /// Center crop while retaining aspect ratio; no blur, stretch or synthetic canvas.
 fn cover_image(image: &image::DynamicImage, width: u32, height: u32) -> image::DynamicImage {
-    yute_core::media::thumbs::resize(image, width, height, true)
+    yute_core::media::thumbs::resize(
+        &yute_core::media::thumbs::remove_thumbnail_bars(image),
+        width,
+        height,
+        true,
+    )
 }
 
 #[cfg(test)]

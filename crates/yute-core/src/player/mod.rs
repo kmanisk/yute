@@ -149,6 +149,12 @@ impl Player {
             .arg("--ytdl=yes")
             .arg("--ytdl-raw-options-append=no-playlist=");
 
+        if cfg.playback.audio_language != "auto" {
+            cmd.arg(format!("--alang={}", cfg.playback.audio_language));
+        }
+        if cfg.playback.subtitle_language != "auto" {
+            cmd.arg(format!("--slang={}", cfg.playback.subtitle_language));
+        }
         if cfg.playback.use_user_mpv_config {
             // User MPV mode: Let user's ~/.config/mpv/mpv.conf and input.conf control vo, hwdec, shaders, scripts
         } else {

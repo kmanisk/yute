@@ -241,6 +241,7 @@ impl Backend for ApiBackend {
                     thumb_url,
                     is_mix: false,
                     first_video_id: None,
+                    updated: None,
                 }));
             }
         }

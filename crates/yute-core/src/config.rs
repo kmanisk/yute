@@ -26,6 +26,10 @@ pub struct Config {
     pub local: LocalConfig,
     #[serde(default)]
     pub ui: UiConfig,
+    #[serde(default)]
+    pub text: TextConfig,
+    #[serde(default)]
+    pub downloads: DownloadConfig,
 }
 
 impl Config {
@@ -38,12 +42,16 @@ impl Config {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UiConfig {
     #[serde(default)]
     pub icons: Option<String>,
     #[serde(default)]
     pub strip_emoji: bool,
+    #[serde(default = "auto_mode")]
+    pub action_bar: String,
+    #[serde(default)]
+    pub sidebar_channels: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,6 +61,10 @@ pub struct GeneralConfig {
     pub graphics: String,
     pub icons: String,
     pub theme: String,
+    #[serde(default = "dark_theme")]
+    pub theme_dark: String,
+    #[serde(default = "light_theme")]
+    pub theme_light: String,
     pub mouse: bool,
     pub stop_mpv_on_quit: bool,
     #[serde(default)]
@@ -65,7 +77,9 @@ impl Default for GeneralConfig {
             start_anonymous: false,
             graphics: "auto".to_string(),
             icons: "auto".to_string(),
-            theme: "youtube-dark".to_string(),
+            theme: "terminal".to_string(),
+            theme_dark: dark_theme(),
+            theme_light: light_theme(),
             mouse: false,
             stop_mpv_on_quit: true,
             strip_emoji: false,
@@ -176,6 +190,11 @@ impl Default for GridConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlaybackConfig {
+    pub default_quality: String,
+    pub preferred_codec: String,
+    pub preferred_audio_codec: String,
+    pub audio_language: String,
+    pub subtitle_language: String,
     pub use_user_mpv_config: bool,
     pub ytdl_format: String,
     #[serde(default = "default_max_resolution")]
@@ -209,6 +228,11 @@ fn default_osd_bar() -> bool {
 impl Default for PlaybackConfig {
     fn default() -> Self {
         Self {
+            default_quality: "best".into(),
+            preferred_codec: "auto".into(),
+            preferred_audio_codec: "auto".into(),
+            audio_language: "auto".into(),
+            subtitle_language: "auto".into(),
             use_user_mpv_config: false,
             ytdl_format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
             max_resolution: "1080p".to_string(),
@@ -234,21 +258,43 @@ impl PlaybackConfig {
     }
 
     pub fn resolved_ytdl_format(&self) -> String {
-        match self.max_resolution.as_str() {
-            "480p" => "bestvideo[height<=480]+bestaudio/best[height<=480]".to_string(),
-            "720p" => "bestvideo[height<=720]+bestaudio/best[height<=720]".to_string(),
-            "1080p" => "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
-            "1440p" => "bestvideo[height<=1440]+bestaudio/best[height<=1440]".to_string(),
-            "2160p" | "4k" => "bestvideo[height<=2160]+bestaudio/best[height<=2160]".to_string(),
-            "best" | "max" => "bestvideo+bestaudio/best".to_string(),
-            _ => {
-                if !self.ytdl_format.is_empty() {
-                    self.ytdl_format.clone()
-                } else {
-                    "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string()
-                }
-            }
+        if self.max_resolution == "manual" {
+            return self.ytdl_format.clone();
         }
+        let maximum = self
+            .max_resolution
+            .trim_end_matches('p')
+            .parse::<u32>()
+            .ok();
+        let requested = self
+            .default_quality
+            .trim_end_matches('p')
+            .parse::<u32>()
+            .ok();
+        let height = match (maximum, requested) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        let filter = height.map(|h| format!("[height<={h}]")).unwrap_or_default();
+        let audio = match self.preferred_audio_codec.as_str() {
+            "opus" => "bestaudio[acodec=opus]/bestaudio",
+            "aac" => "bestaudio[acodec^=mp4a]/bestaudio",
+            _ => "bestaudio",
+        };
+        let base = if audio == "bestaudio" {
+            format!("bestvideo{filter}+bestaudio/best{filter}")
+        } else {
+            format!("bestvideo{filter}+({audio})/best{filter}")
+        };
+        let codec = match self.preferred_codec.as_str() {
+            "av1" => Some("av01"),
+            "vp9" => Some("vp9"),
+            "h264" => Some("avc"),
+            _ => None,
+        };
+        codec
+            .map(|codec| format!("bestvideo{filter}[vcodec^={codec}]+bestaudio/{base}"))
+            .unwrap_or(base)
     }
 }
 
@@ -322,6 +368,8 @@ impl Default for Config {
             thumbnails: ThumbnailConfig::default(),
             local: LocalConfig::default(),
             ui: UiConfig::default(),
+            text: TextConfig::default(),
+            downloads: DownloadConfig::default(),
         }
     }
 }
@@ -485,5 +533,62 @@ mod migration_tests {
         );
         assert!(old.join("auth.json").exists());
         fs::remove_dir_all(root).unwrap();
+    }
+}
+
+fn auto_mode() -> String {
+    "auto".into()
+}
+fn dark_theme() -> String {
+    "gruvbox-dark".into()
+}
+fn light_theme() -> String {
+    "gruvbox-light".into()
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TextConfig {
+    pub emoji: String,
+}
+impl Default for TextConfig {
+    fn default() -> Self {
+        Self { emoji: auto_mode() }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DownloadConfig {
+    pub directory: String,
+    pub video_quality: String,
+    pub audio_mode: String,
+    pub playlist_subdirectories: bool,
+    pub write_metadata: bool,
+    pub write_thumbnail: bool,
+    pub write_subtitles: bool,
+    pub keep_partial: bool,
+}
+impl Default for DownloadConfig {
+    fn default() -> Self {
+        Self {
+            directory: "~/Videos/Yute".into(),
+            video_quality: "1080p".into(),
+            audio_mode: "best".into(),
+            playlist_subdirectories: true,
+            write_metadata: false,
+            write_thumbnail: false,
+            write_subtitles: false,
+            keep_partial: true,
+        }
+    }
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            icons: None,
+            strip_emoji: false,
+            action_bar: auto_mode(),
+            sidebar_channels: false,
+        }
     }
 }

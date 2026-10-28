@@ -1,0 +1,79 @@
+[roles.text]
+fg = "#ebdbb2"
+bg = "#282828"
+
+[roles.text_dim]
+fg = "#bdae93"
+bg = "#282828"
+
+[roles.border]
+fg = "#bdae93"
+bg = "#282828"
+
+[roles.border_focused]
+fg = "#fabd2f"
+bg = "#282828"
+
+[roles.accent]
+fg = "#fabd2f"
+bg = "#282828"
+
+[roles.selection]
+fg = "#282828"
+bg = "#ebdbb2"
+
+[roles.chip_active]
+fg = "#282828"
+bg = "#ebdbb2"
+
+[roles.chip_idle]
+fg = "#bdae93"
+bg = "#282828"
+
+[roles.badge]
+fg = "#ffffff"
+bg = "#000000"
+
+[roles.badge_live]
+fg = "#ffffff"
+bg = "#9d0006"
+
+[roles.badge_mix]
+fg = "#ffffff"
+bg = "#000000"
+
+[roles.progress]
+fg = "#fabd2f"
+bg = "#282828"
+
+[roles.skeleton]
+fg = "#bdae93"
+bg = "#282828"
+
+[roles.error]
+fg = "#ebdbb2"
+bg = "#282828"
+
+[roles.warning]
+fg = "#ebdbb2"
+bg = "#282828"
+
+[roles.scrollbar]
+fg = "#ebdbb2"
+bg = "#282828"
+
+[roles.popup]
+fg = "#ebdbb2"
+bg = "#282828"
+
+[roles.popup_selected]
+fg = "#282828"
+bg = "#ebdbb2"
+
+[roles.status]
+fg = "#ebdbb2"
+bg = "#282828"
+
+[roles.action_hint]
+fg = "#bdae93"
+bg = "#282828"

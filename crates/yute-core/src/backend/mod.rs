@@ -15,6 +15,18 @@ pub trait Backend: Send + Sync {
     fn is_anonymous(&self) -> bool {
         false
     }
+    async fn subscribed_channels(&self, _token: Option<&str>) -> anyhow::Result<FeedPage> {
+        anyhow::bail!("Subscribed channels unavailable from this backend")
+    }
+    async fn remove_from_playlist(&self, _playlist: &str, _video: &str) -> anyhow::Result<()> {
+        anyhow::bail!("Playlist removal unavailable")
+    }
+    async fn remove_from_history(&self, _video: &str) -> anyhow::Result<()> {
+        anyhow::bail!("History removal action unavailable; reload History")
+    }
+    fn can_remove_history(&self, _video: &str) -> bool {
+        false
+    }
     async fn home(&self, chip_token: Option<&str>) -> anyhow::Result<FeedPage>;
     async fn home_category(&self, _category: models::HomeCategory) -> anyhow::Result<FeedPage> {
         anyhow::bail!("This YouTube section is unavailable from the current backend")
@@ -115,6 +127,32 @@ impl Backend for BackendChain {
     fn is_anonymous(&self) -> bool {
         self.backends.first().is_none_or(|b| b.is_anonymous())
     }
+    async fn subscribed_channels(&self, token: Option<&str>) -> anyhow::Result<FeedPage> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend"))?
+            .subscribed_channels(token)
+            .await
+    }
+    async fn remove_from_playlist(&self, p: &str, v: &str) -> anyhow::Result<()> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend"))?
+            .remove_from_playlist(p, v)
+            .await
+    }
+    async fn remove_from_history(&self, v: &str) -> anyhow::Result<()> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend"))?
+            .remove_from_history(v)
+            .await
+    }
+    fn can_remove_history(&self, v: &str) -> bool {
+        self.backends
+            .first()
+            .is_some_and(|b| b.can_remove_history(v))
+    }
     async fn home(&self, chip_token: Option<&str>) -> anyhow::Result<FeedPage> {
         let mut last_err = anyhow::anyhow!("No backends configured");
         let mut empty_res = None;
@@ -143,6 +181,9 @@ impl Backend for BackendChain {
     }
 
     async fn continue_feed(&self, token: &str) -> anyhow::Result<FeedPage> {
+        if let Some(token) = token.strip_prefix("yute:channels:") {
+            return self.subscribed_channels(Some(token)).await;
+        }
         if token.starts_with("yute:account:") {
             return self
                 .backends

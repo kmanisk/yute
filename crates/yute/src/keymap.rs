@@ -48,6 +48,8 @@ pub enum Action {
 
     // Cards / lists
     PlayDefault,
+    Download,
+    PlayAll,
     ItemActions,
     PlayWindow,
     OpenBrowser,
@@ -114,6 +116,12 @@ pub const BINDINGS: &[(char, Action, &str)] = &[
     ('K', Action::PrevFilter, "Previous content tab"),
     ('r', Action::Refresh, "Refresh/retry"),
     ('a', Action::QueueAppend, "Add to queue"),
+    ('w', Action::AddToWatchLater, "Toggle Watch Later"),
+    ('+', Action::LikeVideo, "Like / remove rating"),
+    ('-', Action::DislikeVideo, "Dislike / remove rating"),
+    ('S', Action::ToggleSubscribe, "Subscribe / unsubscribe"),
+    ('d', Action::Download, "Download selected entity"),
+    ('p', Action::PlayAll, "Play playlist"),
     ('y', Action::YankUrl, "Copy URL"),
     ('c', Action::NavChannel, "Open channel"),
     ('v', Action::ToggleViewMode, "Grid/list"),

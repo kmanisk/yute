@@ -1,5 +1,5 @@
-use crate::app::{App, Focus, Screen};
-use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
+use crate::app::{App, Focus};
+use ratatui::{layout::Rect, widgets::Paragraph, Frame};
 use unicode_width::UnicodeWidthStr;
 
 pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
@@ -13,44 +13,13 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         super::cmdline::render_input(f, app, area);
         return;
     }
-    let route = match app.screen {
-        Screen::Home => "Home",
-        Screen::Search => "Search",
-        Screen::Watch => "Watch",
-        Screen::ChannelView => "Channel",
-        Screen::PlaylistView | Screen::Playlists => "Playlists",
-        Screen::Subscriptions => "Subscriptions",
-        Screen::History => "History",
-        Screen::WatchLater => "Watch Later",
-        Screen::Liked => "Liked",
-        Screen::LocalVideos => "Local",
-        Screen::Queue => "Queue",
-        Screen::Settings => "Settings",
-        Screen::Accounts => "Account",
-        Screen::Help => "Help",
-    };
     let count = app.filtered_items().len();
     let pos = if count == 0 {
         0
     } else {
         (app.selected_index + 1).min(count)
     };
-    let left = if matches!(
-        app.screen,
-        Screen::Watch | Screen::Settings | Screen::Accounts | Screen::Help
-    ) {
-        format!(" {route}")
-    } else if app.filter_kind != crate::app::FilterKind::All {
-        format!(" {route} · {} · {pos}/{count}", app.filter_kind.label())
-    } else {
-        format!(" {route} · {pos}/{count}")
-    };
-    let left = format!("{left} · {}", app.session_label());
-    let left = match app.focus {
-        Focus::Sidebar => format!(" Sidebar ▸{left}"),
-        Focus::Chips => format!(" Filters ▸{left}"),
-        _ => left,
-    };
+    let left = format!(" {pos}/{count}");
     let state = if let Some(error) = &app.feed_error {
         error.as_str()
     } else if app.is_loading_more {
@@ -64,7 +33,12 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     } else {
         &app.status_text
     };
-    let right = if !state.is_empty() { state } else { "? help" };
+    let status = if state.is_empty() {
+        "? help".into()
+    } else {
+        format!("{state} · ? help")
+    };
+    let right = status.as_str();
     let right = super::text::truncate_str(right, area.width.saturating_sub(2) as usize);
     let right_width = right.width().min(area.width.saturating_sub(2) as usize) as u16;
     let left_width = if right == "? help" {
@@ -73,7 +47,7 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         (left.width() as u16).min(area.width / 2)
     };
     f.render_widget(
-        Paragraph::new(left).style(Style::default().fg(app.theme.text_secondary)),
+        Paragraph::new(left).style(app.theme.style("text_dim")),
         Rect::new(area.x, area.y, left_width, 1),
     );
     let right_area = Rect::new(
@@ -85,7 +59,7 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(
         Paragraph::new(super::text::truncate_str(&right, right_area.width as usize))
             .alignment(ratatui::layout::Alignment::Right)
-            .style(Style::default().fg(app.theme.text)),
+            .style(app.theme.style("text")),
         right_area,
     );
 }

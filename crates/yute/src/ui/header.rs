@@ -1,10 +1,5 @@
 use crate::app::{App, Screen};
-use ratatui::{
-    layout::Rect,
-    style::{Modifier, Style},
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, style::Modifier, widgets::Paragraph, Frame};
 
 pub fn route_name(app: &App) -> String {
     match app.screen {
@@ -32,18 +27,29 @@ pub fn route_name(app: &App) -> String {
     }
 }
 pub fn label(app: &App, width: u16) -> String {
-    crate::ui::text::truncate_str(
-        &format!(" yute · {}", route_name(app)),
-        width.max(8) as usize,
-    )
+    crate::ui::text::truncate_str(&format!(" {}", route_name(app)), width.max(8) as usize)
 }
 pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
+    let size = f.area();
+    let account = if app.auth.lock().unwrap().needs_login {
+        "! Sign in".to_string()
+    } else if app.is_authenticated() {
+        app.account_name.clone()
+    } else {
+        "Anonymous".into()
+    };
+    let width = (size.width / 4)
+        .min(account.chars().count() as u16 + 2)
+        .max(2);
     f.render_widget(
-        Paragraph::new(label(app, area.width)).style(
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new(crate::ui::text::truncate_str(&account, width as usize))
+            .alignment(ratatui::layout::Alignment::Right)
+            .style(app.theme.style("status")),
+        Rect::new(size.right() - width, size.y, width, 1),
+    );
+    f.render_widget(
+        Paragraph::new(label(app, area.width.min(size.width.saturating_sub(width))))
+            .style(app.theme.style("accent").add_modifier(Modifier::BOLD)),
         area,
     );
 }

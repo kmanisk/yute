@@ -36,7 +36,7 @@ pub fn render_channel(f: &mut Frame, app: &mut App, area: Rect) {
                         .bg(app.theme.chip_active_bg)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(app.theme.text_secondary)
+                    app.theme.style("text_dim")
                 },
             )
         })

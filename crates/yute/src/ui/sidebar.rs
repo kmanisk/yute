@@ -36,6 +36,27 @@ pub fn sidebar_width(expanded: bool) -> u16 {
         0
     }
 }
+pub fn width_for(app: &App) -> u16 {
+    if !app.sidebar_expanded {
+        return 0;
+    }
+    let widest = SIDEBAR_ITEMS
+        .iter()
+        .map(|(name, _, hint)| {
+            name.width() + hint.width() + 2 + Icon::Home.glyph(app.config.icons()).width() + 5
+        })
+        .max()
+        .unwrap_or(20);
+    widest.clamp(20, 30) as u16
+}
+pub fn row_count(app: &App) -> usize {
+    SIDEBAR_ITEMS.len()
+        + if app.config.ui.sidebar_channels && app.terminal_height >= 30 {
+            app.subscribed_channels.len()
+        } else {
+            0
+        }
+}
 pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     if area.is_empty() {
         return;
@@ -92,7 +113,11 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
             Icon::Settings,
         ][i];
         let label = icon.label(app.config.icons(), name);
-        let name = super::text::truncate_str(&label, inner.width.saturating_sub(5) as usize);
+        let hint = if inner.width < 20 { "" } else { *hint };
+        let name = super::text::truncate_str(
+            &label,
+            inner.width.saturating_sub(3 + hint.width() as u16) as usize,
+        );
         let pad = inner
             .width
             .saturating_sub(2 + name.width() as u16 + hint.width() as u16);
@@ -101,17 +126,38 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(name, style),
             Span::raw(" ".repeat(pad as usize)),
             Span::styled(
-                *hint,
-                Style::default()
-                    .fg(app.theme.text_secondary)
-                    .add_modifier(Modifier::DIM),
+                hint,
+                app.theme.style("text_dim").add_modifier(Modifier::DIM),
             ),
         ]);
         lines.push(if cursor {
-            line.style(Style::default().bg(app.theme.surface_hover))
+            line.style(app.theme.style("selection"))
         } else {
             line
         });
+    }
+    if app.config.ui.sidebar_channels
+        && app.terminal_height >= 30
+        && !app.subscribed_channels.is_empty()
+    {
+        lines.push(Line::from(" Subscribed channels"));
+        for (i, card) in app.subscribed_channels.iter().enumerate() {
+            let current = focused && app.sidebar_index == SIDEBAR_ITEMS.len() + i;
+            if current {
+                cursor_line = lines.len();
+            }
+            lines.push(
+                Line::from(super::text::truncate_str(
+                    card.title(),
+                    inner.width as usize,
+                ))
+                .style(app.theme.style(if current {
+                    "selection"
+                } else {
+                    "text_dim"
+                })),
+            );
+        }
     }
     let scroll = cursor_line
         .saturating_add(1)

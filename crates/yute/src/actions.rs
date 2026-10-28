@@ -47,6 +47,15 @@ pub fn channel_of(card: &Card) -> Option<ChannelCard> {
 pub fn url(card: &Card) -> String {
     match card {
         Card::Channel(c) => format!("https://www.youtube.com/channel/{}", c.id),
+        Card::Playlist(p)
+            if p.is_mix && p.first_video_id.as_deref().is_some_and(|id| !id.is_empty()) =>
+        {
+            format!(
+                "https://www.youtube.com/watch?v={}&list={}",
+                p.first_video_id.as_deref().unwrap_or_default(),
+                p.id.trim_start_matches("VL")
+            )
+        }
         Card::Playlist(p) => format!(
             "https://www.youtube.com/playlist?list={}",
             p.id.trim_start_matches("VL")
@@ -58,6 +67,16 @@ pub fn url(card: &Card) -> String {
 
 #[derive(Clone, Debug)]
 pub enum AccountMutation {
+    ClearRating {
+        video_id: String,
+    },
+    WatchLater {
+        video_id: String,
+        remove: bool,
+    },
+    RemoveHistory {
+        video_id: String,
+    },
     Dislike {
         video_id: String,
     },
@@ -74,6 +93,13 @@ pub enum AccountMutation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemAction {
     Play,
+    Like,
+    Dislike,
+    Subscribe,
+    WatchLater,
+    RemoveHistory,
+    QueuePlaylist,
+    PlayAll,
     PlaySelect,
     Audio,
     Browse,
@@ -102,6 +128,9 @@ pub enum MenuStage {
     AudioFormats,
     LoadingPlaylists,
     Playlists,
+    DownloadKind,
+    PlaylistVideo,
+    PlaylistAudio,
 }
 pub struct ActionMenu {
     pub request: u64,
@@ -110,6 +139,8 @@ pub struct ActionMenu {
     pub stage: MenuStage,
     pub playlists: Vec<PlaylistCard>,
     pub message: String,
+    pub download: bool,
+    pub ffmpeg: bool,
     pub formats: Option<yute_core::media::formats::AvailableFormats>,
     pub cancelled: yute_core::oauth::CancellationToken,
 }
@@ -120,6 +151,45 @@ impl Drop for ActionMenu {
 }
 impl ActionMenu {
     pub fn media_rows(&self) -> Vec<(String, String)> {
+        if self.stage == MenuStage::DownloadKind {
+            return vec![
+                ("Video".into(), "video".into()),
+                ("Audio".into(), "audio".into()),
+            ];
+        }
+        if self.stage == MenuStage::PlaylistVideo {
+            return ["best", "1080p", "720p", "480p", "360p"]
+                .iter()
+                .map(|v| {
+                    (
+                        format!(
+                            "{}{}",
+                            v,
+                            if *v == "best" {
+                                ""
+                            } else {
+                                " ceiling per video"
+                            }
+                        ),
+                        (*v).into(),
+                    )
+                })
+                .collect();
+        }
+        if self.stage == MenuStage::PlaylistAudio {
+            let mut rows = vec![
+                ("Best original audio".into(), "best".into()),
+                ("Prefer Opus".into(), "opus".into()),
+                ("Prefer AAC".into(), "aac".into()),
+            ];
+            if self.ffmpeg {
+                for v in ["mp3", "flac", "m4a"] {
+                    rows.push((format!("{} (convert)", v.to_uppercase()), v.into()));
+                }
+            }
+            return rows;
+        }
+
         use yute_core::media::formats::MediaKind;
         let Some(formats) = &self.formats else {
             return vec![];
@@ -194,6 +264,14 @@ impl ActionMenu {
                         if f.hdr { " · HDR" } else { "" }
                     ),
                     selector,
+                ));
+            }
+        }
+        if self.download && self.ffmpeg && self.stage == MenuStage::AudioFormats {
+            for kind in ["mp3", "flac", "m4a"] {
+                result.push((
+                    format!("{} (convert)", kind.to_uppercase()),
+                    format!("convert:{kind}"),
                 ));
             }
         }
@@ -302,7 +380,11 @@ pub fn menu_entries(card: &Card, authenticated: bool, downloading: bool) -> Vec<
     }
     if !matches!(card, Card::Channel(_)) {
         entries.push(MenuEntry {
-            label: "Download locally",
+            label: if matches!(card, Card::Playlist(_)) {
+                "Download playlist..."
+            } else {
+                "Download..."
+            },
             key: 'd',
             action: Download,
             unavailable: if matches!(activation(card), OpenAction::Unavailable(_)) {
@@ -332,25 +414,180 @@ pub fn menu_entries(card: &Card, authenticated: bool, downloading: bool) -> Vec<
             unavailable: None,
         });
     }
+    if authenticated && !local {
+        if matches!(card, Card::Video(_)) {
+            for (label, key, action) in [
+                ("Add/remove Watch Later", 'w', WatchLater),
+                ("Like / Unlike", '+', Like),
+                ("Dislike / Remove dislike", '-', Dislike),
+                ("Remove from history", 'R', RemoveHistory),
+            ] {
+                entries.push(MenuEntry {
+                    label,
+                    key,
+                    action,
+                    unavailable: None,
+                });
+            }
+        }
+        if channel_of(card).is_some() {
+            entries.push(MenuEntry {
+                label: "Subscribe / Unsubscribe",
+                key: 'S',
+                action: Subscribe,
+                unavailable: None,
+            });
+        }
+    }
+    if matches!(card, Card::Playlist(_)) {
+        entries.push(MenuEntry {
+            label: "Queue playlist",
+            key: 'a',
+            action: QueuePlaylist,
+            unavailable: None,
+        });
+    }
+    entries.sort_by_key(|e| match e.action {
+        Play | PlaySelect | Audio | Browse => 0,
+        Queue | QueuePlaylist | Save | WatchLater | Like | Dislike => 1,
+        Download | CancelDownload | Browser | CopyUrl | CopyTitle => 2,
+        _ => 3,
+    });
     entries
+}
+pub fn visible_entries(app: &crate::app::App, card: &Card) -> Vec<MenuEntry> {
+    use crate::backend::Backend;
+    menu_entries(card, app.is_authenticated(), app.download_active)
+        .into_iter()
+        .filter(|e| {
+            (e.unavailable.is_none() || e.action == ItemAction::Save)
+                && (e.action != ItemAction::RemoveHistory
+                    || (app.screen == crate::app::Screen::History
+                        && app.backend.can_remove_history(card.id())))
+        })
+        .map(|mut e| {
+            match e.action {
+                ItemAction::Subscribe => {
+                    if let Some(channel) = channel_of(card) {
+                        e.label =
+                            if app
+                                .subscriptions
+                                .get(&channel.id)
+                                .copied()
+                                .unwrap_or_else(|| {
+                                    app.subscribed_channels.iter().any(|c| c.id() == channel.id)
+                                })
+                            {
+                                "Unsubscribe"
+                            } else {
+                                "Subscribe"
+                            };
+                    }
+                }
+                ItemAction::Like => {
+                    e.label = if app.ratings.get(card.id()) == Some(&1)
+                        || app.screen == crate::app::Screen::Liked
+                    {
+                        "Unlike"
+                    } else {
+                        "Like"
+                    }
+                }
+                ItemAction::Dislike => {
+                    e.label = if app.ratings.get(card.id()) == Some(&-1) {
+                        "Remove dislike"
+                    } else {
+                        "Dislike"
+                    }
+                }
+                ItemAction::WatchLater => {
+                    e.label = if app.watch_later.contains(card.id())
+                        || app.screen == crate::app::Screen::WatchLater
+                    {
+                        "Remove Watch Later"
+                    } else {
+                        "Add Watch Later"
+                    }
+                }
+                _ => (),
+            }
+            e
+        })
+        .collect()
+}
+pub fn menu_rows(menu: &ActionMenu, auth: bool, active: bool) -> Vec<(String, Option<char>)> {
+    if menu.stage == MenuStage::Actions {
+        return menu_entries(&menu.card, auth, active)
+            .into_iter()
+            .filter(|e| e.unavailable.is_none() || e.action == ItemAction::Save)
+            .map(|e| (e.label.to_string(), Some(e.key)))
+            .collect();
+    }
+    if menu.stage == MenuStage::PlayAs {
+        return vec![
+            ("Video".into(), None),
+            ("Audio only".into(), None),
+            ("Best automatically".into(), None),
+        ];
+    }
+    if menu.stage == MenuStage::Playlists {
+        return menu
+            .playlists
+            .iter()
+            .map(|p| (p.title.clone(), None))
+            .collect();
+    }
+    menu.media_rows()
+        .into_iter()
+        .map(|(label, _)| (label, None))
+        .collect()
 }
 pub fn menu_rect(
     app: &crate::app::App,
     area: ratatui::layout::Rect,
 ) -> Option<ratatui::layout::Rect> {
-    app.action_menu.as_ref()?;
-    let w = 58.min(area.width.saturating_sub(4));
-    let h = 16.min(area.height.saturating_sub(2));
+    use unicode_width::UnicodeWidthStr;
+    let menu = app.action_menu.as_ref()?;
+    let rows = if menu.stage == MenuStage::Actions {
+        visible_entries(app, &menu.card)
+            .into_iter()
+            .map(|e| (e.label.to_string(), Some(e.key)))
+            .collect()
+    } else {
+        menu_rows(menu, app.is_authenticated(), app.download_active)
+    };
+    let download_width = if rows.iter().any(|(label, _)| label.contains("Download")) {
+        app.config.downloads.directory.len() + 40
+    } else {
+        0
+    };
+    let width = rows
+        .iter()
+        .map(|(s, _)| s.width() + 7)
+        .max()
+        .unwrap_or(30)
+        .max(download_width)
+        .max(40)
+        .min((area.width as usize * 4 / 5).max(1))
+        .min(area.width.saturating_sub(2) as usize) as u16;
+    let title_lines = crate::ui::text::wrap_and_truncate_title(
+        menu.card.title(),
+        width.saturating_sub(4) as usize,
+        2,
+    )
+    .len();
+    let height =
+        (rows.len().max(1) + title_lines + 4).min(area.height.saturating_sub(2) as usize) as u16;
     Some(ratatui::layout::Rect::new(
-        area.x + (area.width - w) / 2,
-        area.y + (area.height - h) / 2,
-        w,
-        h,
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
     ))
 }
 pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
     use ratatui::{
-        style::{Modifier, Style},
+        layout::Rect,
         text::{Line, Span},
         widgets::{Block, Borders, Clear, Paragraph},
     };
@@ -363,205 +600,185 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
     f.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(if menu.stage == MenuStage::Actions {
-            " Actions "
-        } else if matches!(
-            menu.stage,
-            MenuStage::LoadingPlaylists | MenuStage::Playlists
-        ) {
-            " Save to playlist "
-        } else if menu.stage == MenuStage::PlayAs {
-            " Play as "
-        } else if menu.stage == MenuStage::AudioFormats {
-            " Audio "
+        .title(if menu.download {
+            " Download "
         } else {
-            " Video quality "
+            " Actions "
         })
-        .border_style(Style::default().fg(app.theme.accent))
-        .style(Style::default().bg(app.theme.surface));
+        .style(app.theme.style("popup"))
+        .border_style(app.theme.style("border_focused"));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
-    let auth = app.is_authenticated();
-    let entries = menu_entries(&menu.card, auth, app.download_active);
-    let mut lines = vec![
-        Line::from(Span::styled(
-            crate::ui::text::truncate_str(menu.card.title(), inner.width as usize),
-            Style::default()
-                .fg(app.theme.text)
-                .add_modifier(Modifier::BOLD),
-        )),
-        Line::default(),
-    ];
-    if menu.stage == MenuStage::LoadingFormats {
-        lines.push(Line::from(if menu.message.is_empty() {
-            "Resolving formats..."
-        } else {
-            &menu.message
-        }));
-    } else if menu.stage == MenuStage::LoadingPlaylists {
-        lines.push(Line::from("Loading your playlists…"));
-    } else {
-        let visible = inner.height.saturating_sub(5).clamp(1, 8) as usize;
-        let first = menu.cursor.saturating_sub(visible - 1);
-        let rows = if menu.stage == MenuStage::Actions {
-            entries
-                .iter()
-                .map(|e| {
-                    use crate::ui::icons::Icon;
-                    let icon = match e.action {
-                        ItemAction::Play | ItemAction::PlaySelect => Some(Icon::Play),
-                        ItemAction::Audio => Some(Icon::Audio),
-                        ItemAction::Download | ItemAction::CancelDownload => Some(Icon::Download),
-                        ItemAction::Queue => Some(Icon::Queue),
-                        ItemAction::Save => Some(Icon::Save),
-                        ItemAction::Browser => Some(Icon::Browser),
-                        ItemAction::CopyUrl | ItemAction::CopyTitle => Some(Icon::Copy),
-                        ItemAction::Channel | ItemAction::Browse => Some(Icon::Channel),
-                    };
-                    let label = icon
-                        .map(|i| i.label(app.config.icons(), e.label))
-                        .unwrap_or_else(|| e.label.into());
-                    (format!("{}  {label}", e.key), e.unavailable.is_some())
-                })
-                .collect::<Vec<_>>()
-        } else if menu.stage == MenuStage::PlayAs {
-            vec![
-                ("Video".into(), false),
-                ("Audio only".into(), false),
-                ("Best automatically".into(), false),
-            ]
-        } else if matches!(
-            menu.stage,
-            MenuStage::VideoFormats | MenuStage::AudioFormats
-        ) {
-            menu.media_rows()
-                .into_iter()
-                .map(|(label, _)| (label, false))
-                .collect()
-        } else {
-            menu.playlists
-                .iter()
-                .map(|p| (p.title.clone(), false))
-                .collect()
-        };
-        if rows.is_empty() {
-            lines.push(Line::from(if menu.stage == MenuStage::Playlists {
-                "No writable playlists returned by YouTube."
-            } else {
-                "No matching media streams available."
-            }));
-        }
-        for (i, (label, disabled)) in rows.iter().enumerate().skip(first).take(visible) {
-            let active = i == menu.cursor;
-            let style = Style::default()
-                .fg(if *disabled {
-                    app.theme.text_secondary
-                } else if active {
-                    app.theme.accent
-                } else {
-                    app.theme.text
-                })
-                .bg(if active {
-                    app.theme.surface_hover
-                } else {
-                    app.theme.surface
-                });
-            let mut spans = vec![Span::styled(if active { "› " } else { "  " }, style)];
-            if menu.stage == MenuStage::Actions {
-                let (hint, text) = label.split_once("  ").unwrap_or(("", label));
-                spans.push(Span::styled(
-                    hint.to_owned(),
-                    style
-                        .fg(app.theme.text_secondary)
-                        .add_modifier(Modifier::DIM),
-                ));
-                spans.push(Span::styled(format!("  {text}"), style));
-            } else {
-                spans.push(Span::styled(label.clone(), style));
-            }
-            lines.push(Line::from(spans));
-        }
-    }
-    let message = if !menu.message.is_empty() {
-        menu.message.as_str()
-    } else if menu.stage == MenuStage::Actions {
-        entries
-            .get(menu.cursor)
-            .and_then(|e| e.unavailable)
-            .unwrap_or("Downloads go to ~/Videos/Yute")
-    } else {
-        "Choose a destination playlist"
-    };
+    let titles = crate::ui::text::wrap_and_truncate_title(
+        menu.card.title(),
+        inner.width.saturating_sub(2) as usize,
+        2,
+    );
+    let title_h = titles.len() as u16;
     f.render_widget(
-        Paragraph::new(lines),
-        ratatui::layout::Rect::new(
-            inner.x,
+        Paragraph::new(titles.into_iter().map(Line::from).collect::<Vec<_>>())
+            .style(app.theme.style("text")),
+        Rect::new(
+            inner.x + 1,
             inner.y,
-            inner.width,
-            inner.height.saturating_sub(3),
+            inner.width.saturating_sub(2),
+            title_h.min(inner.height),
         ),
     );
-    f.render_widget(
-        Paragraph::new(vec![
-            Line::from(Span::styled(
-                message,
-                Style::default().fg(app.theme.text_secondary),
-            )),
-            Line::from("j/k select · Enter action · Esc close"),
-        ])
-        .wrap(ratatui::widgets::Wrap { trim: true }),
-        ratatui::layout::Rect::new(inner.x, inner.bottom().saturating_sub(3), inner.width, 3),
-    );
+    let rows = if menu.stage == MenuStage::Actions {
+        visible_entries(app, &menu.card)
+            .into_iter()
+            .map(|e| (e.label.to_string(), Some(e.key)))
+            .collect()
+    } else {
+        menu_rows(menu, app.is_authenticated(), app.download_active)
+    };
+    let visible = inner.height.saturating_sub(title_h + 2) as usize;
+    let first = menu.cursor.saturating_sub(visible.saturating_sub(1));
+    let mut lines = vec![];
+    for (i, (label, key)) in rows.iter().enumerate().skip(first).take(visible) {
+        let selected = i == menu.cursor;
+        let style = app
+            .theme
+            .style(if selected { "popup_selected" } else { "text" });
+        let icon = key
+            .and_then(|k| {
+                visible_entries(app, &menu.card)
+                    .into_iter()
+                    .find(|e| e.key == k)
+            })
+            .map(|e| match e.action {
+                ItemAction::Play | ItemAction::PlayAll | ItemAction::PlaySelect => {
+                    crate::ui::icons::Icon::Play
+                }
+                ItemAction::Audio => crate::ui::icons::Icon::Audio,
+                ItemAction::Download | ItemAction::CancelDownload => {
+                    crate::ui::icons::Icon::Download
+                }
+                ItemAction::CopyUrl | ItemAction::CopyTitle => crate::ui::icons::Icon::Copy,
+                ItemAction::Browser => crate::ui::icons::Icon::Browser,
+                ItemAction::Like => crate::ui::icons::Icon::Like,
+                ItemAction::Dislike => crate::ui::icons::Icon::Dislike,
+                ItemAction::WatchLater => crate::ui::icons::Icon::WatchLater,
+                ItemAction::Queue | ItemAction::QueuePlaylist => crate::ui::icons::Icon::Queue,
+                ItemAction::Save => crate::ui::icons::Icon::Save,
+                _ => crate::ui::icons::Icon::Channel,
+            });
+        let group = if menu.stage == MenuStage::Actions {
+            let entries = visible_entries(app, &menu.card);
+            let rank = |a: ItemAction| match a {
+                ItemAction::Play
+                | ItemAction::PlaySelect
+                | ItemAction::Audio
+                | ItemAction::Browse => 0,
+                ItemAction::Queue
+                | ItemAction::QueuePlaylist
+                | ItemAction::Save
+                | ItemAction::WatchLater
+                | ItemAction::Like
+                | ItemAction::Dislike => 1,
+                ItemAction::Download
+                | ItemAction::CancelDownload
+                | ItemAction::Browser
+                | ItemAction::CopyUrl
+                | ItemAction::CopyTitle => 2,
+                _ => 3,
+            };
+            if let Some(entry) = entries.get(i) {
+                if i == 0 || rank(entries[i - 1].action) != rank(entry.action) {
+                    ["Playback", "Library", "Share", "Account"][rank(entry.action)]
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            }
+        } else {
+            ""
+        };
+        let decorated = icon
+            .map(|i| i.label(app.config.icons(), label))
+            .unwrap_or_else(|| label.clone());
+        let text = format!(
+            "{} {}{}",
+            if selected { ">" } else { " " },
+            key.map(|c| format!("{c}  ")).unwrap_or_default(),
+            if group.is_empty() {
+                decorated
+            } else {
+                format!("{group} · {decorated}")
+            }
+        );
+        let mut spans = vec![Span::styled(
+            crate::ui::text::truncate_str(&text, inner.width as usize),
+            style,
+        )];
+        if label.contains("Download") && inner.width > 50 {
+            use unicode_width::UnicodeWidthStr;
+            let used = text.width();
+            let hint = &app.config.downloads.directory;
+            let pad = (inner.width as usize).saturating_sub(used + hint.width());
+            spans.push(Span::styled(
+                format!("{}{}", " ".repeat(pad), hint),
+                app.theme.style("action_hint"),
+            ));
+        }
+        lines.push(Line::from(spans));
+    }
+    if rows.is_empty() {
+        lines.push(Line::from(if menu.stage == MenuStage::LoadingFormats {
+            "Resolving formats..."
+        } else if menu.stage == MenuStage::LoadingPlaylists {
+            "Loading playlists..."
+        } else {
+            "No available entries"
+        }));
+    }
+    let list = Rect::new(inner.x, inner.y + title_h + 1, inner.width, visible as u16);
+    f.render_widget(Paragraph::new(lines), list);
+    if inner.height > 0 {
+        let indicator = format!(
+            "{}{}",
+            if first > 0 { "▲ " } else { "" },
+            if first + visible < rows.len() {
+                "▼ "
+            } else {
+                ""
+            }
+        );
+        if !menu.message.is_empty() {
+            f.render_widget(
+                Paragraph::new(crate::ui::text::truncate_str(
+                    &menu.message,
+                    inner.width as usize,
+                ))
+                .style(app.theme.style("warning")),
+                Rect::new(inner.x, inner.y + title_h, inner.width, 1),
+            );
+        }
+        let footer = format!("{indicator}j/k move · Enter select · Esc close");
+        f.render_widget(
+            Paragraph::new(crate::ui::text::truncate_str(&footer, inner.width as usize))
+                .style(app.theme.style("action_hint")),
+            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+        );
+    }
 }
 
 /// Argument-only process construction: user/entity text is never interpreted by a shell.
 pub fn download_command(
     card: &Card,
     cfg: &crate::config::Config,
-    dir: &std::path::Path,
+    _dir: &std::path::Path,
 ) -> tokio::process::Command {
-    let mut command = tokio::process::Command::new("yt-dlp");
-    command
-        .kill_on_drop(true)
-        .args([
-            "--ignore-config",
-            "--js-runtimes",
-            "node",
-            "--quiet",
-            "--no-warnings",
-            "--no-progress",
-            "--no-overwrites",
-            "--restrict-filenames",
-            "--format",
-        ])
-        .arg(cfg.playback.resolved_ytdl_format())
-        .arg("--paths")
-        .arg(dir)
-        .args(["--output", "%(title).160B [%(id)s].%(ext)s"]);
-    command.arg(if matches!(card, Card::Playlist(_)) {
-        "--yes-playlist"
-    } else {
-        "--no-playlist"
-    });
-    let url = if let Card::Playlist(p) = card {
-        let seed = p
-            .first_video_id
-            .as_deref()
-            .or_else(|| p.id.strip_prefix("RD").filter(|s| s.len() == 11));
-        if p.is_mix {
-            seed.map(|id| format!("https://www.youtube.com/watch?v={id}&list={}", p.id))
-                .unwrap_or_else(|| url(card))
-        } else {
-            url(card)
-        }
-    } else {
-        url(card)
-    };
-    command
-        .arg("--")
-        .arg(url)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    command
+    yute_core::downloads::command(
+        &yute_core::downloads::Request {
+            url: url(card),
+            playlist: matches!(card, Card::Playlist(_)),
+            mode: yute_core::downloads::Mode::Exact(cfg.playback.resolved_ytdl_format()),
+            ffmpeg: false,
+        },
+        cfg,
+    )
+    .expect("configured download selector")
 }

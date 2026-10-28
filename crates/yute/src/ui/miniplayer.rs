@@ -1,7 +1,7 @@
 use crate::app::App;
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -28,15 +28,10 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(Line::from(vec![
             Span::styled(
                 if status.paused { " Ⅱ " } else { " ▶ " },
-                Style::default().fg(app.theme.accent),
+                app.theme.style("accent"),
             ),
-            Span::styled(
-                title,
-                Style::default()
-                    .fg(app.theme.text)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(suffix, Style::default().fg(app.theme.text_secondary)),
+            Span::styled(title, app.theme.style("text").add_modifier(Modifier::BOLD)),
+            Span::styled(suffix, app.theme.style("text_dim")),
         ])),
         area,
     );

@@ -30,11 +30,7 @@ pub fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let label = format!(" {mode}  {prefix}");
     let label_width = (label.width() as u16).min(area.width);
     f.render_widget(
-        Paragraph::new(label).style(
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new(label).style(app.theme.style("accent").add_modifier(Modifier::BOLD)),
         Rect::new(area.x, area.y, label_width, area.height),
     );
     let input = Rect::new(
@@ -54,7 +50,7 @@ pub fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let scroll = cursor_width.saturating_sub(input.width.saturating_sub(1) as usize);
     f.render_widget(
         Paragraph::new(text)
-            .style(Style::default().fg(app.theme.text))
+            .style(app.theme.style("text"))
             .scroll((0, scroll.min(u16::MAX as usize) as u16)),
         input,
     );
@@ -121,8 +117,7 @@ pub fn render_cmdline(f: &mut Frame, app: &App) {
                 .collect::<Vec<_>>()
                 .join("\n");
             f.render_widget(
-                Paragraph::new(lines)
-                    .style(Style::default().fg(app.theme.text).bg(app.theme.surface)),
+                Paragraph::new(lines).style(app.theme.style("text").bg(app.theme.surface)),
                 rect,
             );
         }
@@ -136,7 +131,7 @@ pub fn render_cmdline(f: &mut Frame, app: &App) {
         f.render_widget(
             Paragraph::new(text.as_str())
                 .wrap(ratatui::widgets::Wrap { trim: false })
-                .style(Style::default().fg(app.theme.text).bg(app.theme.surface)),
+                .style(app.theme.style("text").bg(app.theme.surface)),
             rect,
         );
         return;
@@ -155,7 +150,7 @@ pub fn render_cmdline(f: &mut Frame, app: &App) {
     let block = Block::default()
         .title(" Commands ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.accent))
+        .border_style(app.theme.style("accent"))
         .style(Style::default().bg(app.theme.surface));
     let inner = block.inner(rect);
     f.render_widget(block, rect);
@@ -165,12 +160,12 @@ pub fn render_cmdline(f: &mut Frame, app: &App) {
     for (i, name) in choices.iter().enumerate().skip(start).take(rows) {
         let selected = i == app.completion_index;
         let style = if selected {
-            Style::default()
-                .fg(app.theme.accent)
-                .bg(app.theme.surface_hover)
+            app.theme
+                .style("accent")
+                .patch(app.theme.style("selection"))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(app.theme.text)
+            app.theme.style("text")
         };
         lines.push(Line::from(Span::styled(
             super::text::truncate_str(

@@ -19,6 +19,9 @@ pub struct EncodedCover {
     transmitted: AtomicBool,
 }
 impl EncodedCover {
+    pub fn invalidate(&self) {
+        self.transmitted.store(false, Ordering::SeqCst);
+    }
     pub fn new(protocol: &Protocol, size: Size) -> Self {
         let mut buffer = Buffer::empty(Rect::new(0, 0, size.width, size.height));
         ratatui_image::Image::new(protocol).render(buffer.area, &mut buffer);

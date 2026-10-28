@@ -232,6 +232,8 @@ impl FormatResolver {
             .kill_on_drop(true)
             .args([
                 "--ignore-config",
+                "--js-runtimes",
+                "node",
                 "--dump-single-json",
                 "--skip-download",
                 "--no-playlist",

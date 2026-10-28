@@ -19,6 +19,26 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Thumbnail cache", "Shared source and encoded thumbnail cache budget on disk. Oldest accessed entries are pruned."),
     ("Thumbnail prefetch", "Preload 0-3 pages after visible cards. Visible requests always have priority."),
     ("Icons", "auto / nerd / unicode / ascii / none. Auto uses Unicode; YUTE_NERD_FONT=1 opts into Nerd Fonts."),
+    ("Theme", "terminal/auto/custom; live reload. Invalid files keep the previous theme."),
+    ("Graphics", "auto confirms protocols; mux sessions safely use halfblocks. Changes apply live."),
+    ("Sidebar", "Show/hide navigation."),
+    ("Sidebar channel list", "Names-only subscribed channels in tall sidebars; loaded asynchronously."),
+    ("Action bar", "Auto shows contextual actions at 30 rows; off hides it."),
+    ("Emoji", "auto substitutes risky sequences; keep preserves; strip removes emoji."),
+    ("Download quality", "Per-item ceiling for playlists; exact qualities use the format menu."),
+    ("Download audio", "Original streams by default; no automatic conversion."),
+    ("Write metadata", "Write yt-dlp JSON sidecars; may include public media metadata."),
+    ("Write thumbnail", "Save original image alongside media."),
+    ("Write subtitles", "Save available subtitles."),
+    ("Keep partial downloads", "Keep resumable yt-dlp partial files."),
+    ("Download directory", "Edit [downloads].directory in config.toml; live reload."),    ("Default quality", "Automatic target below the maximum; applies next video."),
+    ("Preferred codec", "auto / AV1 / VP9 / H.264; compatible fallback remains available."),
+    ("Preferred audio", "Original codec preference; applies next video."),
+    ("Audio language", "MPV preferred audio language; applies next video."),
+    ("Subtitle language", "MPV subtitle language preference; applies next video."),
+    ("History sync", "Send progress only when enabled; cross-client synchronization needs live QA."),
+    ("Playlist folders", "Use a per-playlist download directory."),
+
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -68,6 +88,32 @@ fn value(app: &App, index: usize) -> String {
         9 => format!("‹ {} MiB ›", app.config.thumbnails.cache_mb),
         10 => format!("‹ {} pages ›", app.config.thumbnails.prefetch_pages),
         11 => format!("‹ {} ›", app.config.icons()),
+        12 => app.config.general.theme.clone(),
+        13 => app.config.general.graphics.clone(),
+        14 => toggle(app.sidebar_expanded),
+        15 => toggle(app.config.ui.sidebar_channels),
+        16 => {
+            if app.config.ui.action_bar == "off" {
+                "off".into()
+            } else {
+                "auto".into()
+            }
+        }
+        17 => app.config.text.emoji.clone(),
+        18 => app.config.downloads.video_quality.clone(),
+        19 => app.config.downloads.audio_mode.clone(),
+        20 => toggle(app.config.downloads.write_metadata),
+        21 => toggle(app.config.downloads.write_thumbnail),
+        22 => toggle(app.config.downloads.write_subtitles),
+        23 => toggle(app.config.downloads.keep_partial),
+        24 => app.config.downloads.directory.clone(),
+        25 => app.config.playback.default_quality.clone(),
+        26 => app.config.playback.preferred_codec.clone(),
+        27 => app.config.playback.preferred_audio_codec.clone(),
+        28 => app.config.playback.audio_language.clone(),
+        29 => app.config.playback.subtitle_language.clone(),
+        30 => toggle(app.config.playback.mark_watched),
+        31 => toggle(app.config.downloads.playlist_subdirectories),
         _ => String::new(),
     }
 }
@@ -90,9 +136,7 @@ pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
     let mut lines = vec![
         Line::from(Span::styled(
             "Preferences",
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD),
+            app.theme.style("accent").add_modifier(Modifier::BOLD),
         )),
         Line::default(),
     ];
@@ -136,18 +180,18 @@ pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
         let desc = Rect::new(inner.x, inner.bottom() - 4, inner.width, 3);
         f.render_widget(
             Paragraph::new(SETTINGS_ITEMS[selected].1)
-                .style(Style::default().fg(app.theme.text_secondary))
+                .style(app.theme.style("text_dim"))
                 .wrap(ratatui::widgets::Wrap { trim: true })
                 .block(
                     Block::default()
                         .borders(Borders::TOP)
-                        .border_style(Style::default().fg(app.theme.border)),
+                        .border_style(app.theme.style("border")),
                 ),
             desc,
         );
         f.render_widget(
             Paragraph::new("j/k choose   h/l adjust   Enter toggle   Esc back")
-                .style(Style::default().fg(app.theme.text_secondary)),
+                .style(app.theme.style("text_dim")),
             Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
         );
     }
@@ -238,6 +282,108 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
                 )
                 .into(),
             )
+        }
+        12 => {
+            let names = crate::theme::Theme::names();
+            app.config.general.theme = step(&names, &app.config.general.theme, forward);
+        }
+        13 => {
+            app.config.general.graphics = step(
+                &["auto", "kitty", "iterm2", "sixel", "halfblocks", "none"],
+                &app.config.general.graphics.as_str(),
+                forward,
+            )
+            .into()
+        }
+        14 => {
+            app.sidebar_expanded = !app.sidebar_expanded;
+            app.config.grid.sidebar_expanded = app.sidebar_expanded;
+        }
+        15 => app.config.ui.sidebar_channels = !app.config.ui.sidebar_channels,
+        16 => {
+            app.config.ui.action_bar = if app.config.ui.action_bar == "off" {
+                "auto".into()
+            } else {
+                "off".into()
+            }
+        }
+        17 => {
+            app.config.text.emoji = step(
+                &["auto", "keep", "strip"],
+                &app.config.text.emoji.as_str(),
+                forward,
+            )
+            .into()
+        }
+        18 => {
+            app.config.downloads.video_quality = step(
+                RESOLUTIONS,
+                &app.config.downloads.video_quality.as_str(),
+                forward,
+            )
+            .into()
+        }
+        19 => {
+            app.config.downloads.audio_mode = step(
+                &["best", "opus", "aac"],
+                &app.config.downloads.audio_mode.as_str(),
+                forward,
+            )
+            .into()
+        }
+        20 => app.config.downloads.write_metadata = !app.config.downloads.write_metadata,
+        21 => app.config.downloads.write_thumbnail = !app.config.downloads.write_thumbnail,
+        22 => app.config.downloads.write_subtitles = !app.config.downloads.write_subtitles,
+        23 => app.config.downloads.keep_partial = !app.config.downloads.keep_partial,
+        24 => {
+            app.status_text =
+                "Edit [downloads].directory in config.toml; live reload applies it".into();
+            return;
+        }
+        25 => {
+            app.config.playback.default_quality = step(
+                RESOLUTIONS,
+                &app.config.playback.default_quality.as_str(),
+                forward,
+            )
+            .into()
+        }
+        26 => {
+            app.config.playback.preferred_codec = step(
+                &["auto", "av1", "vp9", "h264"],
+                &app.config.playback.preferred_codec.as_str(),
+                forward,
+            )
+            .into()
+        }
+        27 => {
+            app.config.playback.preferred_audio_codec = step(
+                &["auto", "opus", "aac"],
+                &app.config.playback.preferred_audio_codec.as_str(),
+                forward,
+            )
+            .into()
+        }
+        28 => {
+            app.config.playback.audio_language = step(
+                &["auto", "en", "hi", "ja"],
+                &app.config.playback.audio_language.as_str(),
+                forward,
+            )
+            .into()
+        }
+        29 => {
+            app.config.playback.subtitle_language = step(
+                &["auto", "en", "hi", "ja"],
+                &app.config.playback.subtitle_language.as_str(),
+                forward,
+            )
+            .into()
+        }
+        30 => app.config.playback.mark_watched = !app.config.playback.mark_watched,
+        31 => {
+            app.config.downloads.playlist_subdirectories =
+                !app.config.downloads.playlist_subdirectories
         }
         _ => return,
     }

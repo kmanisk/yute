@@ -60,6 +60,7 @@ impl YtDlpBackend {
         let mut cmd = Command::new("yt-dlp");
         cmd.kill_on_drop(true)
             .arg("--ignore-config")
+            .args(["--js-runtimes", "node"])
             .arg("-J")
             .arg("--flat-playlist")
             .arg("--no-warnings")
@@ -188,6 +189,7 @@ impl YtDlpBackend {
                     thumb_url,
                     is_mix,
                     first_video_id: None,
+                    updated: None,
                 }));
                 continue;
             }

@@ -69,60 +69,77 @@ pub fn sanitize_title(title: &str, strip_emoji: bool) -> String {
     trimmed.to_string()
 }
 
+pub fn complex_width(text: &str, width: usize) -> usize {
+    if text.chars().any(|c| matches!(c as u32, 0x0900..=0x0dff)) {
+        width.saturating_sub(1)
+    } else {
+        width
+    }
+}
+pub fn title_for(title: &str, config: &crate::config::Config) -> String {
+    let policy = if config.strip_emoji() && config.text.emoji == "auto" {
+        "strip"
+    } else {
+        config.text.emoji.as_str()
+    };
+    let mut safe = String::new();
+    for g in title.graphemes(true) {
+        let emoji =
+            g.chars().any(|c| matches!(c as u32, 0x1f000..=0x1faff)) || g.contains('\u{fe0f}');
+        match policy {
+            "strip" if emoji => (),
+            "auto"
+                if emoji
+                    && (g.contains('\u{200d}')
+                        || g.contains('\u{fe0f}')
+                        || g.chars().any(|c| matches!(c as u32, 0x1f1e6..=0x1f1ff))) =>
+            {
+                safe.push('*')
+            }
+            _ => safe.push_str(g),
+        }
+    }
+    sanitize_title(&safe, false)
+}
 pub fn wrap_and_truncate_title(
     clean_title: &str,
     max_width: usize,
     max_lines: usize,
 ) -> Vec<String> {
+    let max_width = complex_width(clean_title, max_width);
     if max_width == 0 || max_lines == 0 {
-        return Vec::new();
+        return vec![];
     }
     let text = clean_title.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut remaining = text.as_str();
-    let mut lines = Vec::new();
+    let mut lines = vec![];
     while !remaining.is_empty() && lines.len() < max_lines {
         if remaining.width() <= max_width {
-            lines.push(remaining.to_owned());
+            lines.push(remaining.into());
             break;
         }
         if lines.len() + 1 == max_lines {
-            let mut final_line = String::new();
-            for word in remaining.split_whitespace() {
-                let spacing = usize::from(!final_line.is_empty());
-                if final_line.width() + spacing + word.width() > max_width.saturating_sub(1) {
-                    break;
-                }
-                if spacing > 0 {
-                    final_line.push(' ');
-                }
-                final_line.push_str(word);
-            }
-            if final_line.is_empty() {
-                lines.push(truncate_str(remaining, max_width));
-            } else {
-                final_line.push('…');
-                lines.push(final_line);
-            }
+            lines.push(truncate_str(remaining, max_width));
             break;
         }
         let mut width = 0;
         let mut end = 0;
-        for (offset, grapheme) in remaining.grapheme_indices(true) {
-            if width + grapheme.width() > max_width {
+        for (offset, g) in remaining.grapheme_indices(true) {
+            if width + g.width() > max_width {
                 break;
             }
-            width += grapheme.width();
-            end = offset + grapheme.len();
+            width += g.width();
+            end = offset + g.len();
         }
         if end == 0 {
-            lines.push(truncate_str(remaining, max_width));
+            lines.push("…".into());
             break;
         }
         let split = remaining[..end]
             .rfind(' ')
-            .filter(|offset| *offset > 0)
+            .filter(|i| *i > 0)
             .unwrap_or(end);
-        lines.push(remaining[..split].trim_end().to_owned());
+        lines.push(remaining[..split].trim_end().into());
         remaining = remaining[split..].trim_start();
     }
     lines
@@ -174,7 +191,9 @@ pub fn format_meta_line(
         .as_deref()
         .map(|v| v.trim())
         .filter(|v| !v.is_empty());
-    let pub_str = published.map(|p| p.trim()).filter(|p| !p.is_empty());
+    let pub_str = published
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty() && !p.chars().all(|c| matches!(c, '•' | '·' | ' ' | '|')));
 
     // Priority:
     // 1. All fields if fit
@@ -308,6 +327,9 @@ pub fn truncate_str(s: &str, max_width: usize) -> String {
         } else {
             break;
         }
+    }
+    while res.chars().last().is_some_and(char::is_whitespace) {
+        res.pop();
     }
     res.push('…');
     res

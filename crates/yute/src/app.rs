@@ -158,6 +158,15 @@ pub struct App {
     pub action_menu: Option<crate::actions::ActionMenu>,
     pub menu_request: u64,
     pub format_resolver: yute_core::media::formats::FormatResolver,
+    pub subscribed_channels: Vec<Card>,
+    pub channels_loading: bool,
+    pub channels_loaded: bool,
+    pub channels_error: Option<String>,
+    pub terminal_height: u16,
+    pub ratings: std::collections::HashMap<String, i8>,
+    pub subscriptions: std::collections::HashMap<String, bool>,
+    pub watch_later: HashSet<String>,
+    pub ffmpeg: bool,
     pub download_active: bool,
     pub download_request: u64,
     pub download_task: Option<tokio::task::AbortHandle>,
@@ -314,6 +323,15 @@ impl App {
             action_menu: None,
             menu_request: 0,
             format_resolver: Default::default(),
+            subscribed_channels: vec![],
+            channels_loading: false,
+            channels_loaded: false,
+            channels_error: None,
+            terminal_height: 0,
+            ratings: Default::default(),
+            subscriptions: Default::default(),
+            watch_later: Default::default(),
+            ffmpeg: false,
             download_active: false,
             download_request: 0,
             download_task: None,
@@ -450,6 +468,22 @@ impl App {
         }
     }
     pub fn empty_feed_message(&self) -> String {
+        if self.screen == Screen::Home && self.filter_kind == FilterKind::Channels {
+            if !self.is_authenticated() {
+                return if self.auth.lock().unwrap().needs_login {
+                    "This account needs re-login. Use :account add".into()
+                } else {
+                    "Sign in with :account add".into()
+                };
+            }
+            if self.channels_loading {
+                return "Loading subscribed channels...".into();
+            }
+            if self.channels_error.is_some() {
+                return "Couldn't load channels · r retry".into();
+            }
+            return "No subscribed channels yet.".into();
+        }
         let route = match self.screen {
             Screen::Subscriptions => "subscriptions",
             Screen::History => "history",
@@ -458,7 +492,9 @@ impl App {
             Screen::Playlists => "playlists",
             Screen::LocalVideos => "local videos",
             Screen::Queue => "queued videos",
-            _ => "results",
+            Screen::Home => "recommendations",
+            Screen::Search => "search results",
+            _ => "items",
         };
         if self.anonymous_library() {
             if self.auth.lock().unwrap().needs_login {
@@ -487,6 +523,13 @@ r retry · :account",
     pub fn rebuild_backend(&mut self) {
         self.action_menu = None;
         self.home_pages.clear();
+        self.subscribed_channels.clear();
+        self.channels_loaded = false;
+        self.channels_loading = false;
+        self.channels_error = None;
+        self.ratings.clear();
+        self.subscriptions.clear();
+        self.watch_later.clear();
         self.home_source = FilterKind::All;
         self.channel_items.clear();
         self.channels_revision = (u64::MAX, 0);
@@ -496,8 +539,13 @@ r retry · :account",
     pub fn switch_account(&mut self, index: usize) -> bool {
         let start = std::time::Instant::now();
         let route = format!("{:?}", self.screen);
+        let saved_route = if self.screen == Screen::Home && self.home_source != FilterKind::All {
+            format!("Home:{:?}", self.home_source)
+        } else {
+            route.clone()
+        };
         self.account_store.remember_feed(
-            &route,
+            &saved_route,
             crate::backend::models::FeedPage {
                 items: self.items.clone(),
                 chips: vec![],
@@ -938,7 +986,11 @@ r retry · :account",
         }
 
         // Periodic tracking pings with real mpv time-pos
-        if self.player.is_alive() && self.player.status.file_loaded && !self.player.status.paused {
+        if self.config.playback.mark_watched
+            && self.player.is_alive()
+            && self.player.status.file_loaded
+            && !self.player.status.paused
+        {
             let pos = self.player.status.time_pos;
             if let Some(ref mut tracker) = self.watch_tracker {
                 if !tracker.playback_ping_sent && pos > 0.0 {
@@ -964,7 +1016,11 @@ r retry · :account",
 
         // Automatically return from watch screen when mpv closes and send final watchtime ping
         if was_playing && !self.player.status.is_alive {
-            if let Some(tracker) = self.watch_tracker.take() {
+            if let Some(tracker) = self
+                .watch_tracker
+                .take()
+                .filter(|_| self.config.playback.mark_watched)
+            {
                 let final_pos = self.player.status.time_pos;
                 if final_pos > 0.0 {
                     let backend = Arc::clone(&self.backend);

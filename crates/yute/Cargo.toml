@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 keywords = ["youtube", "terminal", "tui", "mpv", "ratatui"]
 categories = ["command-line-utilities", "multimedia"]
-include = ["src/**", "tests/**", "README.md", "LICENSE", "Cargo.toml"]
+include = ["src/**", "themes/**", "tests/**", "README.md", "LICENSE", "Cargo.toml"]
 repository = "https://github.com/kmanisk/yute"
 homepage = "https://github.com/kmanisk/yute"
 documentation = "https://docs.rs/yute"
@@ -38,3 +38,7 @@ unicode-width = "0.2"
 unicode-segmentation = "1"
 futures-util = "0.3"
 qrcode = { version = "0.14", default-features = false }
+
+notify = { version = "8.2.1", default-features = false }
+toml = "0.8"
+libc = "0.2"

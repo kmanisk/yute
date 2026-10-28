@@ -53,7 +53,7 @@ pub fn render_help(f: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.accent))
+        .border_style(app.theme.style("accent"))
         .title(format!(
             " {:?} · Help ",
             app.nav_history
@@ -100,11 +100,9 @@ pub fn render_help(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!(" {k:<22}"),
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                app.theme.style("accent").add_modifier(Modifier::BOLD),
             ),
-            Span::styled(desc, Style::default().fg(app.theme.text)),
+            Span::styled(desc, app.theme.style("text")),
         ]));
     }
 

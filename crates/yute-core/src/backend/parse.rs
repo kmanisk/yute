@@ -388,6 +388,7 @@ pub fn parse_lockup_view_model(v: &Value) -> Option<Card> {
             thumb_url,
             is_mix,
             first_video_id,
+            updated: None,
         }))
     } else {
         if !content_type.is_empty()
@@ -586,6 +587,11 @@ pub fn parse_playlist_renderer(v: &Value) -> Option<PlaylistCard> {
         thumb_url,
         is_mix,
         first_video_id,
+        updated: v
+            .get("updatedTimeText")
+            .or_else(|| v.get("publishedTimeText"))
+            .map(extract_text)
+            .filter(|s| !s.trim().is_empty()),
     })
 }
 
@@ -644,6 +650,7 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             thumb_url,
             is_mix,
             first_video_id: video_id.map(|s| s.to_string()),
+            updated: None,
         }));
     }
 
@@ -707,7 +714,11 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
         } else {
             1
         };
-        for item in meta_items.iter().skip(start_idx) {
+        for item in meta_items
+            .iter()
+            .skip(start_idx)
+            .filter(|s| !s.chars().all(|c| matches!(c, '•' | '·' | ' ' | '|')))
+        {
             if item.contains("view")
                 || item.contains("watching")
                 || item.ends_with('M')
@@ -1759,6 +1770,7 @@ pub fn parse_playlist_destinations(value: &Value) -> FeedPage {
                         thumb_url: String::new(),
                         is_mix: false,
                         first_video_id: None,
+                        updated: None,
                     }));
                 }
             }

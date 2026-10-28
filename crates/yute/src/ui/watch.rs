@@ -102,11 +102,9 @@ fn render_heading(f: &mut Frame, app: &App, area: Rect) {
         .or_else(|| app.watch_data.as_ref().map(|w| &w.video));
     let title = video.map_or("Video", |v| v.title.as_str());
     f.render_widget(
-        Paragraph::new(title).wrap(Wrap { trim: true }).style(
-            Style::default()
-                .fg(app.theme.text)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new(title)
+            .wrap(Wrap { trim: true })
+            .style(app.theme.style("text").add_modifier(Modifier::BOLD)),
         Rect::new(area.x, area.y, area.width, 2.min(area.height)),
     );
     let meta = video
@@ -125,7 +123,7 @@ fn render_heading(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
     if area.height > 2 {
         f.render_widget(
-            Paragraph::new(meta).style(Style::default().fg(app.theme.text_secondary)),
+            Paragraph::new(meta).style(app.theme.style("text_dim")),
             Rect::new(area.x, area.y + 2, area.width, 1),
         );
     }
@@ -144,13 +142,13 @@ fn render_heading(f: &mut Frame, app: &App, area: Rect) {
         };
         let filled = (fraction * f64::from(width.saturating_sub(1))).round() as usize;
         let line = Line::from(vec![
-            Span::styled("━".repeat(filled), Style::default().fg(app.theme.accent)),
-            Span::styled("●", Style::default().fg(app.theme.accent)),
+            Span::styled("━".repeat(filled), app.theme.style("accent")),
+            Span::styled("●", app.theme.style("accent")),
             Span::styled(
                 "─".repeat(width.saturating_sub(filled as u16 + 1) as usize),
-                Style::default().fg(app.theme.border),
+                app.theme.style("border"),
             ),
-            Span::styled(time, Style::default().fg(app.theme.text_secondary)),
+            Span::styled(time, app.theme.style("text_dim")),
         ]);
         f.render_widget(
             Paragraph::new(line),
@@ -175,7 +173,7 @@ fn render_heading(f: &mut Frame, app: &App, area: Rect) {
                 super::icons::Icon::Like.label(app.config.icons(), like),
                 super::icons::Icon::Dislike.label(app.config.icons(), dislike)
             ))
-            .style(Style::default().fg(app.theme.text_secondary)),
+            .style(app.theme.style("text_dim")),
             Rect::new(area.x, area.y + 4, area.width, 1),
         );
     }
@@ -208,8 +206,7 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
     );
     let Some(watch) = &app.watch_data else {
         f.render_widget(
-            Paragraph::new("Loading video details…")
-                .style(Style::default().fg(app.theme.text_secondary)),
+            Paragraph::new("Loading video details…").style(app.theme.style("text_dim")),
             inner,
         );
         return;
@@ -219,9 +216,7 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
         if text.starts_with("# ") || text.starts_with("## ") {
             lines.push(Line::from(Span::styled(
                 text.trim_start_matches('#').trim(),
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                app.theme.style("accent").add_modifier(Modifier::BOLD),
             )));
         } else {
             let spans = text
@@ -230,11 +225,9 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
                     Span::styled(
                         word,
                         if word.starts_with("https://") || word.starts_with("http://") {
-                            Style::default()
-                                .fg(app.theme.accent)
-                                .add_modifier(Modifier::UNDERLINED)
+                            app.theme.style("accent").add_modifier(Modifier::UNDERLINED)
                         } else {
-                            Style::default().fg(app.theme.text)
+                            app.theme.style("text")
                         },
                     )
                 })
@@ -245,13 +238,13 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             "No description provided.",
-            Style::default().fg(app.theme.text_secondary),
+            app.theme.style("text_dim"),
         )));
     }
     for (time, title) in &watch.chapters {
         lines.push(Line::from(Span::styled(
             format!("{}  {title}", format_time(f64::from(*time))),
-            Style::default().fg(app.theme.accent),
+            app.theme.style("accent"),
         )));
     }
     for (i, (label, url)) in description_links(app).iter().enumerate() {
@@ -265,9 +258,7 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
                     format!("{label}  {url}")
                 }
             ),
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::UNDERLINED),
+            app.theme.style("accent").add_modifier(Modifier::UNDERLINED),
         )));
     }
     f.render_widget(
@@ -301,7 +292,7 @@ fn render_comments(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(
             Paragraph::new(text)
                 .wrap(Wrap { trim: true })
-                .style(Style::default().fg(app.theme.text_secondary)),
+                .style(app.theme.style("text_dim")),
             inner,
         );
         return;
@@ -318,11 +309,7 @@ fn render_comments(f: &mut Frame, app: &App, area: Rect) {
                 if active { "> " } else { "" },
                 comment.author
             ))
-            .style(
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            ),
+            .style(app.theme.style("accent").add_modifier(Modifier::BOLD)),
             Rect::new(inner.x, y, inner.width, 1),
         );
         y += 1;
@@ -337,7 +324,7 @@ fn render_comments(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(
             Paragraph::new(comment.text.as_str())
                 .wrap(Wrap { trim: false })
-                .style(Style::default().fg(app.theme.text)),
+                .style(app.theme.style("text")),
             Rect::new(inner.x, y, inner.width, body_rows),
         );
         y += body_rows;
@@ -352,7 +339,7 @@ fn render_comments(f: &mut Frame, app: &App, area: Rect) {
         .collect::<Vec<_>>()
         .join(" · ");
         f.render_widget(
-            Paragraph::new(meta).style(Style::default().fg(app.theme.text_secondary)),
+            Paragraph::new(meta).style(app.theme.style("text_dim")),
             Rect::new(inner.x, y, inner.width, 1),
         );
         y = y.saturating_add(2);
@@ -384,8 +371,7 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
         .collect::<Vec<_>>();
     if items.is_empty() {
         f.render_widget(
-            Paragraph::new("No suggestions available")
-                .style(Style::default().fg(app.theme.text_secondary)),
+            Paragraph::new("No suggestions available").style(app.theme.style("text_dim")),
             inner,
         );
         return;
@@ -399,7 +385,7 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
         let rect = Rect::new(inner.x, y, inner.width, stride - 1);
         if selected {
             f.render_widget(
-                Block::default().style(Style::default().bg(app.theme.surface_hover)),
+                Block::default().style(Style::default().patch(app.theme.style("selection"))),
                 rect,
             );
         }
@@ -435,7 +421,7 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
         if let Card::Video(video) = item {
             f.render_widget(
                 Paragraph::new(super::text::truncate_str(&video.channel, width as usize))
-                    .style(Style::default().fg(app.theme.text_secondary)),
+                    .style(app.theme.style("text_dim")),
                 Rect::new(x, y + 2, width, 1),
             );
             let meta = super::text::format_meta_line(
@@ -444,7 +430,7 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
                 video.views.as_deref(),
                 video.published.as_deref(),
                 width as usize,
-                Style::default().fg(app.theme.text_secondary),
+                app.theme.style("text_dim"),
             );
             f.render_widget(
                 Paragraph::new(Line::from(meta)),
@@ -455,7 +441,7 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
                 super::thumbnail::badge(
                     f,
                     Paragraph::new(format!(" {duration}"))
-                        .style(Style::default().fg(app.theme.text).bg(app.theme.badge_bg)),
+                        .style(app.theme.style("text").bg(app.theme.badge_bg)),
                     Rect::new(image_area.right() - w, image_area.bottom() - 1, w, 1),
                 );
             }

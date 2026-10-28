@@ -47,6 +47,7 @@ fn mixes_have_an_explicit_playback_action() {
         thumb_url: "".into(),
         is_mix: true,
         first_video_id: Some("abcdefghijk".into()),
+        updated: None,
     });
     assert!(matches!(activation(&card), OpenAction::PlayMix(_)));
 }
@@ -175,6 +176,7 @@ fn entity_action_menu_never_offers_channel_playback_and_marks_login_requirements
         thumb_url: String::new(),
         is_mix: false,
         first_video_id: None,
+        updated: None,
     });
     assert!(menu_entries(&playlist, true, false)
         .iter()
@@ -199,6 +201,7 @@ fn yt_dlp_arguments_are_bounded_to_the_selected_entity_and_quality() {
         thumb_url: String::new(),
         is_mix: true,
         first_video_id: Some("abcdefghijk".into()),
+        updated: None,
     });
     let mut cfg = Config::default();
     cfg.backend.auth = "guest".into();

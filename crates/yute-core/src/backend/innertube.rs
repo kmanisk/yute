@@ -15,12 +15,16 @@ const INNERTUBE_BASE: &str = "https://www.youtube.com/youtubei/v1";
 pub struct InnerTubeBackend {
     client: Client,
     pub auth: Arc<Mutex<AuthContext>>,
+    history_actions: Mutex<std::collections::HashMap<String, String>>,
+    history_tokens: Mutex<std::collections::HashSet<String>>,
 }
 
 impl InnerTubeBackend {
     pub fn new(auth: AuthContext) -> Self {
         Self {
             client: crate::http::client(),
+            history_actions: Default::default(),
+            history_tokens: Default::default(),
             auth: Arc::new(Mutex::new(auth)),
         }
     }
@@ -28,6 +32,8 @@ impl InnerTubeBackend {
     pub fn from_arc(auth: Arc<Mutex<AuthContext>>) -> Self {
         Self {
             client: crate::http::client(),
+            history_actions: Default::default(),
+            history_tokens: Default::default(),
             auth,
         }
     }
@@ -205,7 +211,38 @@ impl InnerTubeBackend {
         let value = self
             .post_endpoint("browse", self.make_body(json!({"browseId": browse_id})))
             .await?;
+        if browse_id == "FEhistory" {
+            self.capture_history_actions(&value);
+        }
         self.read_account_feed(&value)
+    }
+    fn capture_history_actions(&self, value: &Value) {
+        fn visit(v: &Value, map: &mut std::collections::HashMap<String, String>) {
+            if let Some(id) = v.get("videoId").and_then(Value::as_str) {
+                if let Some(token) =
+                    crate::backend::parse::find_json_key(v, "feedbackToken").and_then(Value::as_str)
+                {
+                    map.insert(id.into(), token.into());
+                }
+            }
+            match v {
+                Value::Object(m) => {
+                    for v in m.values() {
+                        visit(v, map)
+                    }
+                }
+                Value::Array(a) => {
+                    for v in a {
+                        visit(v, map)
+                    }
+                }
+                _ => (),
+            }
+        }
+        visit(value, &mut self.history_actions.lock().unwrap());
+        if let Some(token) = crate::backend::parse::parse_continuation(value) {
+            self.history_tokens.lock().unwrap().insert(token);
+        }
     }
 
     fn read_account_feed(&self, value: &Value) -> Result<FeedPage> {
@@ -241,6 +278,47 @@ impl Backend for InnerTubeBackend {
     fn is_anonymous(&self) -> bool {
         let auth = self.auth.lock().unwrap();
         !auth.has_oauth() || auth.needs_login
+    }
+    async fn subscribed_channels(&self, token: Option<&str>) -> Result<FeedPage> {
+        self.require_account()?;
+        let extra = if let Some(token) = token {
+            json!({"continuation":token})
+        } else {
+            json!({"browseId":"FEsubscriptions"})
+        };
+        let value = self.post_endpoint("browse", self.make_body(extra)).await?;
+        let mut page = parse_subscribed_channels(&value)?;
+        page.continuation = page.continuation.map(|s| format!("yute:channels:{s}"));
+        Ok(page)
+    }
+    async fn remove_from_playlist(&self, playlist: &str, video: &str) -> Result<()> {
+        self.require_account()?;
+        let response=self.post_endpoint("browse/edit_playlist",self.make_body(json!({"playlistId":playlist.trim_start_matches("VL"),"actions":[{"action":"ACTION_REMOVE_VIDEO_BY_VIDEO_ID","removedVideoId":video}]}))).await?;
+        if response.get("status").and_then(Value::as_str) == Some("STATUS_SUCCEEDED") {
+            Ok(())
+        } else {
+            acknowledge_mutation(&response)
+        }
+    }
+    fn can_remove_history(&self, video: &str) -> bool {
+        self.history_actions.lock().unwrap().contains_key(video)
+    }
+    async fn remove_from_history(&self, video: &str) -> Result<()> {
+        self.require_account()?;
+        let token = self
+            .history_actions
+            .lock()
+            .unwrap()
+            .get(video)
+            .cloned()
+            .context("Reload History to obtain the server removal action")?;
+        let response = self
+            .post_endpoint(
+                "feedback",
+                self.make_body(json!({"feedbackTokens":[token]})),
+            )
+            .await?;
+        acknowledge_mutation(&response)
     }
     async fn home(&self, chip_token: Option<&str>) -> Result<FeedPage> {
         let body = if let Some(token) = chip_token {
@@ -297,6 +375,9 @@ impl Backend for InnerTubeBackend {
             let value = self
                 .post_endpoint("browse", self.make_body(json!({"continuation":token})))
                 .await?;
+            if self.history_tokens.lock().unwrap().contains(token) {
+                self.capture_history_actions(&value);
+            }
             return self.read_account_feed(&value);
         }
         if let Some(token) = token.strip_prefix("yute:reel:") {
@@ -939,4 +1020,83 @@ mod account_feed_tests {
         assert!(backend.playlists().await.is_err());
         assert!(backend.playlist("LL").await.is_err());
     }
+}
+
+/// TV subscriptions expose channel tabs, independently of Home video shelves.
+pub fn parse_subscribed_channels(value: &Value) -> Result<FeedPage> {
+    if crate::backend::parse::find_json_key(value, "loggedOut").and_then(Value::as_bool)
+        == Some(true)
+    {
+        return Err(crate::oauth::NeedsLogin.into());
+    }
+    let mut items = vec![];
+    let mut ids = std::collections::HashSet::new();
+    fn visit(
+        v: &Value,
+        out: &mut Vec<crate::backend::models::Card>,
+        ids: &mut std::collections::HashSet<String>,
+    ) {
+        if let Some(crate::backend::models::Card::Channel(c)) = crate::backend::parse::parse_card(v)
+        {
+            if ids.insert(c.id.clone()) {
+                out.push(crate::backend::models::Card::Channel(c));
+            }
+        }
+        for key in ["tabRenderer", "guideEntryRenderer"] {
+            if let Some(tab) = v.get(key) {
+                let endpoint = tab
+                    .get("endpoint")
+                    .or_else(|| tab.get("navigationEndpoint"));
+                if let Some(id) = endpoint
+                    .and_then(|e| e.pointer("/browseEndpoint/browseId"))
+                    .and_then(Value::as_str)
+                    .filter(|s| s.starts_with("UC"))
+                {
+                    if ids.insert(id.into()) {
+                        let avatar = crate::backend::parse::extract_best_thumbnail(tab);
+                        out.push(crate::backend::models::Card::Channel(
+                            crate::backend::models::ChannelCard {
+                                id: id.into(),
+                                title: tab
+                                    .get("title")
+                                    .map(crate::backend::parse::extract_text)
+                                    .unwrap_or_default(),
+                                handle: None,
+                                subscribers: None,
+                                avatar_url: (!avatar.is_empty()).then_some(avatar),
+                                verified: false,
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+        match v {
+            Value::Object(m) => {
+                for v in m.values() {
+                    visit(v, out, ids)
+                }
+            }
+            Value::Array(a) => {
+                for v in a {
+                    visit(v, out, ids)
+                }
+            }
+            _ => (),
+        }
+    }
+    visit(value, &mut items, &mut ids);
+    let continuation = crate::backend::parse::parse_continuation(value);
+    if items.is_empty()
+        && crate::backend::parse::find_json_key(value, "emptyContentRenderer").is_none()
+    {
+        return Err(anyhow!(
+            "YouTube did not return recognizable subscribed channel tabs"
+        ));
+    }
+    Ok(FeedPage {
+        items,
+        chips: vec![],
+        continuation,
+    })
 }

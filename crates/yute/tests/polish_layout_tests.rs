@@ -52,6 +52,7 @@ fn playlist() -> PlaylistCard {
         thumb_url: String::new(),
         is_mix: false,
         first_video_id: None,
+        updated: None,
     }
 }
 #[test]
@@ -129,6 +130,7 @@ fn shell_geometry_and_rendering_matrix() {
 #[test]
 fn selected_card_tint_never_reaches_gutters_or_border() {
     let mut app = app();
+    app.theme = yute::theme::Theme::youtube_dark();
     let shell = ShellLayout::new(Rect::new(0, 0, 135, 31), &app);
     let g = GridGeometry::new(
         shell.content,
@@ -192,7 +194,7 @@ fn channel_fallback_and_playlist_are_not_video_duration() {
         .map(|c| c.symbol())
         .collect::<String>();
     assert!(text.contains("CHANNEL"));
-    assert!(text.contains("PLAYLIST"));
+    assert!(text.contains("24 VIDEOS"));
     assert!(!text.contains("12:43"));
     assert!(matches!(
         yute::actions::activation(&app.items[1]),
@@ -253,7 +255,7 @@ fn active_playback_reserves_exactly_one_row_above_footer() {
         let active = ShellLayout::with_playback(area, &app, true);
         assert!(idle.player.is_empty());
         assert_eq!(active.player.height, 1);
-        assert_eq!(active.player.bottom(), active.footer.y);
+        assert_eq!(active.player.bottom(), active.actions.y);
         assert_eq!(idle.content.height, active.content.height + 1);
         app.player.status.title = "Playback fixture".into();
         app.player.status.time_pos = 751.0;
@@ -263,7 +265,7 @@ fn active_playback_reserves_exactly_one_row_above_footer() {
             .draw(|f| ui::miniplayer::render(f, &app, active.player))
             .unwrap();
         let line = (0..w)
-            .map(|x| terminal.backend().buffer()[(x, h - 2)].symbol())
+            .map(|x| terminal.backend().buffer()[(x, active.player.y)].symbol())
             .collect::<String>();
         assert!(line.contains("12:31 / 48:12"));
     }
@@ -405,7 +407,8 @@ fn focus_frames_and_single_row_header_stay_clear_with_hidden_sidebar() {
         let shell = ShellLayout::new(Rect::new(0, 0, w, h), &app);
         assert_eq!(shell.tabs.y, 0);
         assert_eq!(shell.header.y, 0);
-        assert_eq!(shell.pane, Rect::new(0, 1, w, h - 2));
+        let reserved = 2 + u16::from(h >= 30 && app.config.ui.action_bar != "off");
+        assert_eq!(shell.pane, Rect::new(0, 1, w, h - reserved));
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
         terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         assert_eq!(

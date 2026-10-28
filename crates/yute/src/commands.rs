@@ -35,6 +35,8 @@ pub enum Command {
     Shorts(Option<bool>),
     Keys,
     Graphics(String),
+    Theme(String),
+    Download(String),
     Sidebar(Option<bool>),
     Help(Option<String>),
     Quit(bool),
@@ -64,10 +66,7 @@ fn library(args: &str, screen: Screen) -> Result<Command, String> {
     if args.is_empty() {
         Ok(Command::Navigate(screen))
     } else {
-        Err(
-            "YouTube Watch Later mutations are not implemented; local :queue add is separate"
-                .into(),
-        )
+        Err("Use w or Shift-Enter to add/remove Watch Later; :watch-later opens the library".into())
     }
 }
 fn finite_number(text: &str) -> Result<f64, String> {
@@ -171,7 +170,10 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"keys", aliases:&[], usage:"keys", description:"Show keyboard bindings.", parse:|a| no_args(a, Command::Keys) },
     Spec { name:"shorts", aliases:&[], usage:"shorts [on|off|toggle]", description:"Show or hide Shorts in browsing feeds without refetching.", parse:|a| match a {"on"=>Ok(Command::Shorts(Some(true))),"off"=>Ok(Command::Shorts(Some(false))),""|"toggle"=>Ok(Command::Shorts(None)),_=>Err("Usage: :shorts on|off|toggle".into())} },
     Spec { name:"filter", aliases:&[], usage:"filter [all|videos|shorts|live|playlists|channels|query]", description:"Choose a content type, or filter loaded titles locally.", parse:|a| Ok(Command::Filter(a.into())) },
-    Spec { name:"set", aliases:&[], usage:"set graphics <sixel|kitty|halfblocks|none|auto>", description:"Save a graphics preference for the next launch.", parse:|a| {let parts=a.split_whitespace().collect::<Vec<_>>(); match parts.as_slice(){["graphics", mode @ ("sixel"|"kitty"|"halfblocks"|"none"|"auto")]=>Ok(Command::Graphics((*mode).into())),_=>Err("Usage: :set graphics <sixel|kitty|halfblocks|none|auto>".into())}} },
+    Spec { name:"download", aliases:&[], usage:"download [playlist] [video|audio] [best|1080p|720p|480p|360p|opus|aac|mp3|flac|m4a]", description:"Download selected media; playlist video qualities are ceilings.", parse:|a|{if a.split_whitespace().all(|s|matches!(s,"playlist"|"video"|"audio"|"best"|"2160p"|"1440p"|"1080p"|"720p"|"480p"|"360p"|"opus"|"aac"|"mp3"|"flac"|"m4a")){Ok(Command::Download(a.into()))}else{Err("Invalid download mode or quality".into())}} },
+    Spec { name:"theme", aliases:&[], usage:"theme terminal|auto|<name>|reload|list|check", description:"Select, reload or validate a semantic theme.", parse:|a| Ok(Command::Theme(if a.is_empty(){"list".into()}else{a.into()})) },
+    Spec { name:"graphics", aliases:&[], usage:"graphics auto|kitty|iterm2|sixel|halfblocks|off", description:"Apply terminal graphics mode.", parse:|a| match a {"auto"|"kitty"|"iterm2"|"sixel"|"halfblocks"|"off"|"none"=>Ok(Command::Graphics(a.into())),_=>Err("Usage: :graphics auto|kitty|iterm2|sixel|halfblocks|off".into())} },
+    Spec { name:"set", aliases:&[], usage:"set graphics <sixel|kitty|halfblocks|none|auto>", description:"Save a graphics preference for the next launch.", parse:|a| {let parts=a.split_whitespace().collect::<Vec<_>>(); match parts.as_slice(){["graphics", mode @ ("sixel"|"kitty"|"iterm2"|"halfblocks"|"none"|"off"|"auto")]=>Ok(Command::Graphics((*mode).into())),_=>Err("Usage: :set graphics <sixel|kitty|halfblocks|none|auto>".into())}} },
     Spec { name:"sidebar", aliases:&[], usage:"sidebar [show|hide]", description:"Toggle or set sidebar visibility.", parse:|a| match a {""|"toggle"=>Ok(Command::Sidebar(None)),"show"=>Ok(Command::Sidebar(Some(true))),"hide"=>Ok(Command::Sidebar(Some(false))),_=>Err("Usage: :sidebar [show|hide]".into())} },
     Spec { name:"help", aliases:&[], usage:"help [command]", description:"Show command help; ? shows keyboard shortcuts.", parse:|a| if a.split_whitespace().count()>1{Err("Usage: :help [command]".into())}else{Ok(Command::Help((!a.is_empty()).then(||a.into())))} },
     Spec { name:"quit", aliases:&["q"], usage:"quit", description:"Confirm application quit. Normal-mode q goes back.", parse:|a| no_args(a,Command::Quit(false)) },
@@ -262,8 +264,13 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
                 if spec(input).is_some_and(|s| s.name == name) {
                     return Some((0, name));
                 }
+                let same_initial = input
+                    .chars()
+                    .next()
+                    .zip(name.chars().next())
+                    .is_some_and(|(input, candidate)| input == candidate);
                 let mut chars = name.chars();
-                if input.chars().all(|ch| chars.by_ref().any(|c| c == ch)) {
+                if same_initial && input.chars().all(|ch| chars.by_ref().any(|c| c == ch)) {
                     return Some((1, name));
                 }
             }

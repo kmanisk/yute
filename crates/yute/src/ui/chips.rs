@@ -1,6 +1,6 @@
 use crate::app::{App, FilterKind, Focus};
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -23,16 +23,15 @@ pub fn render_chips(f: &mut Frame, app: &App, area: Rect) {
         }
 
         let style = if is_active {
-            Style::default()
-                .bg(app.theme.chip_active_bg)
-                .fg(app.theme.chip_active_fg)
+            app.theme
+                .style("chip_active")
                 .add_modifier(if app.focus == Focus::Chips {
                     Modifier::BOLD | Modifier::UNDERLINED
                 } else {
                     Modifier::BOLD
                 })
         } else {
-            Style::default().fg(app.theme.text_secondary)
+            app.theme.style("text_dim")
         };
 
         if !spans.is_empty() {

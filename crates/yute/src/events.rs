@@ -3,6 +3,10 @@ use crossterm::event::KeyEvent;
 
 #[allow(dead_code)]
 pub enum AppEvent {
+    SubscribedChannels(u64, anyhow::Result<FeedPage>),
+    QueuePlaylist(u64, bool, anyhow::Result<FeedPage>),
+    TerminalReport(crate::terminal_input::Report),
+    ConfigReloaded(Box<anyhow::Result<(crate::config::Config, crate::theme::Theme)>>),
     AccountResult(u64, Box<AppEvent>),
     Input(KeyEvent),
     Resize(u16, u16),
@@ -48,5 +52,8 @@ pub enum AppEvent {
     MenuPlaylists(u64, anyhow::Result<FeedPage>),
     PlaylistSaved(u64, anyhow::Result<()>),
     DownloadFinished(u64, bool),
+    DownloadStatus(u64, String),
+    DownloadComplete(u64, anyhow::Result<yute_core::downloads::Progress>),
+    Ffmpeg(bool),
     CommentUpdated(u64, String, bool, anyhow::Result<()>),
 }

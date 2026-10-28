@@ -28,7 +28,7 @@ pub fn render_picker(f: &mut Frame, app: &App) {
     let block = Block::default()
         .title(" Switch account ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.accent))
+        .border_style(app.theme.style("accent"))
         .style(Style::default().bg(app.theme.bg));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -41,12 +41,12 @@ pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
     for (index, account) in app.accounts.iter().enumerate().skip(start).take(rows) {
         let selected = index == app.accounts_cursor;
         let style = if selected {
-            Style::default()
-                .fg(app.theme.accent)
-                .bg(app.theme.surface_hover)
+            app.theme
+                .style("accent")
+                .patch(app.theme.style("selection"))
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(app.theme.text)
+            app.theme.style("text")
         };
         let marker = if account.status == yute_core::accounts::AccountStatus::NeedsLogin {
             "needs re-login via TV code"
@@ -74,11 +74,11 @@ pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
     }
     lines.push(Line::from(Span::styled(
         "j/k select · Enter/1-9 switch · a add · d remove",
-        Style::default().fg(app.theme.text_secondary),
+        app.theme.style("text_dim"),
     )));
     lines.push(Line::from(Span::styled(
         "Esc close · :account whoami",
-        Style::default().fg(app.theme.text_secondary),
+        app.theme.style("text_dim"),
     )));
     f.render_widget(Paragraph::new(lines), area);
 }

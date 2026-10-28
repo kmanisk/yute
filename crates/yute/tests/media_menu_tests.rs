@@ -7,6 +7,7 @@ use yute::{
 fn menu(stage: MenuStage) -> ActionMenu {
     ActionMenu {
         request: 1,
+        download: false, ffmpeg: false,
         card: yute::backend::parse::parse_card(&serde_json::json!({"videoRenderer":{"videoId":"fixture","title":{"simpleText":"Fixture video"}}})).unwrap(),
         cursor: 0, stage,
         playlists: vec![], message: String::new(),

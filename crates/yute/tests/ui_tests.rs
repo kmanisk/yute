@@ -137,7 +137,7 @@ fn test_capital_letter_navigation_keymaps() {
     // Shift+H and Shift+L navigate back/forward in browser history
     check_key(&mut keymap, 'H', Action::NavBackHistory);
     check_key(&mut keymap, 'L', Action::NavForwardHistory);
-    check_key(&mut keymap, 'S', Action::NavSubs);
+    check_key(&mut keymap, 'S', Action::ToggleSubscribe);
     check_key(&mut keymap, 'Y', Action::NavHistory);
     check_key(&mut keymap, 'P', Action::NavPlaylists);
     check_key(&mut keymap, 'W', Action::NavWatchLater);
@@ -310,17 +310,30 @@ fn test_shift_enter_opens_item_actions_keymap() {
 }
 
 #[test]
-fn test_header_is_minimal_and_does_not_show_account() {
+fn test_header_shows_route_filters_and_account_once() {
     let mut app = create_mock_app();
     app.account_name = "Private account name".into();
+    {
+        let mut auth = app.auth.lock().unwrap();
+        auth.access_token = Some("test-access".into());
+        auth.token_expires_at = Some(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                + 3600,
+        );
+        auth.needs_login = false;
+    }
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let header: String = (0..120)
         .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
         .collect();
-    assert!(header.contains("yute") && header.contains("Home") && header.contains("All"));
-    assert!(!header.contains("YouTube"));
-    assert!(!header.contains("Private account"));
+    assert!(header.contains("Home") && header.contains("All"));
+    assert!(header.contains("Private account"));
+    assert!(!header.contains("OAuth"));
+    assert!(!header.contains("yute ·"));
 }
 
 #[test]
@@ -358,20 +371,12 @@ fn test_accounts_keymap() {
 }
 
 #[test]
-fn test_theme_system_integration() {
+fn test_terminal_theme_follows_terminal_defaults() {
     use yute::theme::Theme;
 
-    let sys = Theme::system_theme();
-    assert!(
-        sys.is_some(),
-        "System theme should be successfully loaded from ~/.local/state/theme/colors.sh"
-    );
-    let theme = sys.unwrap();
-    assert_eq!(
-        theme.bg,
-        ratatui::style::Color::Reset,
-        "System theme bg must be Color::Reset to merge with terminal"
-    );
+    let theme = Theme::terminal();
+    assert_eq!(theme.text, ratatui::style::Color::Reset);
+    assert_eq!(theme.bg, ratatui::style::Color::Reset);
 }
 
 #[test]
@@ -734,9 +739,9 @@ fn test_loading_skeleton_and_badges_render() {
         "Must not render raw placeholder text"
     );
 
-    // Item 1 has progress bar (since progress_pct is Some(65))
+    // Item 1 has a thin progress row at the bottom edge of its thumbnail.
     assert!(
-        full_text.contains("[==="),
+        full_text.contains('█'),
         "Progress bar must be visible on partially watched video"
     );
 
@@ -826,7 +831,9 @@ fn compact_footer_and_card_hierarchy() {
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
     let footer: String = (0..120).map(|x| buffer[(x, 39)].symbol()).collect();
-    assert!(!footer.contains("NORMAL") && footer.contains("Home"));
+    assert!(!footer.contains("NORMAL"));
+    assert!(!footer.contains("Home"));
+    assert!(footer.contains("1/12"));
     assert!(footer.contains("? help"));
     assert!(!footer.contains("Shift"));
     let rows: Vec<String> = (0..39)

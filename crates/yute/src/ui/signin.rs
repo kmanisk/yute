@@ -1,7 +1,7 @@
 use crate::app::App;
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
@@ -89,7 +89,7 @@ pub fn render(f: &mut Frame, app: &App) {
     let block = Block::default()
         .title(" YouTube TV sign-in ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.accent))
+        .border_style(app.theme.style("accent"))
         .style(Style::default().bg(app.theme.bg));
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -101,9 +101,7 @@ pub fn render(f: &mut Frame, app: &App) {
         Line::from(modal.url.clone()),
         Line::from(Span::styled(
             modal.code.clone(),
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD),
+            app.theme.style("accent").add_modifier(Modifier::BOLD),
         )),
         Line::from(format!(
             "Expires in {}:{:02} · Esc cancel",
@@ -128,8 +126,7 @@ pub fn render(f: &mut Frame, app: &App) {
         .map_or(0, |line| line.chars().count()) as u16;
     if rows + 4 <= inner.height && cols <= inner.width {
         f.render_widget(
-            Paragraph::new(modal.qr.as_str())
-                .style(Style::default().fg(Color::Black).bg(Color::White)),
+            Paragraph::new(modal.qr.as_str()).style(crate::theme::qr_style()),
             Rect::new(inner.x + (inner.width - cols) / 2, inner.y + 4, cols, rows),
         );
     } else if inner.height > 4 {

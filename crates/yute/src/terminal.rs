@@ -1,4 +1,4 @@
-//! Terminal hints never read stdin; Crossterm remains its only owner.
+//! Query decisions and cached capabilities. terminal_input is the sole reader.
 use ratatui_image::picker::{Picker, ProtocolType};
 use std::{path::PathBuf, time::Duration};
 fn cache_path() -> PathBuf {
@@ -10,26 +10,18 @@ fn cache_path() -> PathBuf {
     yute_core::config::cache_dir().join(format!("terminal-{:016x}.json", hash.finish()))
 }
 pub fn initial_picker(mode: &str) -> Picker {
-    let cells = std::fs::read(cache_path())
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<(u16, u16)>(&bytes).ok())
-        .filter(|(w, h)| *w > 0 && *h > 0)
+    let cells = report()
+        .cells
+        .or_else(|| {
+            std::fs::read(cache_path())
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<(u16, u16)>(&bytes).ok())
+                .filter(|(w, h)| *w > 0 && *h > 0)
+        })
         .unwrap_or((10, 20));
     #[allow(deprecated)]
     let mut picker = Picker::from_fontsize(cells.into());
-    let term = std::env::var("TERM").unwrap_or_default();
-    let program = std::env::var("TERM_PROGRAM").unwrap_or_default();
-    let kind = match mode {
-        "sixel" => ProtocolType::Sixel,
-        "kitty" => ProtocolType::Kitty,
-        "halfblocks" | "none" => ProtocolType::Halfblocks,
-        _ if std::env::var_os("KITTY_WINDOW_ID").is_some() || term.contains("kitty") => {
-            ProtocolType::Kitty
-        }
-        _ if term.starts_with("foot") => ProtocolType::Sixel,
-        _ if program == "WezTerm" => ProtocolType::Iterm2,
-        _ => ProtocolType::Halfblocks,
-    };
+    let kind = graphics_kind(mode, &report(), multiplexed());
     picker.set_protocol_type(kind);
     picker
 }
@@ -60,4 +52,56 @@ pub fn remember_cells(width: u16, height: u16) {
             }
         });
     }
+}
+
+static REPORT: std::sync::OnceLock<std::sync::Mutex<crate::terminal_input::Report>> =
+    std::sync::OnceLock::new();
+pub fn report() -> crate::terminal_input::Report {
+    REPORT.get_or_init(Default::default).lock().unwrap().clone()
+}
+pub fn remember_report(report: crate::terminal_input::Report) {
+    *REPORT.get_or_init(Default::default).lock().unwrap() = report;
+}
+pub fn background_light() -> Option<bool> {
+    report().light.or_else(|| {
+        std::env::var("COLORFGBG")
+            .ok()
+            .and_then(|v| v.rsplit(';').next()?.parse::<u8>().ok())
+            .map(|n| n == 7 || n >= 15)
+    })
+}
+pub fn multiplexed() -> bool {
+    std::env::var_os("TMUX").is_some() || std::env::var_os("ZELLIJ").is_some()
+}
+pub fn graphics_kind(mode: &str, r: &crate::terminal_input::Report, mux: bool) -> ProtocolType {
+    if mux {
+        return ProtocolType::Halfblocks;
+    }
+    let mode = std::env::var("YUTE_GRAPHICS").unwrap_or_else(|_| mode.into());
+    match mode.as_str() {
+        "kitty" => ProtocolType::Kitty,
+        "sixel" => ProtocolType::Sixel,
+        "iterm2" => ProtocolType::Iterm2,
+        "auto" if r.kitty => ProtocolType::Kitty,
+        "auto" if r.sixel => ProtocolType::Sixel,
+        "auto"
+            if r.iterm2
+                && matches!(
+                    std::env::var("TERM_PROGRAM").as_deref(),
+                    Ok("iTerm.app" | "WezTerm")
+                ) =>
+        {
+            ProtocolType::Iterm2
+        }
+        _ => ProtocolType::Halfblocks,
+    }
+}
+pub fn query() {
+    use std::io::Write;
+    if multiplexed() {
+        return;
+    }
+    let mut out = std::io::stdout();
+    let _=out.write_all(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c\x1b]11;?\x1b\\\x1b[?996n\x1b[?2031h\x1b[16t\x1b]1337;ReportCellSize\x07");
+    let _ = out.flush();
 }

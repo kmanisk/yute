@@ -12,3 +12,5 @@ pub mod secret;
 pub mod trace;
 
 pub mod doctor;
+
+pub mod downloads;

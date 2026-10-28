@@ -1,8 +1,8 @@
 use crate::app::{App, Focus};
 use crate::backend::models::{Card, LiveState};
-use crate::ui::text::{format_meta_line, sanitize_title, wrap_and_truncate_title};
+use crate::ui::text::{format_meta_line, wrap_and_truncate_title};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -15,7 +15,7 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
     let total_items = app.filtered_items().len();
     if total_items == 0 {
         let msg = app.empty_feed_message();
-        let p = Paragraph::new(msg).style(Style::default().fg(app.theme.text_secondary));
+        let p = Paragraph::new(msg).style(app.theme.style("text_dim"));
         f.render_widget(p, area);
         return;
     }
@@ -89,9 +89,9 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
             for y_off in 0..sb_height {
                 let y = area.y + 1 + y_off;
                 let (ch, style) = if y_off >= thumb_pos && y_off < thumb_pos + thumb_size {
-                    ("█", Style::default().fg(app.theme.accent))
+                    ("█", app.theme.style("accent"))
                 } else {
-                    ("│", Style::default().fg(app.theme.border))
+                    ("│", app.theme.style("border"))
                 };
                 f.render_widget(
                     Paragraph::new(ch).style(style),
@@ -123,8 +123,8 @@ fn render_list_row(
     if is_selected {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(app.theme.accent))
-            .style(Style::default().bg(app.theme.surface_hover));
+            .border_style(app.theme.style("accent"))
+            .style(Style::default().patch(app.theme.style("selection")));
         f.render_widget(block, area);
     }
 
@@ -168,7 +168,7 @@ fn render_list_row(
         f.render_widget(
             Paragraph::new(card.title().chars().next().unwrap_or('?').to_string())
                 .alignment(ratatui::layout::Alignment::Center)
-                .style(Style::default().fg(app.theme.accent)),
+                .style(app.theme.style("accent")),
             thumb_area,
         );
     } else if !thumb_url.is_empty()
@@ -188,7 +188,7 @@ fn render_list_row(
             for _ in 0..thumb_area.height {
                 skel_lines.push(Line::from(Span::styled(
                     skeleton_line.clone(),
-                    Style::default().fg(app.theme.border),
+                    app.theme.style("border"),
                 )));
             }
             f.render_widget(Paragraph::new(skel_lines), thumb_area);
@@ -199,7 +199,7 @@ fn render_list_row(
         for _ in 0..thumb_area.height {
             skel_lines.push(Line::from(Span::styled(
                 skeleton_line.clone(),
-                Style::default().fg(app.theme.border),
+                app.theme.style("border"),
             )));
         }
         f.render_widget(Paragraph::new(skel_lines), thumb_area);
@@ -220,7 +220,7 @@ fn render_list_row(
                 let p = Paragraph::new(badge_text).style(
                     Style::default()
                         .bg(app.theme.live_badge_bg)
-                        .fg(Color::White)
+                        .fg(app.theme.badge_fg)
                         .add_modifier(Modifier::BOLD),
                 );
                 super::thumbnail::badge(f, p, badge_rect);
@@ -235,8 +235,8 @@ fn render_list_row(
                 };
                 let p = Paragraph::new(badge_text).style(
                     Style::default()
-                        .bg(Color::Rgb(200, 20, 20))
-                        .fg(Color::White)
+                        .bg(app.theme.live_badge_bg)
+                        .fg(app.theme.badge_fg)
                         .add_modifier(Modifier::BOLD),
                 );
                 super::thumbnail::badge(f, p, badge_rect);
@@ -251,8 +251,8 @@ fn render_list_row(
                 };
                 let p = Paragraph::new(badge_text).style(
                     Style::default()
-                        .bg(Color::Rgb(15, 15, 15))
-                        .fg(Color::White)
+                        .bg(app.theme.badge_bg)
+                        .fg(app.theme.badge_fg)
                         .add_modifier(Modifier::BOLD),
                 );
                 super::thumbnail::badge(f, p, badge_rect);
@@ -279,23 +279,21 @@ fn render_list_row(
     }
 
     let sec_style = if is_selected {
-        Style::default().fg(app.theme.text)
+        app.theme.style("text")
     } else {
-        Style::default().fg(app.theme.text_secondary)
+        app.theme.style("text_dim")
     };
 
     // Render details right
     let raw_title = card.title();
-    let clean = sanitize_title(raw_title, app.config.strip_emoji());
+    let clean = crate::ui::text::title_for(raw_title, &app.config);
     let title_lines = wrap_and_truncate_title(&clean, details_w as usize, 2);
 
     let mut details_lines = Vec::new();
     for tl in title_lines {
         details_lines.push(Line::from(Span::styled(
             tl,
-            Style::default()
-                .fg(app.theme.text)
-                .add_modifier(Modifier::BOLD),
+            app.theme.style("text").add_modifier(Modifier::BOLD),
         )));
     }
 

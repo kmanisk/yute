@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod actionbar;
 pub mod channel;
 pub mod chat;
 pub mod chips;
@@ -34,6 +35,7 @@ pub struct ShellLayout {
     pub content: Rect,
     pub player: Rect,
     pub footer: Rect,
+    pub actions: Rect,
 }
 impl ShellLayout {
     pub fn new(area: Rect, app: &App) -> Self {
@@ -42,10 +44,17 @@ impl ShellLayout {
     /// Pure geometry entrypoint, also usable by offline playback-state previews.
     pub fn with_playback(area: Rect, app: &App, active: bool) -> Self {
         let footer = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
+        let action_h = u16::from(area.height >= 30 && app.config.ui.action_bar != "off");
+        let actions = Rect::new(
+            area.x,
+            footer.y.saturating_sub(action_h),
+            area.width,
+            action_h,
+        );
         let player_h = u16::from(active && app.screen != Screen::Watch);
         let player = Rect::new(
             area.x,
-            footer.y.saturating_sub(player_h),
+            actions.y.saturating_sub(player_h),
             area.width,
             player_h,
         );
@@ -53,9 +62,9 @@ impl ShellLayout {
             area.x,
             area.y + 1,
             area.width,
-            area.height.saturating_sub(2 + player_h),
+            area.height.saturating_sub(2 + player_h + action_h),
         );
-        let sb = sidebar::sidebar_width(app.sidebar_expanded).min(area.width.saturating_sub(20));
+        let sb = sidebar::width_for(app).min(area.width.saturating_sub(20));
         let sidebar = Rect::new(body.x, body.y, sb, body.height);
         let content_x = body.x + sb;
         let width = body.width.saturating_sub(sb);
@@ -67,12 +76,15 @@ impl ShellLayout {
                 | Screen::Help
                 | Screen::ChannelView
         );
+        let account_w = (app.account_name.width() as u16 + 3)
+            .min(area.width / 4)
+            .max(2);
         let label_width = header::label(app, area.width / 3).width() as u16;
         let tabs_x = area.x + sb.max(label_width + 2).min(area.width);
         let tabs = Rect::new(
             tabs_x,
             area.y,
-            area.right().saturating_sub(tabs_x),
+            area.right().saturating_sub(tabs_x + account_w),
             u16::from(has_tabs),
         );
         let pane = Rect::new(content_x, body.y, width, body.height);
@@ -96,17 +108,20 @@ impl ShellLayout {
             content,
             player,
             footer,
+            actions,
         }
     }
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
+    f.render_widget(
+        ratatui::widgets::Block::default().style(app.theme.style("text")),
+        size,
+    );
+    app.terminal_height = size.height;
     app.thumbs.begin_frame();
-    app.overlay_area = signin::modal_area(app, size)
-        .or_else(|| accounts::picker_area(app, size))
-        .or_else(|| super::actions::menu_rect(app, size))
-        .or_else(|| cmdline::popup_area(app, size));
+    app.overlay_area = overlay_rect(app, size);
     if size.width < 30 || size.height < 10 {
         return;
     }
@@ -138,7 +153,23 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
     let content_area = shell.content;
     let status_area = shell.footer;
-    let inner_content = content_area;
+    let mut inner_content = content_area;
+    if app.screen == Screen::PlaylistView {
+        if let Some(crate::app::DetailRoute::Playlist(p)) = &app.detail_route {
+            let text = format!(
+                "{} · {} · {} · p play all",
+                p.title,
+                p.channel,
+                p.video_count.as_deref().unwrap_or("Playlist")
+            );
+            f.render_widget(
+                ratatui::widgets::Paragraph::new(text).style(app.theme.style("text_dim")),
+                Rect::new(inner_content.x, inner_content.y, inner_content.width, 1),
+            );
+            inner_content.y += 1;
+            inner_content.height = inner_content.height.saturating_sub(1);
+        }
+    }
     app.rendered_columns = if app.current_view_mode() == ViewMode::List || content_area.width < 72 {
         1
     } else {
@@ -182,6 +213,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         miniplayer::render(f, app, shell.player);
     }
 
+    actionbar::render(f, app, shell.actions);
     // Render statusbar
     statusbar::render_statusbar(f, app, status_area);
 
@@ -259,7 +291,7 @@ fn render_quit_confirmation(f: &mut Frame, app: &App, area: ratatui::layout::Rec
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Plain)
-        .border_style(Style::default().fg(app.theme.accent))
+        .border_style(app.theme.style("accent"))
         .title(if app.confirming_logout {
             " Sign out "
         } else {
@@ -274,20 +306,16 @@ fn render_quit_confirmation(f: &mut Frame, app: &App, area: ratatui::layout::Rec
         Line::from(""),
         Line::from(vec![Span::styled(
             "Are you sure you want to quit?",
-            Style::default()
-                .fg(app.theme.text)
-                .add_modifier(Modifier::BOLD),
+            app.theme.style("text").add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
         Line::from(vec![
             Span::styled(
                 "[y] Yes",
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
+                app.theme.style("accent").add_modifier(Modifier::BOLD),
             ),
             Span::raw("        "),
-            Span::styled("[n] No", Style::default().fg(app.theme.text_secondary)),
+            Span::styled("[n] No", app.theme.style("text_dim")),
         ]),
     ];
 
@@ -295,4 +323,22 @@ fn render_quit_confirmation(f: &mut Frame, app: &App, area: ratatui::layout::Rec
         .alignment(Alignment::Center)
         .style(Style::default().bg(app.theme.surface));
     f.render_widget(p, inner);
+}
+
+pub fn overlay_rect(app: &App, size: Rect) -> Option<Rect> {
+    if app.confirming_quit || app.confirming_logout {
+        return Some(Rect::new(
+            size.x + (size.width - size.width.saturating_sub(4).min(44)) / 2,
+            size.y + (size.height - size.height.saturating_sub(2).min(7)) / 2,
+            size.width.saturating_sub(4).min(44),
+            size.height.saturating_sub(2).min(7),
+        ));
+    }
+    if app.screen == Screen::Help {
+        return Some(size);
+    }
+    signin::modal_area(app, size)
+        .or_else(|| accounts::picker_area(app, size))
+        .or_else(|| crate::actions::menu_rect(app, size))
+        .or_else(|| cmdline::popup_area(app, size))
 }

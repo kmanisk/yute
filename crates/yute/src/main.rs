@@ -2,14 +2,13 @@
 
 use clap::{Parser, Subcommand};
 use crossterm::event::{
-    Event, EventStream, KeyCode, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    Event, KeyCode, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use futures_util::StreamExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::stdout;
@@ -171,7 +170,17 @@ async fn run() -> anyhow::Result<()> {
 
     let thumbnail_ready = app.thumbs.notifier();
     let mut keymap = KeymapState::new();
-    let mut reader = EventStream::new();
+    let mut reader = yute::terminal_input::start(tx_event.clone())?;
+    yute::live_config::watch(tx_event.clone());
+    let tools_tx = tx_event.clone();
+    tokio::spawn(async move {
+        let check = yute_core::doctor::tool_version("ffmpeg", "-version", false).await;
+        let _ = tools_tx
+            .send(AppEvent::Ffmpeg(
+                check.status == yute_core::doctor::Status::Ok,
+            ))
+            .await;
+    });
     let mut ticker = tokio::time::interval(Duration::from_millis(250));
     let mut dirty = true;
     let mut first_frame = true;
@@ -181,6 +190,10 @@ async fn run() -> anyhow::Result<()> {
     while !app.should_quit {
         if dirty {
             app.refresh_channel_items();
+            app.overlay_area = ui::overlay_rect(
+                &app,
+                ratatui::layout::Rect::new(0, 0, terminal.size()?.width, terminal.size()?.height),
+            );
             let next_layout = format!(
                 "{:?}:{:?}:{:?}:{}:{}:{:?}:{}:{}:{}:{:?}",
                 terminal.size()?,
@@ -200,14 +213,24 @@ async fn run() -> anyhow::Result<()> {
                 )
             );
             if next_layout != graphics_layout {
-                // Delete Kitty placements and erase Sixel cells before a structural
-                // change. Cached encodings remain available for the next draw.
-                use std::io::Write;
-                terminal
-                    .backend_mut()
-                    .write_all(b"\x1b_Ga=d,d=a,q=2;\x1b\\")?;
-                let size = terminal.size()?;
-                terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height))?;
+                // Nothing exists to erase before the initial frame. Structural
+                // changes after that frame invalidate image placements and draw
+                // one blank diff frame before repainting, avoiding the blocking
+                // Crossterm full-screen clear while preventing stale overlay cells.
+                if !first_frame {
+                    use std::io::Write;
+                    if matches!(
+                        yute::terminal::initial_picker(&app.config.general.graphics)
+                            .protocol_type(),
+                        ratatui_image::picker::ProtocolType::Kitty
+                    ) {
+                        terminal
+                            .backend_mut()
+                            .write_all(b"\x1b_Ga=d,d=a,q=2;\x1b\\")?;
+                    }
+                    app.thumbs.invalidate_placements();
+                    terminal.draw(|f| f.render_widget(ratatui::widgets::Clear, f.area()))?;
+                }
                 graphics_layout = next_layout;
             }
             terminal.draw(|f| ui::draw(f, &mut app))?;
@@ -221,6 +244,7 @@ async fn run() -> anyhow::Result<()> {
             if first_frame {
                 yute_core::trace::since_start("first_frame");
                 first_frame = false;
+                yute::terminal::query();
             }
             if first_home && app.screen == Screen::Home && !app.items.is_empty() {
                 yute_core::trace::since_start("home_rendered");
@@ -247,6 +271,14 @@ async fn run() -> anyhow::Result<()> {
             maybe_continue_feed(&mut app, tx_event.clone());
             maybe_load_card_metadata(&mut app, tx_event.clone());
             maybe_load_channel_avatars(&mut app, tx_event.clone());
+            if app.config.ui.sidebar_channels
+                && app.sidebar_expanded
+                && app.terminal_height >= 30
+                && !app.channels_loaded
+                && !app.channels_loading
+            {
+                load_subscribed_channels(&mut app, tx_event.clone(), false);
+            }
             dirty = false;
         }
 
@@ -258,7 +290,7 @@ async fn run() -> anyhow::Result<()> {
                 if hint != app.which_key { app.which_key = hint; dirty = true; }
             }
 
-            event_opt = reader.next() => {
+            event_opt = reader.recv() => {
                 if let Some(Ok(event)) = event_opt {
                     match event {
                         Event::Key(key) => {
@@ -270,6 +302,7 @@ async fn run() -> anyhow::Result<()> {
                             maybe_continue_feed(&mut app, tx_event.clone());
                         }
                         Event::Resize(_, _) | Event::FocusGained => {
+                            if event == Event::FocusGained {yute::terminal::query();}
                             refresh_terminal_cells(&mut app).await;
                             graphics_layout.clear();
                             dirty = true;
@@ -847,6 +880,37 @@ async fn handle_key_event(
         app.suggestion_index = None;
         return;
     }
+    if app.focus == Focus::Content && app.screen != Screen::Watch {
+        if let Some(card) = app.selected_card().cloned() {
+            let menu_action = match action {
+                Action::LikeVideo => Some(yute::actions::ItemAction::Like),
+                Action::DislikeVideo => Some(yute::actions::ItemAction::Dislike),
+                Action::ToggleSubscribe => Some(yute::actions::ItemAction::Subscribe),
+                Action::AddToWatchLater => Some(yute::actions::ItemAction::WatchLater),
+                _ => None,
+            };
+            if let Some(a) = menu_action {
+                mutate_card(app, card, a, tx);
+                return;
+            }
+            if action == Action::Download {
+                open_item_menu(app);
+                if let Some(m) = &mut app.action_menu {
+                    m.download = true;
+                    m.stage = yute::actions::MenuStage::DownloadKind;
+                }
+                return;
+            }
+            if action == Action::PlayAll && matches!(card, Card::Playlist(_)) {
+                queue_playlist(app, card, true, tx);
+                return;
+            }
+            if action == Action::QueueAppend && matches!(card, Card::Playlist(_)) {
+                queue_playlist(app, card, false, tx);
+                return;
+            }
+        }
+    }
     use yute::commands::{Command as AppCommand, CopyTarget};
     let command = match action {
         Action::NavChannel => Some(AppCommand::Channel),
@@ -873,7 +937,7 @@ async fn handle_key_event(
                 app.sidebar_index = app
                     .sidebar_index
                     .saturating_add(count)
-                    .min(ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1));
+                    .min(ui::sidebar::row_count(app).saturating_sub(1));
                 return;
             }
             Action::First => {
@@ -881,7 +945,7 @@ async fn handle_key_event(
                 return;
             }
             Action::Last => {
-                app.sidebar_index = ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1);
+                app.sidebar_index = ui::sidebar::row_count(app).saturating_sub(1);
                 return;
             }
             Action::Back => {
@@ -1085,8 +1149,8 @@ async fn handle_key_event(
                             (app.selected_index + 1).min(watch.up_next.len().saturating_sub(1));
                     }
                 } else if app.focus == Focus::Sidebar {
-                    app.sidebar_index = (app.sidebar_index + 1)
-                        .min(ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1));
+                    app.sidebar_index =
+                        (app.sidebar_index + 1).min(ui::sidebar::row_count(app).saturating_sub(1));
                 } else {
                     let total = app.filtered_items().len();
                     if total > 0 {
@@ -1135,7 +1199,7 @@ async fn handle_key_event(
             }
             Action::Last => {
                 if app.focus == Focus::Sidebar {
-                    app.sidebar_index = ui::sidebar::SIDEBAR_ITEMS.len().saturating_sub(1);
+                    app.sidebar_index = ui::sidebar::row_count(app).saturating_sub(1);
                 } else {
                     let total = app.filtered_items().len();
                     if total > 0 {
@@ -1309,7 +1373,10 @@ async fn handle_key_event(
 
 fn set_content_filter(app: &mut App, kind: yute::app::FilterKind, tx: Sender<AppEvent>) {
     use yute::app::{FilterKind, TabState};
-    let source = if matches!(kind, FilterKind::Shorts | FilterKind::Live) {
+    let source = if matches!(
+        kind,
+        FilterKind::Shorts | FilterKind::Live | FilterKind::Channels
+    ) {
         kind
     } else {
         FilterKind::All
@@ -1317,7 +1384,10 @@ fn set_content_filter(app: &mut App, kind: yute::app::FilterKind, tx: Sender<App
     let mut fetch = false;
     let mut restored = false;
     if app.screen == Screen::Home && source != app.home_source {
-        if !app.items.is_empty() {
+        // The Channels tab is account-backed state, not another Home browse page.
+        // Keep it out of the Home page cache so a late/default Home response can
+        // never replace subscribed channels (or vice versa).
+        if app.home_source != FilterKind::Channels && !app.items.is_empty() {
             app.home_pages.insert(
                 app.home_source,
                 TabState {
@@ -1333,7 +1403,10 @@ fn set_content_filter(app: &mut App, kind: yute::app::FilterKind, tx: Sender<App
         app.is_loading = false;
         app.is_loading_more = false;
         app.continuation_failed = false;
-        if let Some(page) = app.home_pages.remove(&source) {
+        if source == FilterKind::Channels {
+            app.items.clear();
+            app.continuation_token = None;
+        } else if let Some(page) = app.home_pages.remove(&source) {
             app.items = page.items;
             app.continuation_token = page.continuation;
             app.selected_index = page.selected;
@@ -1352,6 +1425,11 @@ fn set_content_filter(app: &mut App, kind: yute::app::FilterKind, tx: Sender<App
     }
     app.refresh_channel_items();
     app.status_text = format!("Filter: {}", kind.label());
+    if app.screen == Screen::Home && source == FilterKind::Channels {
+        app.channel_items.clear();
+        load_subscribed_channels(app, tx, true);
+        return;
+    }
     if fetch {
         let backend = Arc::clone(&app.backend);
         let generation = app.begin_feed_request();
@@ -1393,6 +1471,8 @@ fn open_item_menu(app: &mut App) {
         card,
         cursor: 0,
         stage: yute::actions::MenuStage::Actions,
+        download: false,
+        ffmpeg: app.ffmpeg,
         formats: None,
         cancelled: yute_core::oauth::CancellationToken::new(),
         playlists: vec![],
@@ -1417,7 +1497,7 @@ fn resolve_menu_formats(app: &mut App, audio: bool, tx: Sender<AppEvent>) {
 }
 fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
     use crossterm::event::KeyModifiers;
-    use yute::actions::{menu_entries, ItemAction, MenuStage};
+    use yute::actions::{ItemAction, MenuStage};
     if key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
     {
@@ -1429,13 +1509,16 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
         app.action_menu = None;
         return;
     }
-    let auth = authenticated(app);
+    let entries = yute::actions::visible_entries(app, &app.action_menu.as_ref().unwrap().card);
     let menu = app.action_menu.as_mut().unwrap();
-    let entries = menu_entries(&menu.card, auth, app.download_active);
     let count = match menu.stage {
         MenuStage::Actions => entries.len(),
         MenuStage::PlayAs => 3,
-        MenuStage::VideoFormats | MenuStage::AudioFormats => menu.media_rows().len(),
+        MenuStage::VideoFormats
+        | MenuStage::AudioFormats
+        | MenuStage::DownloadKind
+        | MenuStage::PlaylistVideo
+        | MenuStage::PlaylistAudio => menu.media_rows().len(),
         _ => menu.playlists.len(),
     };
     match key.code {
@@ -1465,6 +1548,37 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
     ) {
         return;
     }
+    if menu.stage == MenuStage::DownloadKind {
+        let audio = menu.cursor == 1;
+        menu.cursor = 0;
+        if matches!(menu.card, Card::Playlist(_)) {
+            menu.stage = if audio {
+                MenuStage::PlaylistAudio
+            } else {
+                MenuStage::PlaylistVideo
+            };
+        } else {
+            resolve_menu_formats(app, audio, tx);
+        }
+        return;
+    }
+    if matches!(
+        menu.stage,
+        MenuStage::PlaylistVideo | MenuStage::PlaylistAudio
+    ) {
+        let Some((_, choice)) = menu.media_rows().get(menu.cursor).cloned() else {
+            return;
+        };
+        let mode = if menu.stage == MenuStage::PlaylistAudio {
+            yute_core::downloads::Mode::Audio(choice)
+        } else {
+            yute_core::downloads::Mode::Video(choice.trim_end_matches('p').parse().ok())
+        };
+        let card = menu.card.clone();
+        app.action_menu = None;
+        start_download_mode(app, card, mode, tx);
+        return;
+    }
     if menu.stage == MenuStage::PlayAs {
         match menu.cursor {
             0 | 1 => {
@@ -1489,6 +1603,21 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
         let Card::Video(video) = menu.card.clone() else {
             return;
         };
+        if menu.download {
+            let mode = if let Some(kind) = selector.strip_prefix("convert:") {
+                yute_core::downloads::Mode::Audio(kind.into())
+            } else {
+                if selector.is_empty() {
+                    yute_core::downloads::Mode::Video(None)
+                } else {
+                    yute_core::downloads::Mode::Exact(selector)
+                }
+            };
+            let card = menu.card.clone();
+            app.action_menu = None;
+            start_download_mode(app, card, mode, tx);
+            return;
+        }
         let mut config = app.config.clone();
         if !selector.is_empty() {
             config.playback.max_resolution = "manual".into();
@@ -1541,6 +1670,12 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
         resolve_menu_formats(app, true, tx);
         return;
     }
+    if action == ItemAction::Download {
+        menu.download = true;
+        menu.stage = MenuStage::DownloadKind;
+        menu.cursor = 0;
+        return;
+    }
     if action == ItemAction::Save {
         menu.stage = MenuStage::LoadingPlaylists;
         menu.message.clear();
@@ -1554,9 +1689,16 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
     }
     app.action_menu = None;
     match action {
+        ItemAction::Like
+        | ItemAction::Dislike
+        | ItemAction::WatchLater
+        | ItemAction::Subscribe
+        | ItemAction::RemoveHistory => mutate_card(app, card, action, tx),
+        ItemAction::QueuePlaylist => queue_playlist(app, card, false, tx),
+        ItemAction::PlayAll => queue_playlist(app, card, true, tx),
         ItemAction::PlaySelect | ItemAction::Audio => unreachable!("handled before closing menu"),
         ItemAction::Play => match card {
-            Card::Playlist(p) => dispatch_open(app, yute::actions::OpenAction::PlayMix(p), tx),
+            Card::Playlist(p) => queue_playlist(app, Card::Playlist(p), true, tx),
             _ => dispatch_open(app, yute::actions::activation(&card), tx),
         },
         ItemAction::Browse => dispatch_open(app, yute::actions::activation(&card), tx),
@@ -1609,25 +1751,44 @@ fn open_system_url(url: String, tx: Sender<AppEvent>) {
     });
 }
 fn start_download(app: &mut App, card: Card, tx: Sender<AppEvent>) {
+    let mode = yute_core::downloads::Mode::Video(
+        app.config
+            .downloads
+            .video_quality
+            .trim_end_matches('p')
+            .parse()
+            .ok(),
+    );
+    start_download_mode(app, card, mode, tx);
+}
+fn start_download_mode(
+    app: &mut App,
+    card: Card,
+    mode: yute_core::downloads::Mode,
+    tx: Sender<AppEvent>,
+) {
     if app.download_active {
+        app.status_text = "A download is already running; x in item actions cancels it".into();
         return;
     }
     app.download_active = true;
-    app.status_text = "Downloading with yt-dlp → ~/Videos/Yute".into();
-    let config = app.config.clone();
     app.download_request = app.download_request.wrapping_add(1);
     let request = app.download_request;
+    app.status_text = "Starting download...".into();
+    let config = app.config.clone();
+    let job = yute_core::downloads::Request {
+        url: yute::actions::url(&card),
+        playlist: matches!(card, Card::Playlist(_)),
+        mode,
+        ffmpeg: app.ffmpeg,
+    };
     let task = tokio::spawn(async move {
-        let dir = yute::config::resolve_path("~/Videos/Yute");
-        let result = async {
-            tokio::fs::create_dir_all(&dir).await?;
-            let mut command = yute::actions::download_command(&card, &config, &dir);
-            command.status().await.map(|s| s.success())
+        let (updates, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let run = yute_core::downloads::run(job, config, updates);
+        tokio::pin!(run);
+        loop {
+            tokio::select! {Some(p)=rx.recv()=>{let text=format!("Download · {}/{} · {}",p.item.unwrap_or(1),p.total.map(|n|n.to_string()).unwrap_or_else(||"?".into()),p.percent);let _=tx.send(AppEvent::DownloadStatus(request,text)).await;},result=&mut run=>{let _=tx.send(AppEvent::DownloadComplete(request,result)).await;break;}}
         }
-        .await;
-        let _ = tx
-            .send(AppEvent::DownloadFinished(request, result.unwrap_or(false)))
-            .await;
     });
     app.download_task = Some(task.abort_handle());
 }
@@ -1904,6 +2065,17 @@ fn focus_sidebar(app: &mut App) {
 }
 
 fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
+    if app.sidebar_index >= ui::sidebar::SIDEBAR_ITEMS.len() {
+        if let Some(card) = app
+            .subscribed_channels
+            .get(app.sidebar_index - ui::sidebar::SIDEBAR_ITEMS.len())
+            .cloned()
+        {
+            dispatch_open(app, yute::actions::activation(&card), tx);
+        }
+        return;
+    }
+
     if let Some((_, screen, _)) = ui::sidebar::SIDEBAR_ITEMS.get(app.sidebar_index) {
         navigate_to_screen(app, *screen, tx);
     }
@@ -2138,6 +2310,143 @@ fn execute_command(app: &mut App, tx: Sender<AppEvent>) {
 
 fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
     match event {
+        AppEvent::SubscribedChannels(generation, result) => {
+            if generation
+                != app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            app.channels_loading = false;
+            app.channels_loaded = true;
+            match result {
+                Ok(page) => {
+                    app.subscribed_channels = page.items.clone();
+                    if let Ok(json) = serde_json::to_string(&page) {
+                        let _ = app.thumbs.cache().save_feed_cache(
+                            &feed_cache_key(app, "feed_subscribed_channels"),
+                            &json,
+                        );
+                    }
+                    if app.screen == Screen::Home
+                        && app.filter_kind == yute::app::FilterKind::Channels
+                    {
+                        app.items = page.items;
+                        app.continuation_token = page.continuation;
+                        app.is_loading = false;
+                        app.feed_error = None;
+                    }
+                }
+                Err(e) => {
+                    app.channels_error = Some(feed_error_message(&e).into());
+                    if app.screen == Screen::Home
+                        && app.filter_kind == yute::app::FilterKind::Channels
+                    {
+                        app.is_loading = false;
+                        app.feed_error = app.channels_error.clone();
+                    }
+                }
+            }
+        }
+        AppEvent::QueuePlaylist(generation, play, result) => {
+            if generation
+                != app
+                    .auth_generation
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
+            match result {
+                Ok(page) => {
+                    let mut videos = page.items.into_iter().filter_map(|c| {
+                        if let Card::Video(v) = c {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    });
+                    if play {
+                        if let Some(v) = videos.next() {
+                            start_playback(app, v, tx.clone());
+                        }
+                    }
+                    let mut count = 0;
+                    for video in videos {
+                        app.player.queue.push_back(video);
+                        count += 1;
+                    }
+                    app.status_text = format!("Queued {count} playlist videos");
+                }
+                Err(_) => app.status_text = "Could not load playlist for queue; r retry".into(),
+            }
+        }
+
+        AppEvent::Ffmpeg(present) => {
+            app.ffmpeg = present;
+            if let Some(menu) = &mut app.action_menu {
+                menu.ffmpeg = present;
+            }
+        }
+        AppEvent::DownloadStatus(request, text) => {
+            if request == app.download_request && app.download_active {
+                app.status_text = text;
+            }
+        }
+        AppEvent::DownloadComplete(request, result) => {
+            if request != app.download_request {
+                return;
+            }
+            app.download_active = false;
+            app.download_task = None;
+            app.status_text = match result {
+                Ok(p) => format!(
+                    "Download complete · {} saved · {} failed",
+                    p.completed, p.failed
+                ),
+                Err(e) => e.to_string(),
+            };
+        }
+
+        AppEvent::TerminalReport(report) => {
+            let old = yute::terminal::report();
+            yute::terminal::remember_report(report.clone());
+            if report.cells != old.cells {
+                if let Some((w, h)) = report.cells {
+                    app.cell_w_px = w as f32;
+                    app.cell_h_px = h as f32;
+                }
+            }
+            let picker = yute::terminal::initial_picker(&app.config.general.graphics);
+            app.thumbs.set_picker(picker);
+            if app.config.general.theme == "auto" && old.light != report.light {
+                yute::live_config::reload(tx, app.config.clone(), Some("auto".into()), false);
+            }
+        }
+        AppEvent::ConfigReloaded(result) => match *result {
+            Ok((config, theme)) => {
+                let selected = app.selected_card().map(|c| c.id().to_string());
+                app.config = config;
+                app.theme = theme;
+                if let Some(id) = selected {
+                    if let Some(i) = app.filtered_items().iter().position(|c| c.id() == id) {
+                        app.selected_index = i;
+                    }
+                }
+                app.thumbs.set_budget(app.config.thumbnails.cache_mb);
+                app.thumbs
+                    .set_picker(yute::terminal::initial_picker(&app.config.general.graphics));
+                app.status_text =
+                    "Theme/config reloaded; backend or active-player changes: restart required"
+                        .into();
+            }
+            Err(_) => {
+                yute_core::trace::duration("config_reload_rejected", Duration::ZERO, 1);
+                app.status_text =
+                    "Theme/config reload failed; previous state kept. Use :theme check".into()
+            }
+        },
+
         AppEvent::AccountResult(generation, event) => {
             if generation
                 == app
@@ -2230,7 +2539,27 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             match result {
                 Err(error) => app.status_text = mutation_error_message(&error),
                 Ok(()) => match mutation {
+                    yute::actions::AccountMutation::ClearRating { video_id } => {
+                        app.ratings.insert(video_id, 0);
+                        app.status_text = "Removed rating".into();
+                    }
+                    yute::actions::AccountMutation::WatchLater { video_id, remove } => {
+                        if remove {
+                            app.watch_later.remove(&video_id);
+                            if app.screen == Screen::WatchLater {
+                                app.items.retain(|c| c.id() != video_id);
+                            }
+                        } else {
+                            app.watch_later.insert(video_id);
+                        }
+                        app.status_text = "Watch Later updated".into();
+                    }
+                    yute::actions::AccountMutation::RemoveHistory { video_id } => {
+                        app.items.retain(|c| c.id() != video_id);
+                        app.status_text = "Removed from history".into();
+                    }
                     yute::actions::AccountMutation::Dislike { video_id } => {
+                        app.ratings.insert(video_id.clone(), -1);
                         if let Some(watch) = &mut app.watch_data {
                             if watch.video.id == video_id {
                                 watch.is_disliked = Some(true);
@@ -2243,6 +2572,15 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                         channel_id,
                         subscribed,
                     } => {
+                        app.subscriptions.insert(channel_id.clone(), subscribed);
+                        if !subscribed {
+                            app.subscribed_channels.retain(|c| c.id() != channel_id);
+                            if app.screen == Screen::Home
+                                && app.filter_kind == yute::app::FilterKind::Channels
+                            {
+                                app.items.retain(|c| c.id() != channel_id);
+                            }
+                        }
                         if let Some(yute::app::DetailRoute::Channel(route)) = &mut app.detail_route
                         {
                             if route.channel.id == channel_id {
@@ -2262,6 +2600,8 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                         .into();
                     }
                     yute::actions::AccountMutation::Like { video_id, liked } => {
+                        app.ratings
+                            .insert(video_id.clone(), if liked { 1 } else { 0 });
                         if let Some(watch) = &mut app.watch_data {
                             if watch.video.id == video_id {
                                 watch.is_liked = Some(liked);
@@ -2277,6 +2617,9 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                     }
                 },
             }
+            app.selected_index = app
+                .selected_index
+                .min(app.filtered_items().len().saturating_sub(1));
         }
         AppEvent::ChannelLoaded(generation, id, result) => {
             if generation != app.feed_generation {
@@ -3193,6 +3536,72 @@ fn maybe_load_card_metadata(app: &mut App, tx: Sender<AppEvent>) {
     }
 }
 
+fn load_subscribed_channels(app: &mut App, tx: Sender<AppEvent>, show: bool) {
+    if !app.is_authenticated() {
+        if show {
+            app.items.clear();
+            app.channel_items.clear();
+        }
+        app.is_loading = false;
+        return;
+    }
+    if show {
+        app.items = app.subscribed_channels.clone();
+    }
+    if app.channels_loading {
+        return;
+    }
+    if show && app.subscribed_channels.is_empty() {
+        try_load_feed_cache(app, "feed_subscribed_channels");
+    }
+    app.channels_loading = true;
+    if show {
+        app.is_loading = app.items.is_empty();
+    }
+    app.channels_error = None;
+    let backend = app.backend.clone();
+    let generation = app
+        .auth_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    tokio::spawn(async move {
+        let result = backend.subscribed_channels(None).await;
+        let _ = tx
+            .send(AppEvent::SubscribedChannels(generation, result))
+            .await;
+    });
+}
+fn queue_playlist(app: &mut App, card: Card, play: bool, tx: Sender<AppEvent>) {
+    let Card::Playlist(p) = card else {
+        return;
+    };
+    let backend = app.backend.clone();
+    let generation = app
+        .auth_generation
+        .load(std::sync::atomic::Ordering::SeqCst);
+    app.status_text = "Loading playlist...".into();
+    tokio::spawn(async move {
+        let result = async {
+            let mut page = backend.playlist(&p.id).await?;
+            let mut seen = std::collections::HashSet::new();
+            while let Some(token) = page.continuation.take() {
+                if !seen.insert(token.clone()) {
+                    anyhow::bail!("Repeated playlist continuation");
+                }
+                let next = backend.continue_feed(&token).await?;
+                page.items.extend(next.items);
+                page.continuation = next.continuation;
+                if page.items.len() > 20000 {
+                    anyhow::bail!("Playlist exceeds local queue limit");
+                }
+            }
+            Ok(page)
+        }
+        .await;
+        let _ = tx
+            .send(AppEvent::QueuePlaylist(generation, play, result))
+            .await;
+    });
+}
 fn maybe_load_channel_avatars(app: &mut App, tx: Sender<AppEvent>) {
     if app.screen != Screen::Home
         || app.filter_kind != yute::app::FilterKind::Channels
@@ -3361,6 +3770,10 @@ fn refresh_current_feed(app: &mut App, tx: Sender<AppEvent>) {
         return;
     }
     app.is_loading = true;
+    if app.screen == Screen::Home && app.filter_kind == yute::app::FilterKind::Channels {
+        load_subscribed_channels(app, tx, true);
+        return;
+    }
     app.status_text = "Refreshing…".to_string();
     let backend = Arc::clone(&app.backend);
     let query = app.search_query.clone();
@@ -3415,6 +3828,69 @@ fn apply_stream_cache(app: &App) {
 fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<AppEvent>) {
     use yute::commands::{Command, CopyTarget};
     match command {
+        Command::Download(args) => {
+            let Some(card) = app.selected_card().cloned() else {
+                app.status_text = "Select a video or playlist first".into();
+                return;
+            };
+            if args.is_empty() {
+                open_item_menu(app);
+                if let Some(menu) = &mut app.action_menu {
+                    menu.download = true;
+                    menu.stage = yute::actions::MenuStage::DownloadKind;
+                }
+                return;
+            }
+            if args.contains("playlist") && !matches!(card, Card::Playlist(_)) {
+                app.status_text = "Select a playlist for this download".into();
+                return;
+            }
+            let tokens = args
+                .split_whitespace()
+                .filter(|s| *s != "playlist")
+                .collect::<Vec<_>>();
+            let mode = match tokens.as_slice() {
+                ["video"] => Some(yute_core::downloads::Mode::Video(
+                    app.config
+                        .downloads
+                        .video_quality
+                        .trim_end_matches('p')
+                        .parse()
+                        .ok(),
+                )),
+                ["video", q] => Some(yute_core::downloads::Mode::Video(
+                    q.trim_end_matches('p').parse().ok(),
+                )),
+                ["audio"] => Some(yute_core::downloads::Mode::Audio(
+                    app.config.downloads.audio_mode.clone(),
+                )),
+                ["audio", kind] => Some(yute_core::downloads::Mode::Audio((*kind).into())),
+                _ => None,
+            };
+            if let Some(mode) = mode {
+                start_download_mode(app, card, mode, tx);
+            } else {
+                app.status_text =
+                    "Usage: :download [playlist] video [720p] | audio [best|opus|aac|mp3|flac|m4a]"
+                        .into();
+            }
+        }
+        Command::Theme(name) => match name.as_str() {
+            "list" => app.status_text = yute::theme::Theme::names().join(" · "),
+            "check" => {
+                tokio::spawn(async move {
+                    let result = tokio::task::spawn_blocking(|| {
+                        yute::live_config::load(yute::terminal::background_light())
+                            .map(|(_, theme)| theme.contrast_warnings())
+                    })
+                    .await;
+                    let message=match result{Ok(Ok(w)) if w.is_empty()=>"Theme syntax valid; no known explicit-colour contrast failures (Reset/ANSI unknown)".into(),Ok(Ok(w))=>w.join("; "),_=>"Theme/config check failed: invalid file; previous theme kept".into()};
+                    let _ = tx.send(AppEvent::StatusMessage(message)).await;
+                });
+            }
+            "reload" => yute::live_config::reload(tx, app.config.clone(), None, false),
+            _ => yute::live_config::reload(tx, app.config.clone(), Some(name), true),
+        },
         Command::PlaySelect | Command::Audio => {
             open_item_menu(app);
             if let Some(menu) = &mut app.action_menu {
@@ -3731,14 +4207,19 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
             app.status_text.clear();
         }
         Command::Graphics(mode) => {
-            let old = std::mem::replace(&mut app.config.general.graphics, mode);
-            if app.config.save().is_ok() {
-                app.status_text = "Graphics preference saved — requires restart".into();
-            } else {
-                app.config.general.graphics = old;
+            app.config.general.graphics = if mode == "off" { "none".into() } else { mode };
+            app.thumbs
+                .set_picker(yute::terminal::initial_picker(&app.config.general.graphics));
+            if app.config.general.graphics == "auto" {
+                yute::terminal::query();
+            }
+            if app.config.save().is_err() {
                 app.status_text = "Could not save graphics preference".into();
+            } else {
+                app.status_text = "Graphics mode applied".into();
             }
         }
+
         Command::Sidebar(show) => {
             app.sidebar_expanded = show.unwrap_or(!app.sidebar_expanded);
             app.focus = if app.sidebar_expanded {
@@ -3773,6 +4254,67 @@ fn authenticated(app: &App) -> bool {
     app.is_authenticated()
 }
 
+fn mutate_card(app: &mut App, card: Card, action: yute::actions::ItemAction, tx: Sender<AppEvent>) {
+    use yute::actions::{AccountMutation, ItemAction};
+    if !app.is_authenticated() {
+        app.status_text = "Sign in with :account add".into();
+        return;
+    }
+    let id = card.id().to_string();
+    let rating = app
+        .ratings
+        .get(&id)
+        .copied()
+        .or_else(|| {
+            app.watch_data
+                .as_ref()
+                .filter(|w| w.video.id == id)
+                .and_then(|w| {
+                    if w.is_liked == Some(true) {
+                        Some(1)
+                    } else if w.is_disliked == Some(true) {
+                        Some(-1)
+                    } else {
+                        None
+                    }
+                })
+        })
+        .unwrap_or(if app.screen == Screen::Liked { 1 } else { 0 });
+    let mutation = match action {
+        ItemAction::Like => AccountMutation::Like {
+            liked: rating != 1,
+            video_id: id,
+        },
+        ItemAction::Dislike => {
+            if rating == -1 {
+                AccountMutation::ClearRating { video_id: id }
+            } else {
+                AccountMutation::Dislike { video_id: id }
+            }
+        }
+        ItemAction::WatchLater => AccountMutation::WatchLater {
+            remove: app.watch_later.contains(&id) || app.screen == Screen::WatchLater,
+            video_id: id,
+        },
+        ItemAction::RemoveHistory => AccountMutation::RemoveHistory { video_id: id },
+        ItemAction::Subscribe => {
+            let Some(channel) = yute::actions::channel_of(&card) else {
+                return;
+            };
+            let current = app
+                .subscriptions
+                .get(&channel.id)
+                .copied()
+                .unwrap_or_else(|| app.subscribed_channels.iter().any(|c| c.id() == channel.id));
+            AccountMutation::Subscribe {
+                channel_id: channel.id,
+                subscribed: !current,
+            }
+        }
+        _ => return,
+    };
+    perform_mutation(app, mutation, tx);
+}
 fn perform_mutation(app: &mut App, mutation: yute::actions::AccountMutation, tx: Sender<AppEvent>) {
     let backend = Arc::clone(&app.backend);
     let generation = app.feed_generation;
@@ -3780,6 +4322,18 @@ fn perform_mutation(app: &mut App, mutation: yute::actions::AccountMutation, tx:
     tokio::spawn(async move {
         use yute::actions::AccountMutation;
         let result = match &mutation {
+            AccountMutation::ClearRating { video_id } => backend.remove_rating(video_id).await,
+            AccountMutation::WatchLater {
+                video_id,
+                remove: true,
+            } => backend.remove_from_playlist("WL", video_id).await,
+            AccountMutation::WatchLater {
+                video_id,
+                remove: false,
+            } => backend.save_to_playlist("WL", video_id).await,
+            AccountMutation::RemoveHistory { video_id } => {
+                backend.remove_from_history(video_id).await
+            }
             AccountMutation::Dislike { video_id } => {
                 backend.dislike_video(video_id).await.and_then(|confirmed| {
                     if confirmed {
@@ -4009,6 +4563,29 @@ fn feed_cache_key(app: &App, key: &str) -> String {
 async fn run_doctor() -> anyhow::Result<()> {
     use yute_core::doctor::{display_text, Status};
     let config = Config::load_checked()?;
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        crossterm::terminal::enable_raw_mode()?;
+        let (tx, mut rx) = channel(16);
+        let _keys = yute::terminal_input::start(tx)?;
+        yute::terminal::query();
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(180);
+        while let Ok(Some(AppEvent::TerminalReport(report))) =
+            tokio::time::timeout_at(deadline, rx.recv()).await
+        {
+            yute::terminal::remember_report(report);
+        }
+        crossterm::terminal::disable_raw_mode()?;
+    }
+    let theme = yute::theme::Theme::resolve(&config, yute::terminal::background_light())?;
+    println!(
+        "Theme: {} · background light={:?}",
+        config.general.theme,
+        yute::terminal::background_light()
+    );
+    for warning in theme.contrast_warnings() {
+        println!("Warning · theme: {warning}");
+    }
     let checks = yute_core::doctor::run(&config).await;
     let failed = checks.iter().any(|check| check.status == Status::Failure);
     for check in checks {
@@ -4020,7 +4597,7 @@ async fn run_doctor() -> anyhow::Result<()> {
         display_text(&std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "unset".into()))
     );
     println!(
-        "Graphics: {:?} (configured={}, environment hint; not actively negotiated)",
+        "Graphics: {:?} (configured={}; auto requires protocol replies, otherwise safe halfblocks)",
         yute::terminal::initial_picker(&config.general.graphics).protocol_type(),
         display_text(&config.general.graphics)
     );
@@ -4405,6 +4982,7 @@ mod feed_ui_tests {
             thumb_url: "".into(),
             is_mix: false,
             first_video_id: Some("abcdefghijk".into()),
+            updated: None,
         })];
         play_selected_card(&mut app, tx.clone());
         assert_eq!(app.screen, Screen::PlaylistView);
@@ -4700,6 +5278,16 @@ mod feed_ui_tests {
         if let Card::Video(v) = &mut cards[0] {
             v.channel_id = Some("UCfixture-owner".into());
         }
+        app.subscribed_channels = vec![Card::Channel(yute::backend::models::ChannelCard {
+            id: "UCfixture-owner".into(),
+            title: "Fixture channel".into(),
+            handle: Some("@fixture".into()),
+            subscribers: Some("10K subscribers".into()),
+            avatar_url: Some("https://example.invalid/avatar.jpg".into()),
+            verified: false,
+        })];
+        app.channels_loading = true;
+        app.auth.lock().unwrap().access_token = Some("test-access".into());
         app.items = cards.clone();
         app.selected_index = 3;
         app.home_pages.insert(
@@ -4821,7 +5409,7 @@ mod feed_ui_tests {
     }
     #[tokio::test]
     async fn cancelling_download_ignores_already_queued_completion_from_old_job() {
-        use yute::actions::{menu_entries, ItemAction};
+        use yute::actions::ItemAction;
         let (mut app, cards) = app_and_cards();
         app.items = cards;
         app.focus = Focus::Content;
@@ -4830,10 +5418,11 @@ mod feed_ui_tests {
         let task = tokio::spawn(std::future::pending::<()>());
         app.download_task = Some(task.abort_handle());
         open_item_menu(&mut app);
-        app.action_menu.as_mut().unwrap().cursor = menu_entries(&app.items[0], false, true)
-            .iter()
-            .position(|e| e.action == ItemAction::CancelDownload)
-            .unwrap();
+        app.action_menu.as_mut().unwrap().cursor =
+            yute::actions::visible_entries(&app, &app.items[0])
+                .iter()
+                .position(|e| e.action == ItemAction::CancelDownload)
+                .unwrap();
         let (tx, _) = channel(16);
         handle_item_menu(
             &mut app,

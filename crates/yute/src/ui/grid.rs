@@ -1,8 +1,8 @@
 use crate::app::{App, Focus};
 use crate::backend::models::{Card, LiveState};
-use crate::ui::text::{format_meta_line, sanitize_title, truncate_str, wrap_and_truncate_title};
+use crate::ui::text::{format_meta_line, truncate_str, wrap_and_truncate_title};
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -15,7 +15,7 @@ pub fn column_count(width: u16, config: &crate::config::GridConfig) -> usize {
             .min(width.saturating_sub(1).max(1) / 2)
             .max(1) as usize;
     }
-    let min_width = config.min_card_width.clamp(30, 44);
+    let min_width = config.min_card_width.clamp(28, 40);
     (width.saturating_add(2) / min_width.saturating_add(2)).clamp(1, 8) as usize
 }
 
@@ -41,7 +41,7 @@ impl GridGeometry {
             .width
             .saturating_sub(2 * columns.saturating_sub(1) as u16)
             / columns as u16;
-        let card_width = slot_width.max(1);
+        let card_width = slot_width.clamp(1, 40);
         let column_stride = card_width.saturating_add(2);
         let occupied = card_width * columns as u16 + 2 * columns.saturating_sub(1) as u16;
         let first_column_offset = area.width.saturating_sub(occupied) / 2;
@@ -93,7 +93,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         let msg = app.empty_feed_message();
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(app.theme.text_secondary));
+            .style(app.theme.style("text_dim"));
         f.render_widget(p, area);
         if app.is_loading && area.height >= 10 {
             let geometry = GridGeometry::new(area, &app.config.grid, app.cell_w_px, app.cell_h_px);
@@ -169,7 +169,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     for r in 0..geometry.visible_rows {
         let card_y = area.y + (r as u16) * row_stride;
         let remaining = area.bottom().saturating_sub(card_y);
-        if remaining == 0 {
+        if remaining < (card_h / 2).max(1) {
             break;
         }
 
@@ -242,9 +242,9 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             for y_off in 0..sb_height {
                 let y = area.y + 1 + y_off;
                 let (ch, style) = if y_off >= thumb_pos && y_off < thumb_pos + thumb_size {
-                    ("█", Style::default().fg(app.theme.accent))
+                    ("█", app.theme.style("accent"))
                 } else {
-                    ("│", Style::default().fg(app.theme.border))
+                    ("│", app.theme.style("border"))
                 };
                 f.render_widget(
                     Paragraph::new(ch).style(style),
@@ -265,7 +265,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 fn render_partial_card(f: &mut Frame, app: &mut App, card: &Card, area: Rect, thumb_h: u16) {
     let block = Block::default()
         .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-        .border_style(Style::default().fg(app.theme.border));
+        .border_style(app.theme.style("border"));
     let inner = block.inner(area);
     f.render_widget(block, area);
     if inner.is_empty() {
@@ -290,7 +290,7 @@ fn render_partial_card(f: &mut Frame, app: &mut App, card: &Card, area: Rect, th
             Line::from("▒".repeat(artwork.width as usize));
             artwork.height as usize
         ])
-        .style(Style::default().fg(app.theme.border)),
+        .style(app.theme.style("border")),
         artwork,
     );
     if can_draw && !url.is_empty() {
@@ -304,11 +304,11 @@ fn render_partial_card(f: &mut Frame, app: &mut App, card: &Card, area: Rect, th
     // Keep the same artwork/title order and dimensions as complete rows.
     let title_h = inner.height.saturating_sub(thumb_h).min(2);
     if title_h > 0 {
-        let title = sanitize_title(card.title(), app.config.strip_emoji());
+        let title = crate::ui::text::title_for(card.title(), &app.config);
         let lines = wrap_and_truncate_title(&title, inner.width as usize, 2);
         f.render_widget(
             Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
-                .style(Style::default().fg(app.theme.text_secondary)),
+                .style(app.theme.style("text_dim")),
             Rect::new(inner.x, inner.y + thumb_h, inner.width, title_h),
         );
     }
@@ -332,16 +332,12 @@ fn render_grid_card(
         Block::default()
             .borders(Borders::ALL)
             .border_type(ratatui::widgets::BorderType::Plain)
-            .border_style(
-                Style::default()
-                    .fg(app.theme.accent)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .border_style(app.theme.style("accent").add_modifier(Modifier::BOLD))
             .style(Style::default().bg(app.theme.bg))
     } else {
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(app.theme.border))
+            .border_style(app.theme.style("border"))
             .style(Style::default().bg(app.theme.bg))
     };
     f.render_widget(card_block, area);
@@ -356,7 +352,7 @@ fn render_grid_card(
 
     if is_selected {
         f.render_widget(
-            Block::default().style(Style::default().bg(app.theme.surface_hover)),
+            Block::default().style(Style::default().patch(app.theme.style("selection"))),
             inner,
         );
     }
@@ -420,7 +416,7 @@ fn render_grid_card(
             for _ in 0..thumb_area.height {
                 skel_lines.push(Line::from(Span::styled(
                     skeleton_line.clone(),
-                    Style::default().fg(app.theme.border),
+                    app.theme.style("border"),
                 )));
             }
             f.render_widget(Paragraph::new(skel_lines), thumb_area);
@@ -432,12 +428,29 @@ fn render_grid_card(
         for _ in 0..thumb_area.height {
             skel_lines.push(Line::from(Span::styled(
                 skeleton_line.clone(),
-                Style::default().fg(app.theme.border),
+                app.theme.style("border"),
             )));
         }
         f.render_widget(Paragraph::new(skel_lines), thumb_area);
     }
 
+    if let Card::Video(video) = card {
+        if let Some(percent) = video.progress_pct.filter(|p| *p > 0) {
+            let filled = usize::from(thumb_area.width) * usize::from(percent.min(100)) / 100;
+            let line = Line::from(vec![
+                Span::styled("█".repeat(filled), app.theme.style("progress")),
+                Span::styled(
+                    "░".repeat(thumb_area.width as usize - filled),
+                    app.theme.style("skeleton"),
+                ),
+            ]);
+            super::thumbnail::badge(
+                f,
+                Paragraph::new(line),
+                Rect::new(thumb_area.x, thumb_area.bottom() - 1, thumb_area.width, 1),
+            );
+        }
+    }
     // Render corner badges
     let now_playing = app.player.is_alive()
         && app.player.status.file_loaded
@@ -454,7 +467,7 @@ fn render_grid_card(
         let p = Paragraph::new(badge_text).style(
             Style::default()
                 .bg(app.theme.accent)
-                .fg(Color::White)
+                .fg(app.theme.badge_fg)
                 .add_modifier(Modifier::BOLD),
         );
         super::thumbnail::badge(f, p, badge_rect);
@@ -473,7 +486,7 @@ fn render_grid_card(
                     let p = Paragraph::new(badge_text).style(
                         Style::default()
                             .bg(app.theme.live_badge_bg)
-                            .fg(Color::White)
+                            .fg(app.theme.badge_fg)
                             .add_modifier(Modifier::BOLD),
                     );
                     super::thumbnail::badge(f, p, badge_rect);
@@ -481,8 +494,11 @@ fn render_grid_card(
                     let rect = Rect::new(thumb_area.x, thumb_area.y, 10.min(thumb_area.width), 1);
                     super::thumbnail::badge(
                         f,
-                        Paragraph::new(" UPCOMING ")
-                            .style(Style::default().fg(Color::White).bg(app.theme.badge_bg)),
+                        Paragraph::new(" UPCOMING ").style(
+                            Style::default()
+                                .fg(app.theme.badge_fg)
+                                .bg(app.theme.badge_bg),
+                        ),
                         rect,
                     );
                 } else if is_shorts {
@@ -496,8 +512,8 @@ fn render_grid_card(
                     };
                     let p = Paragraph::new(badge_text).style(
                         Style::default()
-                            .bg(Color::Rgb(200, 20, 20))
-                            .fg(Color::White)
+                            .bg(app.theme.live_badge_bg)
+                            .fg(app.theme.badge_fg)
                             .add_modifier(Modifier::BOLD),
                     );
                     super::thumbnail::badge(f, p, badge_rect);
@@ -512,15 +528,25 @@ fn render_grid_card(
                     };
                     let p = Paragraph::new(badge_text).style(
                         Style::default()
-                            .bg(Color::Rgb(15, 15, 15))
-                            .fg(Color::White)
+                            .bg(app.theme.badge_bg)
+                            .fg(app.theme.badge_fg)
                             .add_modifier(Modifier::BOLD),
                     );
                     super::thumbnail::badge(f, p, badge_rect);
                 }
             }
             Card::Playlist(p) => {
-                let badge_text = if p.is_mix { " MIX " } else { " PLAYLIST " };
+                let badge_text = if p.is_mix {
+                    " MIX ".into()
+                } else {
+                    format!(
+                        " {} ",
+                        p.video_count
+                            .as_deref()
+                            .unwrap_or("PLAYLIST")
+                            .to_uppercase()
+                    )
+                };
                 let badge_w = (badge_text.len() as u16).min(thumb_area.width);
                 let badge_rect = Rect {
                     x: thumb_area.x + thumb_area.width.saturating_sub(badge_w),
@@ -541,7 +567,7 @@ fn render_grid_card(
                 super::thumbnail::badge(
                     f,
                     Paragraph::new(" CHANNEL ")
-                        .style(Style::default().fg(app.theme.text).bg(app.theme.surface)),
+                        .style(app.theme.style("text").bg(app.theme.surface)),
                     rect,
                 );
             }
@@ -557,7 +583,7 @@ fn render_grid_card(
                     f,
                     Paragraph::new(text).style(
                         Style::default()
-                            .fg(Color::White)
+                            .fg(app.theme.badge_fg)
                             .bg(app.theme.badge_bg)
                             .add_modifier(Modifier::BOLD),
                     ),
@@ -572,41 +598,28 @@ fn render_grid_card(
         }
     }
 
-    let sec_style = Style::default().fg(app.theme.text_secondary);
+    let sec_style = app.theme.style("text_dim");
 
     // Render Title (max 2 lines, word-boundary wrapped with ellipsis)
     let raw_title = card.title();
-    let clean = sanitize_title(raw_title, app.config.strip_emoji());
+    let clean = crate::ui::text::title_for(raw_title, &app.config);
     let title_lines = wrap_and_truncate_title(&clean, title_area.width as usize, title_h as usize);
 
     let mut line_spans = Vec::new();
-    for (l_idx, tl) in title_lines.into_iter().enumerate() {
-        if l_idx == 0 {
-            if let Card::Video(v) = card {
-                if let Some(pct) = v.progress_pct {
-                    let filled = ((pct.min(100) as usize) * 5) / 100;
-                    let track = format!("[{}{}] ", "=".repeat(filled), " ".repeat(5 - filled));
-                    line_spans.push(Line::from(vec![
-                        Span::styled(track, Style::default().fg(app.theme.red)),
-                        Span::styled(
-                            tl,
-                            Style::default()
-                                .fg(app.theme.text)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
-                    continue;
-                }
-            }
-        }
+    for tl in title_lines {
         line_spans.push(Line::from(Span::styled(
             tl,
-            Style::default()
-                .fg(app.theme.text)
-                .add_modifier(Modifier::BOLD),
+            app.theme.style("text").add_modifier(Modifier::BOLD),
         )));
     }
-    f.render_widget(Paragraph::new(line_spans), title_area);
+    f.render_widget(
+        Paragraph::new(line_spans).style(if is_selected {
+            app.theme.style("selection")
+        } else {
+            app.theme.style("text")
+        }),
+        title_area,
+    );
 
     // Render Meta Line
     match card {
@@ -618,7 +631,7 @@ fn render_grid_card(
             };
             f.render_widget(
                 Paragraph::new(truncate_str(&channel, channel_area.width as usize))
-                    .style(Style::default().fg(app.theme.text)),
+                    .style(app.theme.style("text")),
                 channel_area,
             );
             let meta = format_meta_line(
@@ -632,20 +645,26 @@ fn render_grid_card(
             f.render_widget(Paragraph::new(Line::from(meta)), meta_area);
         }
         Card::Playlist(p) => {
+            let owner = if p.channel.is_empty() {
+                p.updated.as_deref().unwrap_or("")
+            } else {
+                &p.channel
+            };
             f.render_widget(
-                Paragraph::new(truncate_str(&p.channel, channel_area.width as usize))
-                    .style(Style::default().fg(app.theme.text)),
+                Paragraph::new(truncate_str(owner, channel_area.width as usize))
+                    .style(app.theme.style("text_dim")),
                 channel_area,
             );
-            f.render_widget(
-                Paragraph::new(p.video_count.as_deref().unwrap_or(if p.is_mix {
-                    "Mix"
-                } else {
-                    "Playlist"
-                }))
-                .style(sec_style),
-                meta_area,
-            );
+            if !p.channel.is_empty() {
+                f.render_widget(
+                    Paragraph::new(truncate_str(
+                        p.updated.as_deref().unwrap_or(""),
+                        meta_area.width as usize,
+                    ))
+                    .style(app.theme.style("text_dim")),
+                    meta_area,
+                );
+            }
         }
         Card::Channel(c) => {
             f.render_widget(
@@ -653,7 +672,7 @@ fn render_grid_card(
                     c.handle.as_deref().unwrap_or("Channel"),
                     channel_area.width as usize,
                 ))
-                .style(Style::default().fg(app.theme.text)),
+                .style(app.theme.style("text")),
                 channel_area,
             );
             f.render_widget(
@@ -673,11 +692,9 @@ fn render_monogram(f: &mut Frame, app: &App, card: &Card, area: Rect) {
         .to_uppercase()
         .to_string();
     f.render_widget(
-        Paragraph::new(initial).alignment(Alignment::Center).style(
-            Style::default()
-                .fg(app.theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Paragraph::new(initial)
+            .alignment(Alignment::Center)
+            .style(app.theme.style("accent").add_modifier(Modifier::BOLD)),
         Rect::new(area.x, area.y + area.height / 2, area.width, 1),
     );
 }

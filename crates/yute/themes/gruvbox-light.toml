@@ -1,0 +1,79 @@
+[roles.text]
+fg = "#3c3836"
+bg = "#fbf1c7"
+
+[roles.text_dim]
+fg = "#665c54"
+bg = "#fbf1c7"
+
+[roles.border]
+fg = "#665c54"
+bg = "#fbf1c7"
+
+[roles.border_focused]
+fg = "#9d0006"
+bg = "#fbf1c7"
+
+[roles.accent]
+fg = "#9d0006"
+bg = "#fbf1c7"
+
+[roles.selection]
+fg = "#fbf1c7"
+bg = "#3c3836"
+
+[roles.chip_active]
+fg = "#fbf1c7"
+bg = "#3c3836"
+
+[roles.chip_idle]
+fg = "#665c54"
+bg = "#fbf1c7"
+
+[roles.badge]
+fg = "#ffffff"
+bg = "#000000"
+
+[roles.badge_live]
+fg = "#ffffff"
+bg = "#9d0006"
+
+[roles.badge_mix]
+fg = "#ffffff"
+bg = "#000000"
+
+[roles.progress]
+fg = "#9d0006"
+bg = "#fbf1c7"
+
+[roles.skeleton]
+fg = "#665c54"
+bg = "#fbf1c7"
+
+[roles.error]
+fg = "#3c3836"
+bg = "#fbf1c7"
+
+[roles.warning]
+fg = "#3c3836"
+bg = "#fbf1c7"
+
+[roles.scrollbar]
+fg = "#3c3836"
+bg = "#fbf1c7"
+
+[roles.popup]
+fg = "#3c3836"
+bg = "#fbf1c7"
+
+[roles.popup_selected]
+fg = "#fbf1c7"
+bg = "#3c3836"
+
+[roles.status]
+fg = "#3c3836"
+bg = "#fbf1c7"
+
+[roles.action_hint]
+fg = "#665c54"
+bg = "#fbf1c7"

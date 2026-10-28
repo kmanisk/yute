@@ -77,6 +77,8 @@ pub struct PlaylistCard {
     pub is_mix: bool,
     #[serde(default)]
     pub first_video_id: Option<String>,
+    #[serde(default)]
+    pub updated: Option<String>,
 }
 
 /// Only the canonical RD + video-id form exposes a seed directly. Other Mix

@@ -12,14 +12,13 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.border))
+        .border_style(app.theme.style("border"))
         .title(" Live Chat ")
         .style(Style::default().bg(app.theme.surface));
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let p = Paragraph::new("Live chat stream polling active...")
-        .style(Style::default().fg(app.theme.text_secondary));
+    let p = Paragraph::new("Live chat stream polling active...").style(app.theme.style("text_dim"));
     f.render_widget(p, inner);
 }
