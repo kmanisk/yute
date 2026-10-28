@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+<defs><filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<rect width="512" height="512" fill="#000"/>
+<rect x="74" y="87" width="364" height="338" rx="50" fill="#101b1d" stroke="#00e5d4" stroke-width="14" filter="url(#glow)"/>
+<line x1="81" y1="162" x2="431" y2="162" stroke="#00e5d4" stroke-width="12"/>
+<text x="256" y="309" text-anchor="middle" font-family="Iosevka,JetBrains Mono,monospace" font-size="112" font-weight="600" fill="#f5d487">&gt;yu|</text>
+</svg>
