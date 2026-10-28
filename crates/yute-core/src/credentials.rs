@@ -92,25 +92,10 @@ fn private_read(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
     }
     Ok(Zeroizing::new(fs::read(path)?))
 }
-fn keyfile(create: bool) -> Result<Zeroizing<[u8; 32]>> {
+fn keyfile() -> Result<Zeroizing<[u8; 32]>> {
     let file = std::env::var_os("YUTE_KEYFILE")
         .map(PathBuf::from)
         .unwrap_or_else(|| data_dir().join("master.key"));
-    if !file.exists() && create {
-        let parent = file.parent().context("Invalid keyfile path")?;
-        private_dir(parent)?;
-        let bytes = Zeroizing::new(random::<32>()?);
-        let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-        temp.write_all(bytes.as_ref())?;
-        temp.as_file().sync_all()?;
-        match temp.persist_noclobber(&file) {
-            Ok(_) => (),
-            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(_) => bail!("Could not create private keyfile"),
-        }
-        #[cfg(unix)]
-        fs::File::open(parent)?.sync_all()?;
-    }
     let bytes = private_read(&file)?;
     let key = <[u8; 32]>::try_from(bytes.as_slice())
         .map_err(|_| anyhow::anyhow!("Keyfile must contain exactly 32 random bytes"))?;
@@ -166,7 +151,7 @@ impl CredentialStore {
             salt.copy_from_slice(&payload[7..23]);
             let bytes = match source {
                 0 => keyring_key(false)?,
-                1 => keyfile(false)?,
+                1 => keyfile()?,
                 2 => passphrase_key(&salt)?,
                 _ => bail!("Unsupported credential key source"),
             };
@@ -175,31 +160,13 @@ impl CredentialStore {
                 source,
                 salt,
             }
-        } else if std::env::var_os("YUTE_PASSPHRASE_FILE").is_some() {
-            let salt = random()?;
-            MasterKey {
-                bytes: passphrase_key(&salt)?,
-                source: 2,
-                salt,
-            }
-        } else if std::env::var_os("YUTE_KEYFILE").is_some() {
-            MasterKey {
-                bytes: keyfile(true)?,
-                source: 1,
-                salt: [0; 16],
-            }
         } else {
-            match keyring_key(true) {
-                Ok(bytes) => MasterKey {
-                    bytes,
-                    source: 0,
-                    salt: [0; 16],
-                },
-                Err(_) => MasterKey {
-                    bytes: keyfile(true)?,
-                    source: 1,
-                    salt: [0; 16],
-                },
+            // New stores require the OS keyring. Legacy encrypted stores retain
+            // their original key source so upgrades never destroy credentials.
+            MasterKey {
+                bytes: keyring_key(true)?,
+                source: 0,
+                salt: [0; 16],
             }
         };
         let key = Arc::new(key);

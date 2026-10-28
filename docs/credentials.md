@@ -14,13 +14,12 @@ blocking workers. A delayed unlock is reported without blocking input, and quit
 does not wait indefinitely for an OS keyring prompt. Existing keyring-backed files require their original keyring;
 an unavailable keyring never causes them to be overwritten with a new key.
 
-For a new store without a usable keyring, Yute creates a random 32-byte keyfile
-at `~/.local/share/yute/master.key`, mode 0600. This is encrypted credential
-storage with a separate local key, not protection against someone who can read
-both files. Set `YUTE_KEYFILE` to select another private keyfile. Alternatively,
-set `YUTE_PASSPHRASE_FILE` to a private file containing the exact passphrase bytes.
-Argon2id derives the AES key using a random 128-bit salt in the authenticated
-header. Preserve the passphrase file exactly, including any final newline.
+New stores require an OS-keyring master key. A missing/locked/unavailable keyring
+is an error; no automatic local keyfile or passphrase fallback is created.
+Existing encrypted stores backed by a keyfile or passphrase retain their original
+key source for compatibility. `YUTE_KEYFILE` and `YUTE_PASSPHRASE_FILE` only
+select keys for those existing stores. Migration of those stores to an OS-keyring
+master key remains outstanding; preserve their original keys until that happens.
 No credentials silently fall back to plaintext. Key material and owned secret
 strings use zeroizing allocations, and Debug redacts them.
 
