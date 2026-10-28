@@ -139,9 +139,9 @@ impl InnerTubeBackend {
             .unwrap_or_default();
         let results = stream::iter(entries.into_iter().take(10))
             .map(|entry| async move {
-                let endpoint = entry.pointer("/command/reelWatchEndpoint")?;
-                let id = endpoint.get("videoId")?.as_str()?;
-                let params = endpoint.get("params")?.as_str()?;
+                let endpoint = entry.pointer("/command/reelWatchEndpoint").context("Shorts sequence entry has no watch endpoint")?;
+                let id = endpoint.get("videoId").and_then(Value::as_str).context("Shorts sequence entry has no video ID")?;
+                let params = endpoint.get("params").and_then(Value::as_str).context("Shorts sequence entry has no request parameters")?;
                 let value = self
                     .post_endpoint(
                         "reel/reel_item_watch",
@@ -149,14 +149,13 @@ impl InnerTubeBackend {
                             json!({"playerRequest":{"videoId":id},"params":params,"disablePlayerResponse":true}),
                         ),
                     )
-                    .await
-                    .ok()?;
-                crate::backend::parse::parse_reel_card(&value, Some(id))
+                    .await?;
+                crate::backend::parse::parse_reel_card(&value, Some(id)).context("Shorts item response contains no playable card")
             })
             .buffered(2)
             .collect::<Vec<_>>()
             .await;
-        let items = results.into_iter().flatten().collect();
+        let items = results.into_iter().collect::<Result<Vec<_>>>()?;
         let continuation = value
             .get("continuation")
             .and_then(serde_json::Value::as_str)
@@ -226,13 +225,7 @@ impl Backend for InnerTubeBackend {
             .get("sequenceContinuation")
             .and_then(serde_json::Value::as_str)
         {
-            self.reel_sequence(token)
-                .await
-                .unwrap_or_else(|_| FeedPage {
-                    items: Vec::new(),
-                    chips: Vec::new(),
-                    continuation: Some(format!("yute:reel:{token}")),
-                })
+            self.reel_sequence(token).await?
         } else {
             FeedPage::default()
         };
