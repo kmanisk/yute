@@ -320,19 +320,19 @@ impl Backend for BackendChain {
     }
 
     async fn mark_watched(&self, id: &str) -> anyhow::Result<()> {
-        for b in &self.backends {
-            if let Ok(()) = b.mark_watched(id).await {
-                return Ok(());
-            }
-        }
-        Ok(())
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .mark_watched(id)
+            .await
     }
 
     async fn ping_playback(&self, id: &str, cpn: &str) -> anyhow::Result<()> {
-        for b in &self.backends {
-            let _ = b.ping_playback(id, cpn).await;
-        }
-        Ok(())
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .ping_playback(id, cpn)
+            .await
     }
 
     async fn ping_watchtime(
@@ -344,10 +344,11 @@ impl Backend for BackendChain {
         cmt: f64,
         is_final: bool,
     ) -> anyhow::Result<()> {
-        for b in &self.backends {
-            let _ = b.ping_watchtime(id, cpn, st, et, cmt, is_final).await;
-        }
-        Ok(())
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .ping_watchtime(id, cpn, st, et, cmt, is_final)
+            .await
     }
 
     async fn account_info(&self) -> anyhow::Result<(String, String)> {

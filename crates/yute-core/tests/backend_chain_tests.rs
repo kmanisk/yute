@@ -119,6 +119,10 @@ async fn account_errors_cannot_be_masked_by_successful_empty_fallback() {
         chain.account_info().await.unwrap_err().to_string(),
         "authoritative OAuth error"
     );
+    assert_eq!(
+        chain.mark_watched("fixture").await.unwrap_err().to_string(),
+        "authoritative OAuth error"
+    );
     assert_eq!(fallback.load(Ordering::SeqCst), 0);
 }
 #[tokio::test]

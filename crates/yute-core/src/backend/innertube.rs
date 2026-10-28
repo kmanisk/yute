@@ -572,13 +572,20 @@ impl Backend for InnerTubeBackend {
             let playback_url = format!(
                 "https://www.youtube.com/api/stats/playback?ns=yt&ver=2&docid={id}&cpn={cpn}"
             );
-            let _ = self
+            let response = self
                 .client
                 .get(&playback_url)
                 .header("Authorization", format!("Bearer {}", tok.expose()))
                 .header("User-Agent", "Mozilla/5.0")
                 .send()
-                .await;
+                .await
+                .map_err(|_| anyhow!("Playback tracking network request failed"))?;
+            if !response.status().is_success() {
+                anyhow::bail!(
+                    "Playback tracking returned HTTP {}",
+                    response.status().as_u16()
+                );
+            }
         }
 
         Ok(())
@@ -603,13 +610,20 @@ impl Backend for InnerTubeBackend {
             let watchtime_url = format!(
                 "https://www.youtube.com/api/stats/watchtime?ns=yt&ver=2&docid={id}&cpn={cpn}&st={st:.1}&et={et:.1}&cmt={cmt:.1}{final_flag}"
             );
-            let _ = self
+            let response = self
                 .client
                 .get(&watchtime_url)
                 .header("Authorization", format!("Bearer {}", tok.expose()))
                 .header("User-Agent", "Mozilla/5.0")
                 .send()
-                .await;
+                .await
+                .map_err(|_| anyhow!("Playback tracking network request failed"))?;
+            if !response.status().is_success() {
+                anyhow::bail!(
+                    "Playback tracking returned HTTP {}",
+                    response.status().as_u16()
+                );
+            }
         }
 
         Ok(())
