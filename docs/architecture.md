@@ -53,7 +53,7 @@ yute/
    - Pings `https://www.youtube.com/api/stats/playback` when playback starts using a session client playback nonce (`cpn`).
    - Periodically queries MPV `time-pos` via IPC and pings `https://www.youtube.com/api/stats/watchtime` (every 25–30 seconds).
    - Transmits a final watchtime ping with actual elapsed position when playback is stopped.
-   - Synchronizes exact resume positions and watch history across all devices.
+   - Emits playback/watchtime tracking from real MPV positions when enabled; exact cross-client resume parity remains subject to live account verification.
 
 4. **Player Controller:**
    - Launches external `mpv` processes communicating over dedicated Unix domain sockets.
@@ -153,3 +153,15 @@ cell pixel dimensions. Typed cards keep video/channel/playlist activation separa
 Semantic icons are centralized in `ui/icons.rs`; display width governs padding.
 Input editing and truncation use grapheme boundaries, including legacy cursor
 positions inside multibyte text.
+
+## Theme, terminal capability and live-config path
+
+The TUI centralizes semantic styles in `theme.rs`. The default `terminal` theme uses terminal defaults and ANSI colours rather than hardcoded RGB. Custom TOML themes are resolved after the first frame, and `live_config.rs` watches config/theme paths using filesystem events; a failed parse keeps the previous state.
+
+Background and graphics reports share the single `/dev/tty` reader in `terminal_input.rs`, so capability replies cannot race normal key input. Graphics auto mode begins with halfblocks. Post-first-frame queries can confirm Kitty, Sixel, iTerm2 cell reports, cell pixel dimensions and background/light state. Structural overlay changes invalidate image placements and clear/redraw the affected screen to prevent persistent graphics ghosts. Multiplexed sessions conservatively use halfblocks when passthrough has not been established.
+
+## Downloads and subscribed channels
+
+`yute-core::downloads` builds yt-dlp commands as argument arrays only. Single-item downloads can use exact resolved selectors; playlist video resolutions are ceilings per item. Audio conversion requires ffmpeg, playlist jobs use local archive files, and one owned asynchronous child is active at a time.
+
+Home's Channels tab is not synthesized from Home recommendations. It uses the authenticated subscribed-channel browse path and an account-scoped stale cache; signed-out state does not reveal cached account channel names. The optional tall-sidebar channel list reuses the same typed channel cards.

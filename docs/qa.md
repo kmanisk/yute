@@ -45,22 +45,37 @@ A doctor success does not establish account/feed correctness.
 - [ ] Private/age-restricted media reports a useful error. Authenticated format
   resolution is outstanding; do not put tokens in command arguments.
 
-## Downloads (requested extensions remain outstanding)
+## Downloads (implemented; live network QA pending)
 
-The existing generic item download/cancel action is available. The specialized
-menus, conversions, playlist accounting and archive behaviour below are pending
-implementation and must not be described as passing.
+Automated tests cover argument-only subprocess construction, single-video selectors, playlist quality ceilings, conversion gating, progress parsing, archives, safe templates, continuation after a failed playlist item, and cancellation. Live media downloads remain manual QA.
 
-- [ ] Single video: original/default and chosen quality.
-- [ ] Audio: original streams versus explicitly labelled conversion.
+- [ ] Single video: chosen available video quality.
+- [ ] Audio: original best/Opus/AAC versus explicitly labelled MP3/FLAC/M4A conversion.
 - [ ] Missing ffmpeg hides conversion choices; no unnecessary conversion.
 - [ ] Cancel and resume partial download; quit terminates children.
-- [ ] Playlist video, <=1080p ceiling and lower-quality per-item fallback.
+- [ ] Playlist video <=1080p ceiling with lower-quality per-item fallback.
 - [ ] Playlist original audio, Opus/AAC preferences and conversions.
-- [ ] One unavailable item and one failed item do not abort remaining items.
-- [ ] Final completed/failed/skipped totals and useful sanitized details.
+- [ ] One unavailable/failed item does not abort the remaining playlist.
+- [ ] Final completed/failed totals stay sanitized.
 - [ ] Playlist retry/archive skips completed IDs; safe directory ordering.
 - [ ] Filenames/URLs containing shell metacharacters remain literal arguments.
+
+## Theme and terminal graphics matrix
+
+For each available terminal, test dark and light palettes on Wayland and X11 where applicable. Unavailable combinations stay unchecked rather than being inferred.
+
+| Terminal | Graphics expectation | Dark | Light | Overlay ghosts | Live theme/config reload | Resize/fullscreen |
+| --- | --- | --- | --- | --- | --- | --- |
+| kitty | Kitty | [ ] | [ ] | [ ] | [ ] | [ ] |
+| Ghostty | Kitty when query confirms | [ ] | [ ] | [ ] | [ ] | [ ] |
+| WezTerm | confirmed Kitty/iTerm2/Sixel path | [ ] | [ ] | [ ] | [ ] | [ ] |
+| foot | Sixel | [ ] | [ ] | [ ] | [ ] | [ ] |
+| Konsole | Sixel when reported | [ ] | [ ] | [ ] | [ ] | [ ] |
+| xterm + Sixel | Sixel | [ ] | [ ] | [ ] | [ ] | [ ] |
+| Alacritty | halfblocks | [ ] | [ ] | [ ] | [ ] | [ ] |
+| tmux/zellij | halfblocks unless passthrough is established | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+Exact manual checks: 16:9 crop with no black strip, no image/text ghosts after every overlay, terminal background/color-scheme response handling, terminal palette switch while unfocused then FocusGained, config/theme hot reload, Hindi/CJK/emoji boundaries, subscribed-channel avatars/sidebar, playlist density and action-menu scrolling at short heights.
 
 ## Follow-up delivery evidence, 2026-10-29
 

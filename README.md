@@ -30,7 +30,8 @@ Yute keeps discovery, navigation, account views and queue management inside the 
 - **Keyboard first** — Vim-style movement, `g` navigation, `/` search and a `:` command line.
 - **Real YouTube browsing** — Home, Subscriptions, Search, History, Watch Later, Liked videos, playlists and channels where the active session exposes them.
 - **Entity-aware routing** — videos, Shorts and playable live streams go to MPV; channels and playlists open inside Yute.
-- **Terminal graphics** — asynchronous Sixel and Kitty thumbnails with Unicode halfblock fallback.
+- **Terminal graphics** — confirmed-protocol Kitty, iTerm2 and Sixel thumbnails with Unicode halfblock fallback.
+- **Terminal-native themes** — semantic styles, a palette-following `terminal` default, light/dark auto selection, and live config/theme reload.
 - **External MPV** — playback stays in a real media player while Yute remains responsive and browsable.
 - **Account-aware feeds** — Anonymous, saved TV OAuth identities and explicit re-login states are isolated cleanly.
 - **Command mode** — completion and history expose power-user actions without filling the UI with permanent chrome.
@@ -68,7 +69,8 @@ The sidebar can be shown when needed and gives fast access to Home, Subscription
 - Rust / Cargo
 - [`mpv`](https://mpv.io/)
 - [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
-- optional: `ffmpeg` / `ffprobe` for local-media metadata
+- `node` for yt-dlp's external YouTube JavaScript runtime
+- optional: `ffmpeg` / `ffprobe` for local-media metadata and explicit audio conversions
 - optional: `wl-copy` or `xclip` for clipboard integration
 
 ### From GitHub
@@ -152,6 +154,8 @@ Normal mode is the default.
 | `Shift-J/K` | Next / previous content filter |
 | `Shift-H/L` | Back / forward through route history |
 | `a` | Add selected video to queue |
+| `S` | Subscribe / unsubscribe when the selected entity has a channel |
+| `d` | Download the selected video or playlist |
 | `y` | Copy selected URL |
 | `o` | Open selected entity in the browser |
 | `?` | Contextual help |
@@ -197,6 +201,11 @@ Press `:` from Normal mode.
 :shorts off
 :quality 1080p
 :quality best
+:play-select
+:audio
+:download video 1080p
+:theme auto
+:graphics auto
 :queue add
 :sidebar toggle
 :account
@@ -254,10 +263,21 @@ Example:
 
 ```toml
 [general]
+graphics = "auto"        # auto | kitty | iterm2 | sixel | halfblocks | none
 icons = "auto"           # auto | nerd | unicode | ascii | none
+theme = "terminal"       # terminal | auto | gruvbox-dark | gruvbox-light | custom name
+theme_dark = "gruvbox-dark"
+theme_light = "gruvbox-light"
+
+[ui]
+action_bar = "auto"      # auto | off
+sidebar_channels = false
+
+[text]
+emoji = "auto"           # auto | keep | strip
 
 [content]
-shorts = "never"          # never | hide | show
+shorts = "never"         # never | hide | show
 
 [grid]
 columns = 0               # automatic; fixed 1–8 also supported
@@ -275,6 +295,13 @@ autoplay = true
 [thumbnails]
 cache_mb = 256
 prefetch_pages = 1
+
+[downloads]
+directory = "~/Videos/Yute"
+video_quality = "1080p"
+audio_mode = "best"
+playlist_subdirectories = true
+keep_partial = true
 ```
 
 Shorts modes:
@@ -283,7 +310,7 @@ Shorts modes:
 - `hide` — hide them in ordinary feeds but allow explicit Shorts/saved content
 - `show` — show normally
 
-Visible thumbnails take priority over prefetch work. The cache stores source images and encoded terminal payloads.
+Visible thumbnails take priority over prefetch work. The cache stores source images and encoded terminal payloads. `:theme` and `:graphics` apply supported visual changes live. Custom themes live in `~/.config/yute/themes/<name>.toml`; the packaged Gruvbox files are examples. `YUTE_GRAPHICS` can override graphics selection for one launch.
 
 ## Architecture
 
@@ -332,6 +359,7 @@ ContentItem ──▶ Action ──▶ Router / Player
 - [Performance measurements](docs/performance.md)
 - [SmartTube protocol notes](docs/smarttube-parity.md)
 - [UI verification](docs/ui-polish-review.md)
+- [Manual QA matrix](docs/qa.md)
 
 ## Development
 
@@ -353,9 +381,10 @@ and the [manual QA checklist](docs/qa.md).
 
 Yute is still early software. Known incomplete areas include:
 
-- full cross-client history/resume parity
+- full cross-client history/resume parity still needs interactive account verification
 - endless Mix-radio continuation
 - some authenticated mutations when YouTube does not return usable action parameters
+- Kitty/iTerm2/Sixel visuals and live terminal-theme switching still need manual verification on each real terminal/multiplexer combination
 
 Mix playback currently uses the returned batch. If YouTube does not expose a working account action, Yute reports the limitation instead of pretending the write succeeded.
 

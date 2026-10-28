@@ -29,7 +29,10 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Filtering | `filter all/videos/shorts/live/playlists/channels`, `filter <query>`, `filter` | Named types select a tab; other text filters loaded titles. Omit the query to clear the title filter. |
 | Shorts | `shorts on`, `shorts off`, `shorts toggle` | Re-filter and save the visibility preference. Settings also offers Hidden outside Shorts, which also hides saved Shorts; explicitly opening Shorts always works. |
 | Route names | `goto <route>` | Navigate to a canonical route; Tab lists available routes. |
-| Graphics | `set graphics sixel`, `kitty`, `halfblocks`, `none`, `auto` | Save the chosen graphics preference; restart required. |
+| Theme | `theme terminal|auto|<name>`, `theme reload`, `theme list`, `theme check` | Apply/reload semantic themes live; invalid reloads keep the previous theme. |
+| Graphics | `graphics auto|kitty|iterm2|sixel|halfblocks|off`, `set graphics <mode>` | Apply graphics mode live. Auto promotes only after a terminal protocol reply and otherwise stays on halfblocks. |
+| Media formats | `play-select`, `audio` | Show actual available video/audio formats for one playback. |
+| Download | `download [playlist] [video|audio] [best|2160p|1440p|1080p|720p|480p|360p|opus|aac|mp3|flac|m4a]` | Start a safe yt-dlp download. Playlist video qualities are per-item ceilings; conversion choices require ffmpeg. |
 | Sidebar | `sidebar`, `sidebar show`, `sidebar hide`, `sidebar toggle` | Toggle or explicitly set visibility; hidden reclaims all width. |
 | Help | `help`, `help <command>`, `keys` | Concise command help; Esc, q or Enter closes it. |
 | Quit | `quit` (`q`), `quit!` (`q!`) | Confirm application quit or quit immediately. Outside text input, q quits. |
@@ -51,9 +54,7 @@ MediaServiceCore's V2 accounts_list read mask and branded X-Goog-Pageid header.
 Subscription/rating commands use existing InnerTube endpoints; they are not locally
 simulated, and live authenticated mutations were not performed during development.
 
-Watch Later add/remove, sorting on unreliable text metadata, persistent command
-history and runtime graphics switching are intentionally not implemented. Manual
-`m` history reporting no longer claims synchronization or fabricates watched time.
+Watch Later add/remove, like/dislike, subscription and supported history removal use authenticated backend mutations and update local state only after confirmation. Persistent command history remains intentionally absent. Runtime theme and graphics preferences apply live where the active terminal supports them; terminal-protocol changes still depend on what that terminal actually confirms.
 
 ## Browsing preferences
 
@@ -111,16 +112,11 @@ values. Initial playback does not wait to fill the entire cache horizon.
 
 Shift+Enter opens typed actions for the current video, channel or playlist.
 Enter alone retains its original typed activation. o opens the entity in the
-browser; g, opens Settings. Within the menu, j/k/arrows select and Esc/q cancels.
-Shortcuts p/v/o/y/t/a/s/d/x select play, browse, browser, copy URL, copy title,
-queue, save to playlist, download, and cancel download when applicable.
+browser; g, opens Settings. Within the menu, j/k/arrows select and Esc/q cancels. The popup sizes to its content on normal terminals and scrolls on short ones, grouping playback, library, share and account actions while keeping the selected row visible.
 
 Save requires authentication, loads real available destinations from
 playlist/get_add_to_playlist, then submits browse/edit_playlist only after a
-destination is chosen. Downloads run yt-dlp asynchronously at the chosen quality,
-write to ~/Videos/Yute, and appear under Local. One download job is allowed at a
-time, with explicit cancellation and process cleanup on exit. No account writes
-or real online downloads are part of the automated tests.
+destination is chosen. Downloads run yt-dlp asynchronously and never interpolate entity text through a shell. Single videos use actual resolved formats; playlist video choices are per-item quality ceilings, and audio conversion choices appear only when ffmpeg is available. Playlist jobs use resumable archives and safe ordered templates under `~/Videos/Yute`. One job is active at a time, with explicit cancellation and child cleanup. Automated tests use fake/local processes rather than real media downloads.
 
 ## TV-code sign-in
 
@@ -167,3 +163,11 @@ successful empty responses. Press r to retry a failed view.
 
 Settings offers Auto or fixed 1–8 grid columns, and auto/nerd/unicode/ascii/none
 icons. The sidebar and item menu share semantic glyphs with width-aware alignment.
+
+## Theme, graphics and text
+
+`:theme terminal` follows the terminal palette using Reset/ANSI semantic roles. `:theme auto` selects `theme_dark` or `theme_light` after a bounded background query; config/theme files under `~/.config/yute/` reload from filesystem events. `NO_COLOR` removes decorative colors while retaining useful modifiers. `:theme check` reports known explicit-color contrast problems.
+
+`:graphics auto` starts safely with halfblocks and promotes only after terminal replies confirm Kitty, Sixel or supported iTerm2 behavior. `YUTE_GRAPHICS` overrides the configured mode for one process. Multiplexed sessions conservatively fall back to halfblocks when passthrough has not been established.
+
+`[text] emoji = "auto|keep|strip"` controls complex emoji handling. Titles and input use grapheme-safe, display-width-aware truncation, including extra safety for complex Indic text.
