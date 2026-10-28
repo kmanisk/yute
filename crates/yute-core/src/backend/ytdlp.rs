@@ -63,7 +63,9 @@ impl YtDlpBackend {
 
     async fn run_ytdlp(&self, target: &str) -> Result<Value> {
         let mut cmd = Command::new("yt-dlp");
-        cmd.arg("-J")
+        cmd.kill_on_drop(true)
+            .arg("--ignore-config")
+            .arg("-J")
             .arg("--flat-playlist")
             .arg("--no-warnings")
             .arg("--extractor-args")
@@ -94,25 +96,20 @@ impl YtDlpBackend {
                         .unwrap_or(false);
                     if has_auth {
                         cmd.arg("--cookies").arg(p);
-                        cookie_set = true;
                     }
                 }
             }
         }
 
-        if !cookie_set {
-            let home = std::env::var("HOME").unwrap_or_default();
-            let brave_origin = PathBuf::from(format!("{home}/.config/BraveSoftware/Brave-Origin"));
-            if brave_origin.exists() {
-                cmd.arg("--cookies-from-browser")
-                    .arg(format!("brave:{}", brave_origin.display()));
-            }
-        }
-
-        let output = cmd.output().await.context("Failed to execute yt-dlp")?;
+        let output = tokio::time::timeout(std::time::Duration::from_secs(45), cmd.output())
+            .await
+            .map_err(|_| anyhow!("yt-dlp request timed out after 45 seconds"))?
+            .context("Failed to execute yt-dlp; check PATH and executable permissions")?;
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("yt-dlp error: {stderr}"));
+            return Err(anyhow!(
+                "yt-dlp failed ({}); resolver stderr suppressed to protect session data",
+                output.status
+            ));
         }
 
         let val: Value =

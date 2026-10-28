@@ -16,7 +16,7 @@ fn build_client() -> Client {
         .pool_max_idle_per_host(10)
         .http2_keep_alive_interval(Duration::from_secs(15))
         .http2_keep_alive_timeout(Duration::from_secs(5))
-        .http2_keep_alive_while_idle(true)
+        .http2_keep_alive_while_idle(false)
         .brotli(true)
         .gzip(true)
         .build()

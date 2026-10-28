@@ -10,3 +10,5 @@ pub mod http;
 pub mod oauth;
 pub mod secret;
 pub mod trace;
+
+pub mod doctor;
