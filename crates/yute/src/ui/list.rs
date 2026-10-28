@@ -14,13 +14,7 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
 
     let total_items = app.filtered_items().len();
     if total_items == 0 {
-        let msg = if app.anonymous_library() {
-            "Sign in with :account add to view this library."
-        } else if app.is_loading {
-            "Searching..."
-        } else {
-            "No results. Press '/' to search with new query."
-        };
+        let msg = app.empty_feed_message();
         let p = Paragraph::new(msg).style(Style::default().fg(app.theme.text_secondary));
         f.render_widget(p, area);
         return;
@@ -144,12 +138,21 @@ fn render_list_row(
     let actual_thumb_w = thumb_w.min(inner.width.saturating_sub(20));
     let actual_thumb_h = thumb_h.min(inner.height);
 
-    let thumb_area = Rect {
+    let mut thumb_area = Rect {
         x: inner.x,
         y: inner.y,
         width: actual_thumb_w,
         height: actual_thumb_h,
     };
+
+    if matches!(card, Card::Channel(_)) {
+        let width = ((actual_thumb_h as f32 * app.cell_h_px / app.cell_w_px.max(1.)).round()
+            as u16)
+            .min(actual_thumb_w)
+            .max(1);
+        thumb_area.x += (actual_thumb_w - width) / 2;
+        thumb_area.width = width;
+    }
 
     let details_x = inner.x + actual_thumb_w + 2;
     let details_w = inner.width.saturating_sub(actual_thumb_w + 2);

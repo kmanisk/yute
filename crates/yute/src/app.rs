@@ -128,6 +128,7 @@ pub struct NavState {
     pub chips: Vec<Chip>,
     pub active_chip_index: usize,
     pub status_text: String,
+    pub feed_error: Option<String>,
     pub continuation_token: Option<String>,
     pub filter_text: String,
     pub view_mode: ViewMode,
@@ -201,6 +202,7 @@ pub struct App {
     status_deadline: Option<std::time::Instant>,
     pub status_text: String,
     pub is_loading: bool,
+    pub feed_error: Option<String>,
     pub rendered_columns: usize,
     pub rendered_rows: usize,
     pub autofill_pages: u8,
@@ -208,6 +210,7 @@ pub struct App {
     pub input_cursor: Option<usize>,
     pub feed_generation: u64,
     pub metadata_generation: u64,
+    pub metadata_cancelled: yute_core::oauth::CancellationToken,
     pub metadata_pending: HashSet<String>,
     pub metadata_slots: Arc<tokio::sync::Semaphore>,
     pub metadata_attempted: HashSet<String>,
@@ -284,21 +287,7 @@ impl App {
             ThumbnailManager::new(picker, disk_cache.with_limit(config.thumbnails.cache_mb));
         let player = Player::new(&config);
 
-        let mut auth = AuthContext::default();
-        auth.hl = config.backend.hl.clone();
-        auth.gl = config.backend.gl.clone();
-        if config.backend.client == "web" {
-            auth.client_name = "WEB".to_string();
-            auth.client_version = "2.20240101.00.00".to_string();
-            auth.user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36".to_string();
-        } else {
-            if !config.backend.client_name.is_empty() {
-                auth.client_name = config.backend.client_name.clone();
-            }
-            if !config.backend.client_version.is_empty() {
-                auth.client_version = config.backend.client_version.clone();
-            }
-        }
+        let auth = AuthContext::from_config(&config);
         // Credentials and keyring access are deferred to a blocking worker.
         let account_store = yute_core::accounts::Accounts::bootstrap(
             &auth,
@@ -313,7 +302,7 @@ impl App {
 
         let authenticated = {
             let auth = auth.lock().unwrap();
-            auth.access_token.is_some() || auth.cookie_header.is_some()
+            auth.has_oauth() && !auth.needs_login
         };
         Self {
             cell_w_px,
@@ -374,6 +363,7 @@ impl App {
             status_deadline: None,
             status_text: "Ready".to_string(),
             is_loading: false,
+            feed_error: None,
             rendered_columns: 1,
             rendered_rows: 1,
             autofill_pages: 0,
@@ -381,6 +371,7 @@ impl App {
             input_cursor: None,
             feed_generation: 0,
             metadata_generation: 0,
+            metadata_cancelled: Default::default(),
             metadata_pending: HashSet::new(),
             metadata_slots: Arc::new(tokio::sync::Semaphore::new(2)),
             metadata_attempted: HashSet::new(),
@@ -430,7 +421,7 @@ impl App {
     }
 
     pub fn anonymous_library(&self) -> bool {
-        self.account_store.active_id() == yute_core::accounts::ANONYMOUS
+        !self.has_oauth_session()
             && matches!(
                 self.screen,
                 Screen::Subscriptions
@@ -440,16 +431,58 @@ impl App {
                     | Screen::Playlists
             )
     }
-    pub fn is_authenticated(&self) -> bool {
+    pub fn has_oauth_session(&self) -> bool {
         let auth = self.auth.lock().unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
         !auth.needs_login
             && (auth.access_token.as_ref().is_some_and(|t| !t.is_empty())
-                && auth.token_expires_at.is_none_or(|expiry| expiry > now)
-                || (auth.sapisid.is_some() && auth.cookie_header.is_some()))
+                || auth.refresh_token.as_ref().is_some_and(|t| !t.is_empty()))
+    }
+    pub fn is_authenticated(&self) -> bool {
+        self.has_oauth_session()
+    }
+    pub fn session_label(&self) -> String {
+        if self.auth.lock().unwrap().needs_login {
+            format!("Needs re-login · {}", self.account_name)
+        } else if self.has_oauth_session() {
+            format!("OAuth · {}", self.account_name)
+        } else {
+            "Anonymous".into()
+        }
+    }
+    pub fn empty_feed_message(&self) -> String {
+        let route = match self.screen {
+            Screen::Subscriptions => "subscriptions",
+            Screen::History => "history",
+            Screen::WatchLater => "Watch Later videos",
+            Screen::Liked => "liked videos",
+            Screen::Playlists => "playlists",
+            Screen::LocalVideos => "local videos",
+            Screen::Queue => "queued videos",
+            _ => "results",
+        };
+        if self.anonymous_library() {
+            if self.auth.lock().unwrap().needs_login {
+                "This account needs re-login.
+Use :account add to sign in with a TV code."
+                    .into()
+            } else {
+                format!(
+                    "Sign in to view {route}.
+Sign in with :account add"
+                )
+            }
+        } else if self.is_loading {
+            format!("Loading {route}…")
+        } else if self.feed_error.is_some() {
+            format!(
+                "Could not load {route}.
+{}
+r retry · :account",
+                self.feed_error.as_deref().unwrap_or_default()
+            )
+        } else {
+            format!("No {route} found.")
+        }
     }
     pub fn rebuild_backend(&mut self) {
         self.action_menu = None;
@@ -489,6 +522,8 @@ impl App {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.feed_generation = self.feed_generation.wrapping_add(1);
         self.metadata_generation = self.metadata_generation.wrapping_add(1);
+        self.metadata_cancelled.cancel();
+        self.metadata_cancelled = Default::default();
         self.metadata_pending.clear();
         self.metadata_attempted.clear();
         self.nav_history.clear();
@@ -527,6 +562,12 @@ impl App {
             self.trace_subscriptions = Some(start);
             self.trace_subscriptions_complete = Some(start);
         }
+        self.metadata_cancelled.cancel();
+        self.metadata_cancelled = Default::default();
+        self.metadata_pending.clear();
+        self.metadata_attempted.clear();
+        self.metadata_generation = self.feed_generation.wrapping_add(1);
+        self.feed_error = None;
         self.autofill_pages = 0;
         self.feed_generation = self.feed_generation.wrapping_add(1);
         self.is_loading = true;
@@ -570,6 +611,14 @@ impl App {
             return;
         }
         self.channels_revision = revision;
+        let avatars = self
+            .channel_items
+            .iter()
+            .filter_map(|card| match card {
+                Card::Channel(c) => c.avatar_url.as_ref().map(|url| (c.id.clone(), url.clone())),
+                _ => None,
+            })
+            .collect::<std::collections::HashMap<_, _>>();
         self.channel_items.clear();
         let mut ids = self
             .items
@@ -592,7 +641,7 @@ impl App {
                                 title: video.channel.clone(),
                                 handle: None,
                                 subscribers: None,
-                                avatar_url: None,
+                                avatar_url: avatars.get(id).cloned(),
                                 verified: video.verified,
                             },
                         ));
@@ -693,6 +742,9 @@ impl App {
 
     pub fn transition(&mut self, screen: Screen, force: bool) {
         if force || self.screen != screen {
+            self.metadata_cancelled.cancel();
+            self.metadata_cancelled = Default::default();
+            self.metadata_pending.clear();
             self.feed_generation = self.feed_generation.wrapping_add(1);
             self.nav_history.push(NavState {
                 screen: self.screen,
@@ -708,10 +760,12 @@ impl App {
                 chips: self.chips.clone(),
                 active_chip_index: self.active_chip_index,
                 status_text: self.status_text.clone(),
+                feed_error: self.feed_error.clone(),
                 continuation_token: self.continuation_token.clone(),
                 filter_text: self.filter_text.clone(),
             });
             self.nav_future.clear();
+            self.feed_error = None;
             self.screen = screen;
             if screen == Screen::Home {
                 self.home_source = FilterKind::All;
@@ -730,6 +784,9 @@ impl App {
     }
 
     pub fn nav_back(&mut self) {
+        self.metadata_cancelled.cancel();
+        self.metadata_cancelled = Default::default();
+        self.metadata_pending.clear();
         self.feed_generation = self.feed_generation.wrapping_add(1);
         self.is_loading = false;
         self.is_loading_more = false;
@@ -748,6 +805,7 @@ impl App {
                 chips: self.chips.clone(),
                 active_chip_index: self.active_chip_index,
                 status_text: self.status_text.clone(),
+                feed_error: self.feed_error.clone(),
                 continuation_token: self.continuation_token.clone(),
                 filter_text: self.filter_text.clone(),
             });
@@ -764,6 +822,7 @@ impl App {
             self.chips = prev.chips;
             self.active_chip_index = prev.active_chip_index;
             self.status_text = prev.status_text;
+            self.feed_error = prev.feed_error;
             self.continuation_token = prev.continuation_token;
             self.filter_text = prev.filter_text;
             self.sidebar_index =
@@ -777,6 +836,9 @@ impl App {
     }
 
     pub fn nav_forward(&mut self) {
+        self.metadata_cancelled.cancel();
+        self.metadata_cancelled = Default::default();
+        self.metadata_pending.clear();
         self.feed_generation = self.feed_generation.wrapping_add(1);
         self.is_loading = false;
         self.is_loading_more = false;
@@ -795,6 +857,7 @@ impl App {
                 chips: self.chips.clone(),
                 active_chip_index: self.active_chip_index,
                 status_text: self.status_text.clone(),
+                feed_error: self.feed_error.clone(),
                 continuation_token: self.continuation_token.clone(),
                 filter_text: self.filter_text.clone(),
             });
@@ -811,6 +874,7 @@ impl App {
             self.chips = next.chips;
             self.active_chip_index = next.active_chip_index;
             self.status_text = next.status_text;
+            self.feed_error = next.feed_error;
             self.continuation_token = next.continuation_token;
             self.filter_text = next.filter_text;
             self.sidebar_index =
@@ -837,12 +901,14 @@ impl App {
         }
         if self.status_text != self.status_seen {
             self.status_seen.clone_from(&self.status_text);
-            self.status_deadline =
-                if self.status_text.is_empty() || self.status_text.starts_with("Login:") {
-                    None
-                } else {
-                    Some(std::time::Instant::now() + std::time::Duration::from_secs(6))
-                };
+            self.status_deadline = if self.status_text.is_empty()
+                || self.status_text.starts_with("Login:")
+                || self.feed_error.is_some()
+            {
+                None
+            } else {
+                Some(std::time::Instant::now() + std::time::Duration::from_secs(6))
+            };
         }
         if self
             .status_deadline
@@ -931,26 +997,11 @@ impl App {
 }
 
 fn backend_for_session(
-    config: &Config,
+    _config: &Config,
     auth: Arc<std::sync::Mutex<AuthContext>>,
 ) -> Arc<BackendChain> {
-    let cookie_session = {
-        let session = auth.lock().unwrap();
-        session.access_token.is_none() && session.cookie_header.is_some()
-    };
-    let cookies_from_browser = if !cookie_session {
-        None
-    } else if !config.backend.cookies_from_browser.is_empty() {
-        Some(config.backend.cookies_from_browser.clone())
-    } else {
-        let path = resolve_path("~/.config/BraveSoftware/Brave-Origin");
-        path.exists().then(|| format!("brave:{}", path.display()))
-    };
     Arc::new(BackendChain::new(vec![
         Box::new(InnerTubeBackend::from_arc(auth)),
-        Box::new(YtDlpBackend::new(
-            cookie_session.then(|| resolve_path(&config.backend.cookies_file)),
-            cookies_from_browser,
-        )),
+        Box::new(YtDlpBackend::new(None, None)),
     ]))
 }

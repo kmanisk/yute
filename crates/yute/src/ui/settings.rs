@@ -18,6 +18,7 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Start as", "Choose the last used account or Anonymous for the next launch."),
     ("Thumbnail cache", "Shared source and encoded thumbnail cache budget on disk. Oldest accessed entries are pruned."),
     ("Thumbnail prefetch", "Preload 0-3 pages after visible cards. Visible requests always have priority."),
+    ("Icons", "auto / nerd / unicode / ascii / none. Auto uses Unicode; YUTE_NERD_FONT=1 opts into Nerd Fonts."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -66,6 +67,7 @@ fn value(app: &App, index: usize) -> String {
         .into(),
         9 => format!("‹ {} MiB ›", app.config.thumbnails.cache_mb),
         10 => format!("‹ {} pages ›", app.config.thumbnails.prefetch_pages),
+        11 => format!("‹ {} ›", app.config.icons()),
         _ => String::new(),
     }
 }
@@ -169,7 +171,13 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
             )
             .into()
         }
-        1 => app.config.grid.columns = step(&[0, 2, 3, 4, 5], &app.config.grid.columns, forward),
+        1 => {
+            app.config.grid.columns = step(
+                &[0, 1, 2, 3, 4, 5, 6, 7, 8],
+                &app.config.grid.columns,
+                forward,
+            )
+        }
         2 => {
             app.config.playback.hwdec = step(
                 &["auto-safe", "vaapi", "nvdec-copy", "no"],
@@ -219,6 +227,16 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
                 &[0, 1, 2, 3],
                 &app.config.thumbnails.prefetch_pages,
                 forward,
+            )
+        }
+        11 => {
+            app.config.ui.icons = Some(
+                step(
+                    &["auto", "nerd", "unicode", "ascii", "none"],
+                    &app.config.icons(),
+                    forward,
+                )
+                .into(),
             )
         }
         _ => return,

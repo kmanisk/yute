@@ -270,6 +270,7 @@ fn test_nav_settings_keymap() {
 #[test]
 fn test_fixed_three_columns_preserve_selection_when_scrolling() {
     let mut app = create_mock_app();
+    app.config.grid.columns = 3;
     let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
     terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
     assert_eq!(app.rendered_columns, 3);
@@ -846,4 +847,177 @@ fn compact_footer_and_card_hierarchy() {
         accent_cells > 10,
         "Selected card needs a visible accent border"
     );
+}
+
+#[test]
+fn hindi_truncation_preserves_graphemes_and_display_width() {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    use yute::ui::text::{truncate_str, wrap_and_truncate_title};
+    let title = "हिन्दी क्षत्रिय विज्ञान की दुनिया में आपका स्वागत है";
+    for width in 0..45 {
+        let truncated = truncate_str(title, width);
+        assert!(truncated.width() <= width);
+        let prefix = truncated.strip_suffix('…').unwrap_or(&truncated);
+        assert!(title.starts_with(prefix));
+        assert!(
+            prefix.is_empty()
+                || title
+                    .grapheme_indices(true)
+                    .any(|(offset, g)| offset + g.len() == prefix.len())
+        );
+        let wrapped = wrap_and_truncate_title(title, width, 2);
+        assert!(wrapped.len() <= 2);
+        for line in wrapped {
+            assert!(line.width() <= width, "{line:?} width {width}");
+        }
+    }
+}
+
+#[test]
+fn account_feed_errors_and_legacy_state_remain_actionable() {
+    use yute::app::Screen;
+    let mut app = create_mock_app();
+    app.items.clear();
+    app.screen = Screen::Subscriptions;
+    app.auth.lock().unwrap().needs_login = true;
+    app.account_name = "Legacy account".into();
+    assert_eq!(app.session_label(), "Needs re-login · Legacy account");
+    assert!(app.empty_feed_message().contains(":account add"));
+    {
+        let mut auth = app.auth.lock().unwrap();
+        auth.needs_login = false;
+        auth.refresh_token = Some("fixture".into());
+    }
+    app.feed_error = Some("YouTube rejected this session — retry".into());
+    app.status_text.clear();
+    assert!(app.empty_feed_message().contains("rejected"));
+    assert!(app.session_label().starts_with("OAuth ·"));
+}
+
+#[test]
+fn wide_grid_fills_content_and_uses_more_than_three_columns() {
+    use ratatui::layout::Rect;
+    use yute::ui::grid::GridGeometry;
+    let config = Config::default();
+    for width in [180, 210, 240, 280] {
+        let geometry = GridGeometry::new(Rect::new(0, 0, width, 50), &config.grid, 9., 18.);
+        assert!(geometry.columns > 3 && geometry.columns <= 8);
+        assert!((30..=44).contains(&geometry.card_width));
+        assert!(geometry.first_column_offset <= 4);
+        let physical_aspect =
+            geometry.thumbnail_width as f32 * 9. / (geometry.thumbnail_height as f32 * 18.);
+        assert!((physical_aspect - 16. / 9.).abs() < 0.3);
+    }
+}
+
+#[test]
+fn semantic_icons_keep_all_modes_usable() {
+    use unicode_width::UnicodeWidthStr;
+    use yute::ui::icons::Icon;
+    for icon in [
+        Icon::Home,
+        Icon::Subscriptions,
+        Icon::History,
+        Icon::WatchLater,
+        Icon::Like,
+        Icon::Dislike,
+        Icon::Playlists,
+        Icon::Queue,
+        Icon::Local,
+        Icon::Account,
+        Icon::Settings,
+        Icon::Play,
+        Icon::Audio,
+        Icon::Download,
+    ] {
+        for mode in ["auto", "nerd", "unicode", "ascii", "none"] {
+            let label = icon.label(mode, "Action");
+            assert!(label.ends_with("Action"));
+            assert!(label.width() >= 6);
+            if mode == "ascii" {
+                assert!(label.is_ascii());
+            }
+            if mode == "none" {
+                assert_eq!(label, "Action");
+            }
+        }
+    }
+}
+
+#[test]
+fn screenshot_sized_terminal_uses_four_columns_without_sidebar() {
+    let mut app = create_mock_app();
+    app.sidebar_expanded = false;
+    app.cell_w_px = 15.;
+    app.cell_h_px = 38.;
+    let mut terminal = Terminal::new(TestBackend::new(128, 31)).unwrap();
+    terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+    assert_eq!(app.rendered_columns, 4);
+}
+
+#[test]
+fn feed_states_are_consistent_in_grid_and_list_and_survive_status_expiry() {
+    use yute::app::{Screen, ViewMode};
+    let mut app = create_mock_app();
+    app.items.clear();
+    app.auth.lock().unwrap().access_token = Some("fixture".into());
+    for (screen, noun) in [
+        (Screen::Subscriptions, "subscriptions"),
+        (Screen::History, "history"),
+        (Screen::Liked, "liked videos"),
+        (Screen::WatchLater, "Watch Later videos"),
+        (Screen::Playlists, "playlists"),
+    ] {
+        app.screen = screen;
+        app.feed_error = None;
+        app.is_loading = false;
+        assert_eq!(app.empty_feed_message(), format!("No {noun} found."));
+        app.feed_error = Some("HTTP request failed".into());
+        app.status_text = "Transient message".into();
+        app.tick();
+        assert!(app
+            .empty_feed_message()
+            .contains(&format!("Could not load {noun}")));
+        for mode in [ViewMode::Grid, ViewMode::List] {
+            app.view_mode = mode;
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("Could not load"));
+        }
+    }
+}
+#[test]
+fn cursor_rendering_tolerates_legacy_mid_character_offsets() {
+    let mut app = create_mock_app();
+    app.focus = yute::app::Focus::CommandLine;
+    app.cmd_input = "खोज: भारत की यात्रा".into();
+    for cursor in 0..=app.cmd_input.len() {
+        app.input_cursor = Some(cursor);
+        let mut terminal = Terminal::new(TestBackend::new(50, 15)).unwrap();
+        terminal
+            .draw(|frame| yute::ui::cmdline::render_input(frame, &app, frame.area()))
+            .unwrap();
+    }
+}
+#[test]
+fn navigation_cancels_avatar_metadata_and_retains_selection_on_resize() {
+    let mut app = create_mock_app();
+    app.selected_index = 3;
+    let id = app.selected_card().unwrap().id().to_string();
+    for width in [80, 120, 200, 320] {
+        let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+        terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
+        assert_eq!(app.selected_card().unwrap().id(), id);
+    }
+    let token = app.metadata_cancelled.clone();
+    app.transition(yute::app::Screen::Search, false);
+    assert!(token.is_cancelled());
 }

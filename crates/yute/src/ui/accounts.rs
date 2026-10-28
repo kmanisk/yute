@@ -48,10 +48,10 @@ pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
         } else {
             Style::default().fg(app.theme.text)
         };
-        let marker = if index == app.active_account_index {
+        let marker = if account.status == yute_core::accounts::AccountStatus::NeedsLogin {
+            "needs re-login via TV code"
+        } else if index == app.active_account_index {
             "active"
-        } else if account.status == yute_core::accounts::AccountStatus::NeedsLogin {
-            "needs re-login"
         } else {
             ""
         };

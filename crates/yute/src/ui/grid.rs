@@ -15,8 +15,8 @@ pub fn column_count(width: u16, config: &crate::config::GridConfig) -> usize {
             .min(width.saturating_sub(1).max(1) / 2)
             .max(1) as usize;
     }
-    let min_width = config.min_card_width.max(30);
-    (width.saturating_sub(1) / min_width.saturating_add(1)).clamp(1, 5) as usize
+    let min_width = config.min_card_width.clamp(30, 44);
+    (width.saturating_add(2) / min_width.saturating_add(2)).clamp(1, 8) as usize
 }
 
 /// Shared geometry for complete selection rows and a clipped trailing row.
@@ -39,17 +39,9 @@ impl GridGeometry {
         let columns = column_count(area.width, config);
         let slot_width = area
             .width
-            .saturating_sub(2 + 2 * columns.saturating_sub(1) as u16)
+            .saturating_sub(2 * columns.saturating_sub(1) as u16)
             / columns as u16;
-        let mut card_width = slot_width.min(30);
-        while card_width > 12 && area.height >= 18 {
-            let rows = ((card_width.saturating_sub(2)) as f32 * cell_w / cell_h.max(1.) * 9. / 16.)
-                .round() as u16;
-            if (rows + 6) * 2 <= area.height {
-                break;
-            }
-            card_width -= 1;
-        }
+        let card_width = slot_width.max(1);
         let column_stride = card_width.saturating_add(2);
         let occupied = card_width * columns as u16 + 2 * columns.saturating_sub(1) as u16;
         let first_column_offset = area.width.saturating_sub(occupied) / 2;
@@ -98,20 +90,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 
     let total_items = app.filtered_items().len();
     if total_items == 0 {
-        let route = match app.screen {
-            crate::app::Screen::Subscriptions => "subscriptions",
-            crate::app::Screen::History => "history",
-            _ => "results",
-        };
-        let msg = if app.anonymous_library() {
-            format!("Sign in to view {route}.\nSign in with :account add")
-        } else if app.is_loading {
-            format!("Loading {route}…")
-        } else if app.status_text.contains("could not") || app.status_text.contains("failed") {
-            format!("Could not load {route}.\nr retry · :account")
-        } else {
-            format!("No {route} found.\nChange the filter or press r to refresh.")
-        };
+        let msg = app.empty_feed_message();
         let p = Paragraph::new(msg)
             .alignment(Alignment::Center)
             .style(Style::default().fg(app.theme.text_secondary));
@@ -285,47 +264,54 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
 /// rather than emitting an image payload outside the viewport.
 fn render_partial_card(f: &mut Frame, app: &mut App, card: &Card, area: Rect, thumb_h: u16) {
     let block = Block::default()
-        .borders(Borders::LEFT | Borders::RIGHT)
+        .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
         .border_style(Style::default().fg(app.theme.border));
     let inner = block.inner(area);
     f.render_widget(block, area);
     if inner.is_empty() {
         return;
     }
-    let title_h = inner.height.min(2);
-    let artwork_h = inner.height.saturating_sub(title_h);
-    let artwork = Rect::new(inner.x, inner.y + title_h, inner.width, artwork_h);
+    let mut artwork = Rect::new(inner.x, inner.y, inner.width, inner.height.min(thumb_h));
+    if matches!(card, Card::Channel(_)) {
+        let width = ((thumb_h as f32 * app.cell_h_px / app.cell_w_px.max(1.)).round() as u16)
+            .min(inner.width)
+            .max(1);
+        artwork.x += (inner.width - width) / 2;
+        artwork.width = width;
+    }
     let url = yute_core::media::thumbs::card_thumbnail_url(card).into_owned();
     let can_draw = app.thumbs.supports_partial()
         && app.config.general.graphics != "none"
         && app.overlay_area.is_none()
         && !app.confirming_quit
         && !app.confirming_logout;
-    if artwork_h > 0 {
-        f.render_widget(
-            Paragraph::new(vec![
-                Line::from("▒".repeat(inner.width as usize));
-                artwork_h as usize
-            ])
-            .style(Style::default().fg(app.theme.border)),
-            artwork,
-        );
-        if can_draw && !url.is_empty() {
-            if let Some(cover) = app
-                .thumbs
-                .get_cover_protocol(&url, ratatui::layout::Size::new(inner.width, thumb_h))
-            {
-                f.render_widget(cover, artwork);
-            }
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from("▒".repeat(artwork.width as usize));
+            artwork.height as usize
+        ])
+        .style(Style::default().fg(app.theme.border)),
+        artwork,
+    );
+    if can_draw && !url.is_empty() {
+        if let Some(cover) = app
+            .thumbs
+            .get_cover_protocol(&url, ratatui::layout::Size::new(artwork.width, thumb_h))
+        {
+            f.render_widget(cover, artwork);
         }
     }
-    let title = sanitize_title(card.title(), app.config.strip_emoji());
-    let lines = wrap_and_truncate_title(&title, inner.width as usize, title_h as usize);
-    f.render_widget(
-        Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
-            .style(Style::default().fg(app.theme.text_secondary)),
-        Rect::new(inner.x, inner.y, inner.width, title_h),
-    );
+    // Keep the same artwork/title order and dimensions as complete rows.
+    let title_h = inner.height.saturating_sub(thumb_h).min(2);
+    if title_h > 0 {
+        let title = sanitize_title(card.title(), app.config.strip_emoji());
+        let lines = wrap_and_truncate_title(&title, inner.width as usize, 2);
+        f.render_widget(
+            Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
+                .style(Style::default().fg(app.theme.text_secondary)),
+            Rect::new(inner.x, inner.y + thumb_h, inner.width, title_h),
+        );
+    }
 }
 
 fn render_grid_card(
@@ -381,7 +367,15 @@ fn render_grid_card(
 
     let is_shorts = matches!(card, Card::Video(v) if v.badges.iter().any(|b| b == "SHORTS"));
     let actual_thumb_h = inner.height.saturating_sub(title_h + 2).min(thumb_h).max(1);
-    let thumb_area = Rect::new(inner.x, inner.y, inner.width, actual_thumb_h);
+    let mut thumb_area = Rect::new(inner.x, inner.y, inner.width, actual_thumb_h);
+    if matches!(card, Card::Channel(_)) {
+        let width = ((actual_thumb_h as f32 * app.cell_h_px / app.cell_w_px.max(1.)).round()
+            as u16)
+            .min(inner.width)
+            .max(1);
+        thumb_area.x += (inner.width - width) / 2;
+        thumb_area.width = width;
+    }
     let text_x = inner.x;
     let text_y = inner.y + actual_thumb_h;
     let text_w = inner.width;

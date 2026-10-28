@@ -406,7 +406,23 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
         let rows = if menu.stage == MenuStage::Actions {
             entries
                 .iter()
-                .map(|e| (format!("{}  {}", e.key, e.label), e.unavailable.is_some()))
+                .map(|e| {
+                    use crate::ui::icons::Icon;
+                    let icon = match e.action {
+                        ItemAction::Play | ItemAction::PlaySelect => Some(Icon::Play),
+                        ItemAction::Audio => Some(Icon::Audio),
+                        ItemAction::Download | ItemAction::CancelDownload => Some(Icon::Download),
+                        ItemAction::Queue => Some(Icon::Queue),
+                        ItemAction::Save => Some(Icon::Save),
+                        ItemAction::Browser => Some(Icon::Browser),
+                        ItemAction::CopyUrl | ItemAction::CopyTitle => Some(Icon::Copy),
+                        ItemAction::Channel | ItemAction::Browse => Some(Icon::Channel),
+                    };
+                    let label = icon
+                        .map(|i| i.label(app.config.icons(), e.label))
+                        .unwrap_or_else(|| e.label.into());
+                    (format!("{}  {label}", e.key), e.unavailable.is_some())
+                })
                 .collect::<Vec<_>>()
         } else if menu.stage == MenuStage::PlayAs {
             vec![
@@ -437,22 +453,33 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
         }
         for (i, (label, disabled)) in rows.iter().enumerate().skip(first).take(visible) {
             let active = i == menu.cursor;
-            lines.push(Line::from(Span::styled(
-                format!("{} {}", if active { "›" } else { " " }, label),
-                Style::default()
-                    .fg(if *disabled {
-                        app.theme.text_secondary
-                    } else if active {
-                        app.theme.accent
-                    } else {
-                        app.theme.text
-                    })
-                    .bg(if active {
-                        app.theme.surface_hover
-                    } else {
-                        app.theme.surface
-                    }),
-            )));
+            let style = Style::default()
+                .fg(if *disabled {
+                    app.theme.text_secondary
+                } else if active {
+                    app.theme.accent
+                } else {
+                    app.theme.text
+                })
+                .bg(if active {
+                    app.theme.surface_hover
+                } else {
+                    app.theme.surface
+                });
+            let mut spans = vec![Span::styled(if active { "› " } else { "  " }, style)];
+            if menu.stage == MenuStage::Actions {
+                let (hint, text) = label.split_once("  ").unwrap_or(("", label));
+                spans.push(Span::styled(
+                    hint.to_owned(),
+                    style
+                        .fg(app.theme.text_secondary)
+                        .add_modifier(Modifier::DIM),
+                ));
+                spans.push(Span::styled(format!("  {text}"), style));
+            } else {
+                spans.push(Span::styled(label.clone(), style));
+            }
+            lines.push(Line::from(spans));
         }
     }
     let message = if !menu.message.is_empty() {
@@ -516,10 +543,6 @@ pub fn download_command(
     } else {
         "--no-playlist"
     });
-    let cookies = crate::config::resolve_path(&cfg.backend.cookies_file);
-    if cfg.backend.auth != "guest" && cookies.is_file() {
-        command.arg("--cookies").arg(cookies);
-    }
     let url = if let Card::Playlist(p) = card {
         let seed = p
             .first_video_id

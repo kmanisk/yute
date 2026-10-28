@@ -43,7 +43,14 @@ pub fn render_input(f: &mut Frame, app: &App, area: Rect) {
         area.width.saturating_sub(label_width),
         area.height,
     );
-    let cursor_width = text[..app.input_cursor.unwrap_or(text.len()).min(text.len())].width();
+    let requested = app.input_cursor.unwrap_or(text.len()).min(text.len());
+    let boundary = unicode_segmentation::UnicodeSegmentation::grapheme_indices(text, true)
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(text.len()))
+        .take_while(|offset| *offset <= requested)
+        .last()
+        .unwrap_or(0);
+    let cursor_width = text[..boundary].width();
     let scroll = cursor_width.saturating_sub(input.width.saturating_sub(1) as usize);
     f.render_widget(
         Paragraph::new(text)

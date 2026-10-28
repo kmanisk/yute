@@ -246,6 +246,7 @@ async fn run() -> anyhow::Result<()> {
             }
             maybe_continue_feed(&mut app, tx_event.clone());
             maybe_load_card_metadata(&mut app, tx_event.clone());
+            maybe_load_channel_avatars(&mut app, tx_event.clone());
             dirty = false;
         }
 
@@ -2355,6 +2356,21 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 app.status_text = "Could not load this Mix — press r to retry".into();
             }
         }
+        AppEvent::ChannelAvatarLoaded(generation, id, avatar) => {
+            if generation != app.feed_generation {
+                return;
+            }
+            app.metadata_pending.remove(&id);
+            if let Some(url) = avatar {
+                for card in app.items.iter_mut().chain(app.channel_items.iter_mut()) {
+                    if let Card::Channel(channel) = card {
+                        if channel.id == id {
+                            channel.avatar_url = Some(url.clone());
+                        }
+                    }
+                }
+            }
+        }
         AppEvent::CardMetadataLoaded(generation, id, video) => {
             if generation != app.feed_generation || app.screen != Screen::Home {
                 return;
@@ -2395,6 +2411,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             app.is_loading = false;
             match res {
                 Ok(page) => {
+                    app.feed_error = None;
                     if !page.chips.is_empty() {
                         app.chips = page.chips.clone();
                     }
@@ -2435,6 +2452,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 }
                 Err(err) => {
                     app.status_text = feed_error_message(&err).to_string();
+                    app.feed_error = Some(app.status_text.clone());
                 }
             }
         }
@@ -2457,14 +2475,24 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                             .into_iter()
                             .filter(|c| ids.insert(c.id().to_string())),
                     );
-                    app.continuation_token = page
-                        .continuation
-                        .filter(|next| next != &token && app.items.len() > before);
+                    app.continuation_token = page.continuation.filter(|next| next != &token);
+                    if app.screen == Screen::Subscriptions {
+                        if app.items.len() == before {
+                            app.autofill_pages += 1;
+                            if app.autofill_pages >= 3 && app.continuation_token.is_some() {
+                                app.continuation_failed = true;
+                                app.feed_error = Some("YouTube returned repeated empty subscription pages — press r to retry".into());
+                            }
+                        } else {
+                            app.autofill_pages = 0;
+                        }
+                    }
                     app.status_text = format!("Loaded {} more items", app.items.len() - before);
                 }
                 Err(error) => {
                     app.continuation_failed = true;
                     app.status_text = feed_error_message(&error).to_string();
+                    app.feed_error = Some(app.status_text.clone());
                 }
             }
         }
@@ -3098,7 +3126,7 @@ fn feed_error_message(error: &anyhow::Error) -> &'static str {
         || diagnostic.contains("unauthorized")
         || diagnostic.contains("needs re-login")
     {
-        "YouTube session expired — use :login to reconnect"
+        "Needs re-login via TV code — sign in with :account add"
     } else if diagnostic.contains("403") {
         "YouTube rejected this session/client — check Accounts, then press r to retry"
     } else if diagnostic.contains("429") {
@@ -3159,6 +3187,62 @@ fn maybe_load_card_metadata(app: &mut App, tx: Sender<AppEvent>) {
                 .filter(|video| video.id == id);
             let _ = tx
                 .send(AppEvent::CardMetadataLoaded(generation, id, data))
+                .await;
+            drop(permit);
+        });
+    }
+}
+
+fn maybe_load_channel_avatars(app: &mut App, tx: Sender<AppEvent>) {
+    if app.screen != Screen::Home
+        || app.filter_kind != yute::app::FilterKind::Channels
+        || app.is_loading
+    {
+        return;
+    }
+    app.refresh_channel_items();
+    let slots = 2usize.saturating_sub(app.metadata_pending.len());
+    let ids = app
+        .filtered_items()
+        .into_iter()
+        .skip(app.scroll_row * app.rendered_columns)
+        .take(app.rendered_columns * app.rendered_rows)
+        .filter_map(|card| match card {
+            Card::Channel(c)
+                if c.avatar_url.as_ref().is_none_or(String::is_empty)
+                    && !app.metadata_attempted.contains(&c.id) =>
+            {
+                Some(c.id.clone())
+            }
+            _ => None,
+        })
+        .take(slots)
+        .collect::<Vec<_>>();
+    for id in ids {
+        let Ok(permit) = Arc::clone(&app.metadata_slots).try_acquire_owned() else {
+            break;
+        };
+        app.metadata_pending.insert(id.clone());
+        app.metadata_attempted.insert(id.clone());
+        // Avatars are public: a legacy session must not block their lookup.
+        let session = app.auth.lock().unwrap();
+        let backend =
+            yute::backend::innertube::InnerTubeBackend::new(yute::backend::auth::AuthContext {
+                hl: session.hl.clone(),
+                gl: session.gl.clone(),
+                ..Default::default()
+            });
+        drop(session);
+        let cancelled = app.metadata_cancelled.clone();
+        let generation = app.feed_generation;
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let avatar = tokio::select! {
+                _ = cancelled.cancelled() => None,
+                result = tokio::time::timeout(Duration::from_secs(12), backend.channel_page(&id, None)) => result.ok().and_then(Result::ok).and_then(|page| page.channel.avatar_url),
+            };
+            let _ = tx
+                .send(AppEvent::ChannelAvatarLoaded(generation, id, avatar))
                 .await;
             drop(permit);
         });
@@ -3828,18 +3912,45 @@ fn edit_input(app: &mut App, key: crossterm::event::KeyEvent) -> bool {
         KeyCode::End | KeyCode::Char('e') if key.code == KeyCode::End || ctrl => {
             *cursor = text.len()
         }
-        KeyCode::Left => *cursor = text[..*cursor].char_indices().last().map_or(0, |(i, _)| i),
-        KeyCode::Right => *cursor += text[*cursor..].chars().next().map_or(0, char::len_utf8),
+        KeyCode::Left => {
+            *cursor =
+                unicode_segmentation::UnicodeSegmentation::grapheme_indices(text.as_str(), true)
+                    .map(|(i, _)| i)
+                    .take_while(|i| *i < *cursor)
+                    .last()
+                    .unwrap_or(0)
+        }
+        KeyCode::Right => {
+            *cursor =
+                unicode_segmentation::UnicodeSegmentation::grapheme_indices(text.as_str(), true)
+                    .map(|(i, _)| i)
+                    .find(|i| *i > *cursor)
+                    .unwrap_or(text.len())
+        }
         KeyCode::Backspace => {
             if *cursor > 0 {
-                let start = text[..*cursor].char_indices().last().map_or(0, |(i, _)| i);
+                let start = unicode_segmentation::UnicodeSegmentation::grapheme_indices(
+                    text.as_str(),
+                    true,
+                )
+                .map(|(i, _)| i)
+                .take_while(|i| *i < *cursor)
+                .last()
+                .unwrap_or(0);
                 text.drain(start..*cursor);
                 *cursor = start;
             }
         }
         KeyCode::Delete => {
-            if let Some(ch) = text[*cursor..].chars().next() {
-                text.drain(*cursor..*cursor + ch.len_utf8());
+            if *cursor < text.len() {
+                let end = unicode_segmentation::UnicodeSegmentation::grapheme_indices(
+                    text.as_str(),
+                    true,
+                )
+                .map(|(i, _)| i)
+                .find(|i| *i > *cursor)
+                .unwrap_or(text.len());
+                text.drain(*cursor..end);
             }
         }
         KeyCode::Char('u') if ctrl => {
@@ -3897,7 +4008,7 @@ fn feed_cache_key(app: &App, key: &str) -> String {
 
 async fn run_doctor() -> anyhow::Result<()> {
     use yute_core::doctor::{display_text, Status};
-    let config = Config::load();
+    let config = Config::load_checked()?;
     let checks = yute_core::doctor::run(&config).await;
     let failed = checks.iter().any(|check| check.status == Status::Failure);
     for check in checks {
@@ -4505,7 +4616,8 @@ mod feed_ui_tests {
         );
         assert_eq!(app.items.len(), 5);
         assert_eq!(app.selected_index, 3);
-        assert!(app.status_text.contains("session expired"));
+        assert!(app.status_text.contains("Needs re-login via TV code"));
+        assert!(app.status_text.contains(":account add"));
         assert!(!app.status_text.contains("fixture-secret"));
         assert!(!app.is_loading);
     }

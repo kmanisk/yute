@@ -6,6 +6,7 @@ pub mod cmdline;
 pub mod grid;
 pub mod header;
 pub mod help;
+pub mod icons;
 pub mod list;
 pub mod settings;
 pub mod sidebar;

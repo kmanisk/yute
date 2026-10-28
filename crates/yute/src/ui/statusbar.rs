@@ -45,13 +45,15 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     } else {
         format!(" {route} · {pos}/{count}")
     };
-    let left = format!("{left} · {}", app.account_name);
+    let left = format!("{left} · {}", app.session_label());
     let left = match app.focus {
         Focus::Sidebar => format!(" Sidebar ▸{left}"),
         Focus::Chips => format!(" Filters ▸{left}"),
         _ => left,
     };
-    let state = if app.is_loading_more {
+    let state = if let Some(error) = &app.feed_error {
+        error.as_str()
+    } else if app.is_loading_more {
         "Loading more…"
     } else if app.is_loading && !app.items.is_empty() {
         "Refreshing…"

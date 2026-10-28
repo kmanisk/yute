@@ -377,7 +377,7 @@ fn compact_grid_and_settings_remain_bounded_at_requested_sizes() {
         }
         let g = GridGeometry::new(Rect::new(0, 2, w, h - 3), &app.config.grid, 15., 38.);
         assert_eq!(g.title_rows, 2);
-        assert!(g.card_width <= 32);
+        assert!(g.card_width <= 44);
     }
     app.settings_index = 3;
     yute::ui::settings::cycle_setting(&mut app, true);
@@ -454,9 +454,14 @@ fn grid_bounds_complete_and_partial_rows_across_terminal_sizes() {
                 let used = g.row_stride * (g.visible_rows - 1) as u16;
                 assert!(used < shell.content.height);
                 assert!(shell.content.height - used <= g.row_stride);
-                if shell.content.height >= 20 {
-                    assert!(g.complete_rows >= 2, "{width}x{height}");
-                }
+                assert_eq!(
+                    g.complete_rows,
+                    if shell.content.height >= g.card_height {
+                        (1 + (shell.content.height - g.card_height) / g.row_stride) as usize
+                    } else {
+                        1
+                    }
+                );
             }
         }
     }

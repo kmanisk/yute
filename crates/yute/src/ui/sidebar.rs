@@ -1,3 +1,4 @@
+use super::icons::Icon;
 use crate::app::{App, Focus, Screen};
 use ratatui::{
     layout::Rect,
@@ -6,6 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 pub const SIDEBAR_ITEMS: &[(&str, Screen, &str)] = &[
     ("Home", Screen::Home, "gh"),
@@ -77,10 +79,23 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         } else {
             style
         };
-        let name = super::text::truncate_str(name, inner.width.saturating_sub(5) as usize);
+        let icon = [
+            Icon::Home,
+            Icon::Subscriptions,
+            Icon::History,
+            Icon::WatchLater,
+            Icon::Like,
+            Icon::Playlists,
+            Icon::Queue,
+            Icon::Local,
+            Icon::Account,
+            Icon::Settings,
+        ][i];
+        let label = icon.label(app.config.icons(), name);
+        let name = super::text::truncate_str(&label, inner.width.saturating_sub(5) as usize);
         let pad = inner
             .width
-            .saturating_sub(2 + name.len() as u16 + hint.len() as u16);
+            .saturating_sub(2 + name.width() as u16 + hint.width() as u16);
         let line = Line::from(vec![
             Span::styled(marker, style),
             Span::styled(name, style),

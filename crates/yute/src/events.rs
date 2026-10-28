@@ -10,6 +10,7 @@ pub enum AppEvent {
     TerminalCells(u16, u16),
     FeedLoaded(u64, anyhow::Result<FeedPage>),
     MixLoaded(u64, anyhow::Result<FeedPage>),
+    ChannelAvatarLoaded(u64, String, Option<String>),
     CardMetadataLoaded(u64, String, Option<crate::backend::models::VideoCard>),
     FeedContinued(
         u64,

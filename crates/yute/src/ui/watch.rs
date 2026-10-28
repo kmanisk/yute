@@ -170,8 +170,12 @@ fn render_heading(f: &mut Frame, app: &App, area: Rect) {
             "Dislike"
         };
         f.render_widget(
-            Paragraph::new(format!("+ {like}   − {dislike}"))
-                .style(Style::default().fg(app.theme.text_secondary)),
+            Paragraph::new(format!(
+                "{}   {}",
+                super::icons::Icon::Like.label(app.config.icons(), like),
+                super::icons::Icon::Dislike.label(app.config.icons(), dislike)
+            ))
+            .style(Style::default().fg(app.theme.text_secondary)),
             Rect::new(area.x, area.y + 4, area.width, 1),
         );
     }
