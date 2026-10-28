@@ -74,6 +74,8 @@ pub enum AccountMutation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemAction {
     Play,
+    PlaySelect,
+    Audio,
     Browse,
     Browser,
     CopyUrl,
@@ -94,6 +96,10 @@ pub struct MenuEntry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuStage {
     Actions,
+    PlayAs,
+    LoadingFormats,
+    VideoFormats,
+    AudioFormats,
     LoadingPlaylists,
     Playlists,
 }
@@ -104,6 +110,95 @@ pub struct ActionMenu {
     pub stage: MenuStage,
     pub playlists: Vec<PlaylistCard>,
     pub message: String,
+    pub formats: Option<yute_core::media::formats::AvailableFormats>,
+    pub cancelled: yute_core::oauth::CancellationToken,
+}
+impl Drop for ActionMenu {
+    fn drop(&mut self) {
+        self.cancelled.cancel();
+    }
+}
+impl ActionMenu {
+    pub fn media_rows(&self) -> Vec<(String, String)> {
+        use yute_core::media::formats::MediaKind;
+        let Some(formats) = &self.formats else {
+            return vec![];
+        };
+        let mut rows = formats
+            .formats
+            .iter()
+            .filter(|f| match self.stage {
+                MenuStage::VideoFormats => f.kind != MediaKind::AudioOnly,
+                MenuStage::AudioFormats => f.kind == MediaKind::AudioOnly,
+                _ => false,
+            })
+            .collect::<Vec<_>>();
+        rows.sort_by_key(|f| {
+            std::cmp::Reverse((
+                f.height.unwrap_or(0),
+                (f.fps.unwrap_or(0.) * 100.) as u32,
+                f.audio_bitrate.or(f.bitrate).unwrap_or(0),
+            ))
+        });
+        let mut result = vec![(
+            "Best automatically".into(),
+            if self.stage == MenuStage::AudioFormats {
+                let Some(audio) = formats.best_audio(None) else {
+                    return vec![];
+                };
+                audio.id.clone()
+            } else {
+                String::new()
+            },
+        )];
+        for f in rows {
+            let codec = f
+                .video_codec
+                .as_deref()
+                .or(f.audio_codec.as_deref())
+                .unwrap_or("unknown");
+            let codec = if codec.starts_with("av01") {
+                "AV1"
+            } else if codec.starts_with("avc") {
+                "H.264"
+            } else if codec.starts_with("vp") {
+                "VP9"
+            } else if codec.starts_with("mp4a") {
+                "AAC"
+            } else {
+                codec
+            };
+            let rate = f
+                .audio_bitrate
+                .or(f.bitrate)
+                .map(|rate| format!(" · {} kbps", rate / 1000))
+                .unwrap_or_default();
+            let quality = f
+                .height
+                .map(|h| {
+                    format!(
+                        "{h}p{} · ",
+                        if f.fps.unwrap_or(0.) >= 59. { "60" } else { "" }
+                    )
+                })
+                .unwrap_or_default();
+            let language = f
+                .audio_language
+                .as_deref()
+                .map(|l| format!("{l} · "))
+                .unwrap_or_default();
+            if let Ok(selector) = formats.selector(&f.id) {
+                result.push((
+                    format!(
+                        "{quality}{language}{codec}{}{rate}",
+                        if f.hdr { " · HDR" } else { "" }
+                    ),
+                    selector,
+                ));
+            }
+        }
+        result
+    }
 }
 pub fn menu_entries(card: &Card, authenticated: bool, downloading: bool) -> Vec<MenuEntry> {
     use ItemAction::*;
@@ -139,6 +234,23 @@ pub fn menu_entries(card: &Card, authenticated: bool, downloading: bool) -> Vec<
                 unavailable: None,
             });
         }
+    }
+    if matches!(card, Card::Video(_))
+        && !local
+        && !matches!(activation(card), OpenAction::Unavailable(_))
+    {
+        entries.push(MenuEntry {
+            label: "Play / quality...",
+            key: 'f',
+            action: PlaySelect,
+            unavailable: None,
+        });
+        entries.push(MenuEntry {
+            label: "Audio only...",
+            key: 'm',
+            action: Audio,
+            unavailable: None,
+        });
     }
     entries.extend([
         MenuEntry {
@@ -253,8 +365,17 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
         .borders(Borders::ALL)
         .title(if menu.stage == MenuStage::Actions {
             " Actions "
-        } else {
+        } else if matches!(
+            menu.stage,
+            MenuStage::LoadingPlaylists | MenuStage::Playlists
+        ) {
             " Save to playlist "
+        } else if menu.stage == MenuStage::PlayAs {
+            " Play as "
+        } else if menu.stage == MenuStage::AudioFormats {
+            " Audio "
+        } else {
+            " Video quality "
         })
         .border_style(Style::default().fg(app.theme.accent))
         .style(Style::default().bg(app.theme.surface));
@@ -271,7 +392,13 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
         )),
         Line::default(),
     ];
-    if menu.stage == MenuStage::LoadingPlaylists {
+    if menu.stage == MenuStage::LoadingFormats {
+        lines.push(Line::from(if menu.message.is_empty() {
+            "Resolving formats..."
+        } else {
+            &menu.message
+        }));
+    } else if menu.stage == MenuStage::LoadingPlaylists {
         lines.push(Line::from("Loading your playlists…"));
     } else {
         let visible = inner.height.saturating_sub(5).clamp(1, 8) as usize;
@@ -281,6 +408,20 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
                 .iter()
                 .map(|e| (format!("{}  {}", e.key, e.label), e.unavailable.is_some()))
                 .collect::<Vec<_>>()
+        } else if menu.stage == MenuStage::PlayAs {
+            vec![
+                ("Video".into(), false),
+                ("Audio only".into(), false),
+                ("Best automatically".into(), false),
+            ]
+        } else if matches!(
+            menu.stage,
+            MenuStage::VideoFormats | MenuStage::AudioFormats
+        ) {
+            menu.media_rows()
+                .into_iter()
+                .map(|(label, _)| (label, false))
+                .collect()
         } else {
             menu.playlists
                 .iter()
@@ -288,7 +429,11 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
                 .collect()
         };
         if rows.is_empty() {
-            lines.push(Line::from("No writable playlists returned by YouTube."));
+            lines.push(Line::from(if menu.stage == MenuStage::Playlists {
+                "No writable playlists returned by YouTube."
+            } else {
+                "No matching media streams available."
+            }));
         }
         for (i, (label, disabled)) in rows.iter().enumerate().skip(first).take(visible) {
             let active = i == menu.cursor;

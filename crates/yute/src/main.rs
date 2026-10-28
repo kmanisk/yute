@@ -52,6 +52,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Diagnose connectivity, session, tools and terminal without displaying secrets.
+    Doctor,
     /// Interactive YouTube device-code login (enter code at google.com/device or youtube.com/activate)
     Login,
     /// Spike: Fetch and dump raw TVHTML5 JSON for browse/home, next, and search
@@ -79,6 +81,10 @@ async fn run() -> anyhow::Result<()> {
     yute_core::trace::start();
     init_performance_trace()?;
     let cli = Cli::parse();
+
+    if let Some(Commands::Doctor) = cli.command {
+        return run_doctor().await;
+    }
 
     if let Some(Commands::SetupMpv) = cli.command {
         let profile = MpvProfile::new();
@@ -1386,8 +1392,26 @@ fn open_item_menu(app: &mut App) {
         card,
         cursor: 0,
         stage: yute::actions::MenuStage::Actions,
+        formats: None,
+        cancelled: yute_core::oauth::CancellationToken::new(),
         playlists: vec![],
         message: String::new(),
+    });
+}
+fn resolve_menu_formats(app: &mut App, audio: bool, tx: Sender<AppEvent>) {
+    let Some(menu) = &mut app.action_menu else {
+        return;
+    };
+    menu.stage = yute::actions::MenuStage::LoadingFormats;
+    menu.cursor = 0;
+    menu.message.clear();
+    let id = menu.card.id().to_string();
+    let request = menu.request;
+    let cancelled = menu.cancelled.clone();
+    let resolver = app.format_resolver.clone();
+    tokio::spawn(async move {
+        let result = resolver.resolve(&id, cancelled).await;
+        let _ = tx.send(AppEvent::MenuFormats(request, audio, result)).await;
     });
 }
 fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
@@ -1407,10 +1431,11 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
     let auth = authenticated(app);
     let menu = app.action_menu.as_mut().unwrap();
     let entries = menu_entries(&menu.card, auth, app.download_active);
-    let count = if menu.stage == MenuStage::Actions {
-        entries.len()
-    } else {
-        menu.playlists.len()
+    let count = match menu.stage {
+        MenuStage::Actions => entries.len(),
+        MenuStage::PlayAs => 3,
+        MenuStage::VideoFormats | MenuStage::AudioFormats => menu.media_rows().len(),
+        _ => menu.playlists.len(),
     };
     match key.code {
         KeyCode::Char('j') | KeyCode::Down => {
@@ -1433,7 +1458,46 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
         }
         _ => return,
     }
-    if menu.stage == MenuStage::LoadingPlaylists {
+    if matches!(
+        menu.stage,
+        MenuStage::LoadingPlaylists | MenuStage::LoadingFormats
+    ) {
+        return;
+    }
+    if menu.stage == MenuStage::PlayAs {
+        match menu.cursor {
+            0 | 1 => {
+                let audio = menu.cursor == 1;
+                resolve_menu_formats(app, audio, tx);
+            }
+            _ => {
+                let card = menu.card.clone();
+                app.action_menu = None;
+                dispatch_open(app, yute::actions::activation(&card), tx);
+            }
+        }
+        return;
+    }
+    if matches!(
+        menu.stage,
+        MenuStage::VideoFormats | MenuStage::AudioFormats
+    ) {
+        let Some((_, selector)) = menu.media_rows().get(menu.cursor).cloned() else {
+            return;
+        };
+        let Card::Video(video) = menu.card.clone() else {
+            return;
+        };
+        let mut config = app.config.clone();
+        if !selector.is_empty() {
+            config.playback.max_resolution = "manual".into();
+            config.playback.ytdl_format = selector;
+        }
+        app.action_menu = None;
+        app.status_text = match app.player.play_video(video, &config) {
+            Ok(()) => "Starting external MPV with selected format".into(),
+            Err(_) => "Could not start MPV; run yute doctor".into(),
+        };
         return;
     }
     if menu.stage == MenuStage::Playlists {
@@ -1467,6 +1531,15 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
     let action = entry.action;
     let card = menu.card.clone();
     let request = menu.request;
+    if action == ItemAction::PlaySelect {
+        menu.stage = MenuStage::PlayAs;
+        menu.cursor = 0;
+        return;
+    }
+    if action == ItemAction::Audio {
+        resolve_menu_formats(app, true, tx);
+        return;
+    }
     if action == ItemAction::Save {
         menu.stage = MenuStage::LoadingPlaylists;
         menu.message.clear();
@@ -1480,6 +1553,7 @@ fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<A
     }
     app.action_menu = None;
     match action {
+        ItemAction::PlaySelect | ItemAction::Audio => unreachable!("handled before closing menu"),
         ItemAction::Play => match card {
             Card::Playlist(p) => dispatch_open(app, yute::actions::OpenAction::PlayMix(p), tx),
             _ => dispatch_open(app, yute::actions::activation(&card), tx),
@@ -2070,6 +2144,29 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                     .load(std::sync::atomic::Ordering::SeqCst)
             {
                 handle_app_event(app, *event, tx);
+            }
+        }
+        AppEvent::MenuFormats(request, audio, result) => {
+            let Some(menu) = &mut app.action_menu else {
+                return;
+            };
+            if menu.request != request || menu.stage != yute::actions::MenuStage::LoadingFormats {
+                return;
+            }
+            match result {
+                Ok(formats) => {
+                    menu.formats = Some(formats);
+                    menu.stage = if audio {
+                        yute::actions::MenuStage::AudioFormats
+                    } else {
+                        yute::actions::MenuStage::VideoFormats
+                    };
+                    menu.message = "Manual selection overrides defaults for this playback".into();
+                }
+                Err(error) => {
+                    menu.stage = yute::actions::MenuStage::Actions;
+                    menu.message = error.to_string();
+                }
             }
         }
         AppEvent::MenuPlaylists(request, result) => {
@@ -3234,6 +3331,24 @@ fn apply_stream_cache(app: &App) {
 fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<AppEvent>) {
     use yute::commands::{Command, CopyTarget};
     match command {
+        Command::PlaySelect | Command::Audio => {
+            open_item_menu(app);
+            if let Some(menu) = &mut app.action_menu {
+                if !matches!(menu.card, Card::Video(_))
+                    || menu.card.id().starts_with('/')
+                    || menu.card.id().starts_with('.')
+                {
+                    app.action_menu = None;
+                    app.status_text = "Select a YouTube video to choose formats".into();
+                    return;
+                }
+                if command == Command::Audio {
+                    resolve_menu_formats(app, true, tx);
+                } else {
+                    menu.stage = yute::actions::MenuStage::PlayAs;
+                }
+            }
+        }
         Command::Quality(quality) => {
             let Some(quality) = quality else {
                 app.status_text = format!(
@@ -3778,6 +3893,45 @@ fn feed_cache_key(app: &App, key: &str) -> String {
         app.account_store.cache_namespace(),
         key
     )
+}
+
+async fn run_doctor() -> anyhow::Result<()> {
+    use yute_core::doctor::{display_text, Status};
+    let config = Config::load();
+    let checks = yute_core::doctor::run(&config).await;
+    let failed = checks.iter().any(|check| check.status == Status::Failure);
+    for check in checks {
+        println!("{:?} · {}: {}", check.status, check.name, check.detail);
+    }
+    println!(
+        "Terminal: {} · program={}",
+        display_text(&std::env::var("TERM").unwrap_or_else(|_| "unset".into())),
+        display_text(&std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "unset".into()))
+    );
+    println!(
+        "Graphics: {:?} (configured={}, environment hint; not actively negotiated)",
+        yute::terminal::initial_picker(&config.general.graphics).protocol_type(),
+        display_text(&config.general.graphics)
+    );
+    match crossterm::terminal::window_size() {
+        Ok(size) => println!(
+            "Terminal dimensions: {}x{} cells, {}x{} pixels",
+            size.columns, size.rows, size.width, size.height
+        ),
+        Err(_) => {
+            println!("Warning · terminal dimensions unavailable (stdout may not be a terminal)")
+        }
+    }
+    match yute::terminal::cell_size().await {
+        Some((w, h)) => println!("Terminal cell dimensions: {w}x{h} pixels"),
+        None => println!(
+            "Warning · terminal cell dimensions unavailable; rendering uses cached/default hints"
+        ),
+    }
+    if failed {
+        anyhow::bail!("doctor found failures; see individual checks above");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

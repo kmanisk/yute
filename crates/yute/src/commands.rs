@@ -18,6 +18,8 @@ pub enum Command {
     Volume(f64, bool),
     Mute,
     Quality(Option<String>),
+    PlaySelect,
+    Audio,
     QueueAdd(bool),
     QueueRemove,
     QueueClear,
@@ -127,6 +129,8 @@ fn queue(args: &str) -> Result<Command, String> {
 }
 
 pub static REGISTRY: &[Spec] = &[
+    Spec { name:"play-select", aliases:&[], usage:"play-select", description:"Choose available video or audio streams for the selected video.", parse:|a| if a.is_empty() {Ok(Command::PlaySelect)} else {Err("Usage: :play-select".into())} },
+    Spec { name:"audio", aliases:&[], usage:"audio", description:"Choose original audio streams for this playback only.", parse:|a| if a.is_empty() {Ok(Command::Audio)} else {Err("Usage: :audio".into())} },
     Spec { name:"quality", aliases:&[], usage:"quality [480p|720p|1080p|1440p|2160p|best]", description:"Show quality or reload the active stream at its current position with a new limit.", parse:|a| match a { "" => Ok(Command::Quality(None)), "480"|"480p"|"720"|"720p"|"1080"|"1080p"|"1440"|"1440p"|"2160"|"2160p"|"4k"|"best" => Ok(Command::Quality(Some(if a=="4k" {"2160p".into()} else if a.chars().all(|c|c.is_ascii_digit()) {format!("{a}p")} else {a.into()}))), _=> Err("Usage: :quality 480p|720p|1080p|1440p|2160p|best".into()) } },
     Spec { name:"home", aliases:&[], usage:"home", description:"Open Home.", parse:|a| no_args(a,Command::Navigate(Screen::Home)) },
     Spec { name:"subscriptions", aliases:&["subs"], usage:"subscriptions", description:"Open the subscriptions feed.", parse:|a| no_args(a,Command::Navigate(Screen::Subscriptions)) },

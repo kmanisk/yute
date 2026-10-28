@@ -80,6 +80,11 @@ impl Player {
         // If window player is already running, switch video via IPC loadfile replace
         if self.is_alive() {
             if let Some(ref ipc) = self.ipc {
+                // Reset on every play: one explicit audio/format choice is not a mode.
+                let _ = ipc.send(IpcCommand::SetProperty(
+                    "ytdl-format",
+                    serde_json::json!(cfg.playback.resolved_ytdl_format()),
+                ));
                 if ipc
                     .send(IpcCommand::LoadFileWithStart(
                         target_url.clone(),
@@ -137,6 +142,10 @@ impl Player {
             .arg("--idle=yes")
             .arg("--keep-open=yes")
             .arg(format!("--log-file={}", mpv_log_file.display()))
+            .arg(format!(
+                "--ytdl-format={}",
+                cfg.playback.resolved_ytdl_format()
+            ))
             .arg("--ytdl=yes")
             .arg("--ytdl-raw-options-append=no-playlist=");
 
@@ -145,10 +154,6 @@ impl Player {
         } else {
             // Dedicated yute profile mode
             cmd.arg(format!("--config-dir={}", self.profile.dir.display()))
-                .arg(format!(
-                    "--ytdl-format={}",
-                    cfg.playback.resolved_ytdl_format()
-                ))
                 .arg(format!("--hwdec={hwdec}"))
                 .arg("--vo=gpu-next")
                 .arg("--cache=yes")

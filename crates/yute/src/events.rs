@@ -39,6 +39,11 @@ pub enum AppEvent {
         anyhow::Result<crate::backend::models::CommentsBatch>,
     ),
     StatusMessage(String),
+    MenuFormats(
+        u64,
+        bool,
+        anyhow::Result<yute_core::media::formats::AvailableFormats>,
+    ),
     MenuPlaylists(u64, anyhow::Result<FeedPage>),
     PlaylistSaved(u64, anyhow::Result<()>),
     DownloadFinished(u64, bool),

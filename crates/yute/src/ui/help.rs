@@ -13,6 +13,10 @@ const ENTRIES: &[(&str, &str)] = &[
     ("arrows", "Move between cards"),
     ("Ctrl-d/u, Ctrl-f/b", "Half/full page"),
     ("Tab / Shift-Tab", "Cycle pane focus"),
+    (
+        ":play-select / :audio",
+        "Available video / original audio formats",
+    ),
     ("Other panes", ""),
     ("Settings: j/k", "Choose setting; h/l/Enter changes it"),
     (

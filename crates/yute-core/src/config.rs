@@ -210,7 +210,7 @@ impl Default for PlaybackConfig {
     fn default() -> Self {
         Self {
             use_user_mpv_config: false,
-            ytdl_format: "bestvideo[height<=?1080]+bestaudio/best".to_string(),
+            ytdl_format: "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
             max_resolution: "1080p".to_string(),
             hwdec: "auto-safe".to_string(),
             osd_bar: false,
@@ -235,17 +235,17 @@ impl PlaybackConfig {
 
     pub fn resolved_ytdl_format(&self) -> String {
         match self.max_resolution.as_str() {
-            "480p" => "bestvideo[height<=?480]+bestaudio/best[height<=?480]/best".to_string(),
-            "720p" => "bestvideo[height<=?720]+bestaudio/best[height<=?720]/best".to_string(),
-            "1080p" => "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best".to_string(),
-            "1440p" => "bestvideo[height<=?1440]+bestaudio/best[height<=?1440]/best".to_string(),
-            "2160p" | "4k" => "bestvideo[height<=?2160]+bestaudio/best".to_string(),
+            "480p" => "bestvideo[height<=480]+bestaudio/best[height<=480]".to_string(),
+            "720p" => "bestvideo[height<=720]+bestaudio/best[height<=720]".to_string(),
+            "1080p" => "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string(),
+            "1440p" => "bestvideo[height<=1440]+bestaudio/best[height<=1440]".to_string(),
+            "2160p" | "4k" => "bestvideo[height<=2160]+bestaudio/best[height<=2160]".to_string(),
             "best" | "max" => "bestvideo+bestaudio/best".to_string(),
             _ => {
                 if !self.ytdl_format.is_empty() {
                     self.ytdl_format.clone()
                 } else {
-                    "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best".to_string()
+                    "bestvideo[height<=1080]+bestaudio/best[height<=1080]".to_string()
                 }
             }
         }
@@ -336,7 +336,9 @@ pub fn resolve_path(p: &str) -> PathBuf {
 }
 
 pub fn config_dir() -> PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        PathBuf::from(xdg).join("yute")
+    } else if let Some(home) = std::env::var_os("HOME") {
         PathBuf::from(home).join(".config/yute")
     } else {
         PathBuf::from(".config/yute")

@@ -218,7 +218,9 @@ fn yt_dlp_arguments_are_bounded_to_the_selected_entity_and_quality() {
     assert!(args.contains(&"--no-overwrites".into()));
     assert!(args.contains(&"--yes-playlist".into()));
     assert!(!args.contains(&"--cookies".into()));
-    assert!(args.iter().any(|s| s.contains("height<=?720")));
+    assert!(args
+        .iter()
+        .any(|s| s == "bestvideo[height<=720]+bestaudio/best[height<=720]"));
     assert_eq!(args[args.len() - 2], "--");
     assert_eq!(
         args.last().unwrap(),
