@@ -1,0 +1,286 @@
+[
+  {
+    "name": "home",
+    "date": "17 years ago",
+    "views": "471M views",
+    "card": {
+      "tileRenderer": {
+        "contentType": "TILE_CONTENT_TYPE_VIDEO",
+        "onSelectCommand": {
+          "watchEndpoint": {
+            "videoId": "fixturevid1"
+          }
+        },
+        "metadata": {
+          "tileMetadataRenderer": {
+            "title": {
+              "simpleText": "Fixture title"
+            },
+            "userName": {
+              "simpleText": "Fixture channel"
+            },
+            "lines": [
+              {
+                "lineRenderer": {
+                  "items": [
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "471M views"
+                        }
+                      }
+                    },
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "\u2022"
+                        }
+                      }
+                    },
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "17 years ago"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "live",
+    "date": null,
+    "views": "38 watching",
+    "card": {
+      "tileRenderer": {
+        "contentType": "TILE_CONTENT_TYPE_VIDEO",
+        "onSelectCommand": {
+          "watchEndpoint": {
+            "videoId": "fixturevid1"
+          }
+        },
+        "metadata": {
+          "tileMetadataRenderer": {
+            "title": {
+              "simpleText": "Fixture title"
+            },
+            "userName": {
+              "simpleText": "Fixture channel"
+            },
+            "lines": [
+              {
+                "lineRenderer": {
+                  "items": [
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "38 watching"
+                        }
+                      }
+                    },
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "\u2022"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "streamed",
+    "date": "Streamed 1 day ago",
+    "views": "2K views",
+    "card": {
+      "tileRenderer": {
+        "contentType": "TILE_CONTENT_TYPE_VIDEO",
+        "onSelectCommand": {
+          "watchEndpoint": {
+            "videoId": "fixturevid1"
+          }
+        },
+        "metadata": {
+          "tileMetadataRenderer": {
+            "title": {
+              "simpleText": "Fixture title"
+            },
+            "userName": {
+              "simpleText": "Fixture channel"
+            },
+            "lines": [
+              {
+                "lineRenderer": {
+                  "items": [
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "2K views"
+                        }
+                      }
+                    },
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "\u2022"
+                        }
+                      }
+                    },
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "Streamed 1 day ago"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "premiere",
+    "date": "Premieres Oct 30, 2026",
+    "views": null,
+    "card": {
+      "tileRenderer": {
+        "contentType": "TILE_CONTENT_TYPE_VIDEO",
+        "onSelectCommand": {
+          "watchEndpoint": {
+            "videoId": "fixturevid1"
+          }
+        },
+        "metadata": {
+          "tileMetadataRenderer": {
+            "title": {
+              "simpleText": "Fixture title"
+            },
+            "userName": {
+              "simpleText": "Fixture channel"
+            },
+            "lines": [
+              {
+                "lineRenderer": {
+                  "items": [
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "\u2022"
+                        }
+                      }
+                    },
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "Premieres Oct 30, 2026"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "missing_date",
+    "date": null,
+    "views": "471M views",
+    "card": {
+      "tileRenderer": {
+        "contentType": "TILE_CONTENT_TYPE_VIDEO",
+        "onSelectCommand": {
+          "watchEndpoint": {
+            "videoId": "fixturevid1"
+          }
+        },
+        "metadata": {
+          "tileMetadataRenderer": {
+            "title": {
+              "simpleText": "Fixture title"
+            },
+            "userName": {
+              "simpleText": "Fixture channel"
+            },
+            "lines": [
+              {
+                "lineRenderer": {
+                  "items": [
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "471M views"
+                        }
+                      }
+                    },
+                    {
+                      "lineItemRenderer": {
+                        "text": {
+                          "simpleText": "\u2022"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "search",
+    "date": "2 years ago",
+    "views": "1,234 views",
+    "card": {
+      "videoRenderer": {
+        "videoId": "fixturevid2",
+        "title": {
+          "simpleText": "Search fixture"
+        },
+        "viewCountText": {
+          "simpleText": "1,234 views"
+        },
+        "publishedTimeText": {
+          "simpleText": "2 years ago"
+        }
+      }
+    }
+  },
+  {
+    "name": "playlist",
+    "date": "Updated yesterday",
+    "card": {
+      "playlistRenderer": {
+        "playlistId": "PLfixture",
+        "title": {
+          "simpleText": "Playlist fixture"
+        },
+        "videoCount": "24",
+        "updatedTimeText": {
+          "simpleText": "Updated yesterday"
+        }
+      }
+    }
+  }
+]

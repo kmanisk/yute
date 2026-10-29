@@ -429,7 +429,7 @@ impl Backend for InnerTubeBackend {
         }
     }
     async fn playlists(&self) -> Result<FeedPage> {
-        self.account_feed("FElibrary").await
+        self.account_feed("FEplaylist_aggregation").await
     }
 
     async fn playlist(&self, id: &str) -> Result<FeedPage> {

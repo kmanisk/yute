@@ -5213,6 +5213,8 @@ fn delete_word(input: &mut String) {
 fn feed_cache_key(app: &App, key: &str) -> String {
     let key = if key == "feed_home" {
         "feed_home_tv_default"
+    } else if key == "feed_playlists" {
+        "feed_playlists_aggregation_v1"
     } else {
         key
     };

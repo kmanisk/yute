@@ -605,7 +605,11 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
     let playlist_id = v.pointer("/onSelectCommand/watchEndpoint/playlistId")
         .or_else(|| v.pointer("/onSelectCommand/watchPlaylistEndpoint/playlistId"))
         .or_else(|| v.pointer("/menu/menuRenderer/items/0/menuNavigationItemRenderer/navigationEndpoint/watchEndpoint/playlistId"))
-        .and_then(|s| s.as_str());
+        .and_then(|s| s.as_str())
+        .or_else(|| {
+            ["/onSelectCommand/browseEndpoint/browseId", "/onTap/innertubeCommand/browseEndpoint/browseId", "/navigationEndpoint/browseEndpoint/browseId"]
+                .iter().find_map(|path| v.pointer(path).and_then(Value::as_str).filter(|id| id.starts_with("VL") && id.len() > 2))
+        }).filter(|id| !id.is_empty());
 
     let channel_id = v
         .pointer("/onSelectCommand/browseEndpoint/browseId")
@@ -636,7 +640,7 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
 
     if content_type == "TILE_CONTENT_TYPE_PLAYLIST" || (playlist_id.is_some() && video_id.is_none())
     {
-        let p_id = playlist_id.unwrap_or("").to_string();
+        let p_id = playlist_id?.to_string();
         let channel = v.pointer("/metadata/tileMetadataRenderer/lines/0/lineRenderer/items/0/lineItemRenderer/badge/metadataBadgeRenderer/label")
             .or_else(|| v.pointer("/metadata/tileMetadataRenderer/userName"))
             .map(extract_text)
