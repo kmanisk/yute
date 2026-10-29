@@ -143,6 +143,28 @@ pub enum WatchPane {
     Comments,
     Suggestions,
 }
+#[derive(Clone, Debug)]
+pub enum SettingEditor {
+    Choice {
+        setting: usize,
+        title: String,
+        options: Vec<String>,
+        cursor: usize,
+    },
+    Text {
+        setting: usize,
+        title: String,
+        value: String,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub struct CommentThread {
+    pub parent_author: String,
+    pub comments: Vec<crate::backend::models::CommentItem>,
+    pub root_cursor: usize,
+}
+
 #[derive(Clone)]
 pub struct CommentDraft {
     pub video_id: String,
@@ -174,6 +196,7 @@ pub struct App {
     pub description_scroll: u16,
     pub watch_link_index: usize,
     pub comments_loading: bool,
+    pub comment_thread: Option<CommentThread>,
     pub comment_input: String,
     pub comment_draft: Option<CommentDraft>,
     pub comment_posting: bool,
@@ -190,6 +213,7 @@ pub struct App {
     pub sidebar_expanded: bool,
     pub sidebar_index: usize,
     pub settings_index: usize,
+    pub setting_editor: Option<SettingEditor>,
     pub chips: Vec<Chip>,
     pub active_chip_index: usize,
     pub items: Vec<Card>,
@@ -343,6 +367,7 @@ impl App {
             description_scroll: 0,
             watch_link_index: 0,
             comments_loading: false,
+            comment_thread: None,
             comment_input: String::new(),
             comment_draft: None,
             comment_posting: false,
@@ -360,6 +385,7 @@ impl App {
             focus: Focus::Content,
             sidebar_index: 0,
             settings_index: 0,
+            setting_editor: None,
             chips: Vec::new(),
             active_chip_index: 0,
             items: Vec::new(),
@@ -424,6 +450,29 @@ impl App {
             watch_right_mode: WatchRightMode::UpNext,
             comments_cursor: 0,
         }
+    }
+
+    pub fn visible_comments(&self) -> &[crate::backend::models::CommentItem] {
+        if let Some(thread) = &self.comment_thread {
+            &thread.comments
+        } else {
+            self.watch_data
+                .as_ref()
+                .map(|watch| watch.comments.as_slice())
+                .unwrap_or(&[])
+        }
+    }
+
+    pub fn selected_comment(&self) -> Option<&crate::backend::models::CommentItem> {
+        self.visible_comments().get(self.comments_cursor)
+    }
+
+    pub fn close_comment_thread(&mut self) -> bool {
+        let Some(thread) = self.comment_thread.take() else {
+            return false;
+        };
+        self.comments_cursor = thread.root_cursor;
+        true
     }
 
     pub fn save_active_account(&self) {
@@ -932,6 +981,7 @@ r retry · :account",
 
     pub fn needs_tick(&self) -> bool {
         self.player.has_session()
+            || self.thumbs.has_active_animation()
             || self.status_text != self.status_seen
             || self.status_deadline.is_some()
     }
@@ -968,8 +1018,9 @@ r retry · :account",
             dirty = true;
         }
 
-        // Poll thumbnail loading
-        if self.thumbs.poll_loaded() {
+        // Poll thumbnail loading. Animated media only requests redraws while
+        // visible; there is no permanent animation timer when the page is hidden.
+        if self.thumbs.poll_loaded() || self.thumbs.animation_due() {
             dirty = true;
         }
 

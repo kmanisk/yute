@@ -70,7 +70,7 @@ pub fn url(card: &Card) -> String {
 
 #[derive(Clone, Debug)]
 pub enum AccountMutation {
-    ClearRating {
+    ClearDislike {
         video_id: String,
     },
     WatchLater {
@@ -643,9 +643,13 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
     let mut lines = vec![];
     for (i, (label, key)) in rows.iter().enumerate().skip(first).take(visible) {
         let selected = i == menu.cursor;
-        let style = app
-            .theme
-            .style(if selected { "popup_selected" } else { "text" });
+        let style = if selected {
+            app.theme
+                .style("accent")
+                .add_modifier(ratatui::style::Modifier::BOLD)
+        } else {
+            app.theme.style("text")
+        };
         let icon = key
             .and_then(|k| {
                 visible_entries(app, &menu.card)
@@ -706,7 +710,7 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
             .unwrap_or_else(|| label.clone());
         let text = format!(
             "{} {}{}",
-            if selected { ">" } else { " " },
+            if selected { "▎" } else { " " },
             key.map(|c| format!("{c}  ")).unwrap_or_default(),
             if group.is_empty() {
                 decorated

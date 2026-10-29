@@ -1,0 +1,84 @@
+# Traditional YouTube dark palette. Selection is intentionally border/text driven;
+# row/card widgets do not use inverse fill highlighting.
+[roles.text]
+fg = "#f1f1f1"
+bg = "#0f0f0f"
+
+[roles.text_dim]
+fg = "#aaaaaa"
+bg = "#0f0f0f"
+
+[roles.border]
+fg = "#3f3f3f"
+bg = "#0f0f0f"
+
+[roles.border_focused]
+fg = "#ff0033"
+bg = "#0f0f0f"
+
+[roles.accent]
+fg = "#ff0033"
+bg = "#0f0f0f"
+
+[roles.selection]
+fg = "#ff0033"
+bg = "#0f0f0f"
+modifiers = ["bold"]
+
+[roles.chip_active]
+fg = "#ff0033"
+bg = "#0f0f0f"
+modifiers = ["bold", "underlined"]
+
+[roles.chip_idle]
+fg = "#aaaaaa"
+bg = "#0f0f0f"
+
+[roles.badge]
+fg = "#f1f1f1"
+bg = "#272727"
+
+[roles.badge_live]
+fg = "#ffffff"
+bg = "#ff0033"
+
+[roles.badge_mix]
+fg = "#f1f1f1"
+bg = "#272727"
+
+[roles.progress]
+fg = "#ff0033"
+bg = "#3f3f3f"
+
+[roles.skeleton]
+fg = "#717171"
+bg = "#0f0f0f"
+
+[roles.error]
+fg = "#ff6b6b"
+bg = "#0f0f0f"
+
+[roles.warning]
+fg = "#f1c40f"
+bg = "#0f0f0f"
+
+[roles.scrollbar]
+fg = "#aaaaaa"
+bg = "#272727"
+
+[roles.popup]
+fg = "#f1f1f1"
+bg = "#181818"
+
+[roles.popup_selected]
+fg = "#ff0033"
+bg = "#181818"
+modifiers = ["bold"]
+
+[roles.status]
+fg = "#f1f1f1"
+bg = "#0f0f0f"
+
+[roles.action_hint]
+fg = "#aaaaaa"
+bg = "#0f0f0f"

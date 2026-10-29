@@ -45,6 +45,7 @@ pub enum Action {
     CommandLine,
     Help,
     Redraw,
+    CenterSelection,
 
     // Cards / lists
     PlayDefault,
@@ -110,7 +111,6 @@ pub const BINDINGS: &[(char, Action, &str)] = &[
     ('/', Action::FocusSearch, "Search"),
     (':', Action::CommandLine, "Command line"),
     ('?', Action::Help, "Keyboard help"),
-    ('q', Action::Quit, "Quit application"),
     ('f', Action::Filter, "Cycle content type"),
     ('J', Action::NextFilter, "Next content tab"),
     ('K', Action::PrevFilter, "Previous content tab"),
@@ -122,7 +122,6 @@ pub const BINDINGS: &[(char, Action, &str)] = &[
     ('S', Action::ToggleSubscribe, "Subscribe / unsubscribe"),
     ('d', Action::Download, "Download selected entity"),
     ('p', Action::PlayAll, "Play playlist"),
-    ('y', Action::YankUrl, "Copy URL"),
     ('c', Action::NavChannel, "Open channel"),
     ('v', Action::ToggleViewMode, "Grid/list"),
     ('[', Action::PrevChip, "Previous channel tab"),
@@ -210,6 +209,15 @@ impl KeymapState {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, in_watch: bool) -> Option<(Action, usize)> {
+        self.handle_key_with_config(key, in_watch, &crate::config::KeyConfig::default())
+    }
+
+    pub fn handle_key_with_config(
+        &mut self,
+        key: KeyEvent,
+        in_watch: bool,
+        keys: &crate::config::KeyConfig,
+    ) -> Option<(Action, usize)> {
         if self.prefix_at.is_some_and(|at| at.elapsed().as_secs() >= 4) {
             self.prefix_char = None;
             self.prefix_at = None;
@@ -217,6 +225,44 @@ impl KeymapState {
         let key = normalize_key(key);
         let code = key.code;
         let mods = key.modifiers;
+        let two = |binding: &str| -> Option<(char, char)> {
+            let binding = binding.trim();
+            let parts = binding.split_whitespace().collect::<Vec<_>>();
+            if parts.len() == 2 {
+                let first = if parts[0].eq_ignore_ascii_case("space") {
+                    ' '
+                } else {
+                    parts[0].chars().next()?
+                };
+                let second = parts[1].chars().next()?;
+                return Some((first, second));
+            }
+            let chars = binding.chars().collect::<Vec<_>>();
+            if chars.len() == 2 {
+                Some((chars[0], chars[1]))
+            } else {
+                None
+            }
+        };
+        let modified = |binding: &str| -> Option<(KeyModifiers, char)> {
+            let binding = binding.trim().to_ascii_lowercase();
+            let (modifier, key) = binding.split_once('-')?;
+            let modifier = match modifier {
+                "alt" => KeyModifiers::ALT,
+                "ctrl" | "control" => KeyModifiers::CONTROL,
+                _ => return None,
+            };
+            Some((modifier, key.chars().next()?))
+        };
+        let single = |binding: &str| -> Option<char> {
+            let binding = binding.trim();
+            if binding.eq_ignore_ascii_case("space") {
+                return Some(' ');
+            }
+            let mut chars = binding.chars();
+            let first = chars.next()?;
+            chars.next().is_none().then_some(first)
+        };
 
         // Quit now
         if (mods == KeyModifiers::CONTROL && code == KeyCode::Char('c'))
@@ -225,8 +271,12 @@ impl KeymapState {
             return Some((Action::ForceQuit, 1));
         }
 
-        if mods == KeyModifiers::ALT && code == KeyCode::Char('e') {
-            return Some((Action::FocusSidebar, 1));
+        for binding in [&keys.sidebar, &keys.sidebar_alt] {
+            if let Some((modifier, expected)) = modified(binding) {
+                if mods == modifier && code == KeyCode::Char(expected) {
+                    return Some((Action::FocusSidebar, 1));
+                }
+            }
         }
         if !mods.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
             match code {
@@ -236,12 +286,25 @@ impl KeymapState {
             }
         }
 
-        // Multi-key 'g' handler
+        // Multi-key handler. `g` stays Vim-like; a small set of frequently
+        // customized actions can be rebound in config.toml without rebuilding Yute.
         if let Some(prefix) = self.prefix_char {
             self.prefix_char = None;
+            self.prefix_at = None;
             let count = self.take_count();
-            if prefix == 'g' {
-                if let KeyCode::Char(c) = code {
+            if let KeyCode::Char(c) = code {
+                for (binding, action) in [
+                    (&keys.sidebar, Action::FocusSidebar),
+                    (&keys.sidebar_alt, Action::FocusSidebar),
+                    (&keys.copy_url, Action::YankUrl),
+                    (&keys.center, Action::CenterSelection),
+                    (&keys.quit, Action::Quit),
+                ] {
+                    if two(binding).is_some_and(|pair| pair == (prefix, c)) {
+                        return Some((action, count));
+                    }
+                }
+                if prefix == 'g' {
                     if c == 'o' {
                         return Some((Action::NavSettings, count));
                     }
@@ -265,6 +328,36 @@ impl KeymapState {
         }
 
         let count = self.take_count();
+
+        if mods.is_empty() {
+            if let KeyCode::Char(c) = code {
+                for (binding, action) in [
+                    (&keys.copy_url, Action::YankUrl),
+                    (&keys.center, Action::CenterSelection),
+                    (&keys.quit, Action::Quit),
+                    (&keys.sidebar, Action::FocusSidebar),
+                ] {
+                    if single(binding) == Some(c) {
+                        return Some((action, count));
+                    }
+                }
+                if [
+                    &keys.sidebar,
+                    &keys.sidebar_alt,
+                    &keys.copy_url,
+                    &keys.center,
+                    &keys.quit,
+                ]
+                .iter()
+                .filter_map(|binding| two(binding))
+                .any(|(first, _)| first == c)
+                {
+                    self.prefix_char = Some(c);
+                    self.prefix_at = Some(std::time::Instant::now());
+                    return None;
+                }
+            }
+        }
 
         // Control combinations
         if mods == KeyModifiers::CONTROL {

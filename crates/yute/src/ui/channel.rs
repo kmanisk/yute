@@ -1,7 +1,7 @@
 use crate::app::{App, DetailRoute};
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -31,12 +31,11 @@ pub fn render_channel(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(
                 format!(" {} ", t.title),
                 if i == route.active {
-                    Style::default()
-                        .fg(app.theme.chip_active_fg)
-                        .bg(app.theme.chip_active_bg)
-                        .add_modifier(Modifier::BOLD)
+                    app.theme
+                        .style("accent")
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
                 } else {
-                    app.theme.style("text_dim")
+                    app.theme.style("text_dim").add_modifier(Modifier::DIM)
                 },
             )
         })

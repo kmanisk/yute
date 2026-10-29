@@ -37,11 +37,14 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
     app.rendered_rows = visible_rows;
     let selected = app.selected_index.min(total_items.saturating_sub(1));
 
-    if selected < app.scroll_row + 1 {
-        app.scroll_row = selected.saturating_sub(1);
+    let margin = usize::from(app.config.ui.scrolloff).min(visible_rows.saturating_sub(1) / 2);
+    if selected < app.scroll_row.saturating_add(margin) {
+        app.scroll_row = selected.saturating_sub(margin);
     }
-    if selected + 1 >= app.scroll_row + visible_rows {
-        app.scroll_row = (selected + 2).saturating_sub(visible_rows);
+    if selected.saturating_add(margin) >= app.scroll_row + visible_rows {
+        app.scroll_row = selected
+            .saturating_add(margin + 1)
+            .saturating_sub(visible_rows);
     }
     app.scroll_row = app.scroll_row.min(total_items.saturating_sub(visible_rows));
 
@@ -123,8 +126,7 @@ fn render_list_row(
     if is_selected {
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_style(app.theme.style("accent"))
-            .style(Style::default().patch(app.theme.style("selection")));
+            .border_style(app.theme.style("accent"));
         f.render_widget(block, area);
     }
 

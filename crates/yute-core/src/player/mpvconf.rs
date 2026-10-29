@@ -39,10 +39,13 @@ impl MpvProfile {
             demuxer-max-back-bytes=128MiB\n\
             demuxer-readahead-secs=45\n\
             demuxer-seekable-cache=yes\n\
+            cache-pause=yes\n\
+            cache-pause-wait=0.5\n\
             hr-seek=no\n\
             save-position-on-quit=yes\n\
             stream-buffer-size=4MiB\n\
-            network-timeout=15\n\
+            network-timeout=12\n\
+            stream-lavf-o=reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,reconnect_streamed=1,reconnect_delay_max=2,reconnect_max_retries=6,reconnect_delay_total_max=12\n\
             ytdl-raw-options-append=no-playlist=\n\
             ytdl-raw-options-append=concurrent-fragments=4\n\
             sub-auto=fuzzy\n\
@@ -111,6 +114,13 @@ impl MpvProfile {
 
         let script_opts_dir = self.dir.join("script-opts");
         let _ = fs::create_dir_all(&script_opts_dir);
+        // MPV's OSC can request expensive exact seeks while dragging. Prefer
+        // keyframe-oriented seeks for network/DASH playback so large jumps
+        // recover quickly; keyboard/command seeks remain available via IPC.
+        let _ = fs::write(
+            script_opts_dir.join("osc.conf"),
+            "seekbarkeyframes=yes\nseekrangestyle=slider\n",
+        );
         let chat_conf = "auto-load=no\n\
             live-chat-directory=~/.local/share/youtube-live-chats\n\
             yt-dlp-path=yt-dlp\n\
@@ -160,7 +170,7 @@ impl MpvProfile {
             let local_src = user_mpv_scripts.join(name);
 
             if local_src.exists() {
-                if let Ok(_) = fs::copy(&local_src, &dest) {
+                if fs::copy(&local_src, &dest).is_ok() {
                     println!("Synced {name} from local mpv scripts");
                     continue;
                 }
@@ -179,5 +189,11 @@ impl MpvProfile {
         }
 
         Ok(())
+    }
+}
+
+impl Default for MpvProfile {
+    fn default() -> Self {
+        Self::new()
     }
 }

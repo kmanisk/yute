@@ -44,7 +44,14 @@ impl ShellLayout {
     /// Pure geometry entrypoint, also usable by offline playback-state previews.
     pub fn with_playback(area: Rect, app: &App, active: bool) -> Self {
         let footer = Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1);
-        let action_h = u16::from(area.height >= 30 && app.config.ui.action_bar != "off");
+        // Keep the footer to at most two rows. During background playback the
+        // miniplayer is the first row and status is the second; otherwise the
+        // contextual action row can use that first row.
+        let action_h = u16::from(
+            area.height >= 30
+                && app.config.ui.action_bar != "off"
+                && !(active && app.screen != Screen::Watch),
+        );
         let actions = Rect::new(
             area.x,
             footer.y.saturating_sub(action_h),
@@ -88,7 +95,9 @@ impl ShellLayout {
             u16::from(has_tabs),
         );
         let pane = Rect::new(content_x, body.y, width, body.height);
-        let content = pane.inner(ratatui::layout::Margin::new(1, 1));
+        // Vertical breathing room only. Horizontal centering already belongs to
+        // individual views; a shell margin caused visible dead bands at both sides.
+        let content = pane.inner(ratatui::layout::Margin::new(0, 1));
         let title = Rect::new(content.x, content.y, content.width, 0);
         Self {
             header: Rect::new(
@@ -225,6 +234,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     crate::actions::render_menu(f, app);
     accounts::render_picker(f, app);
     signin::render(f, app);
+    settings::render_editor(f, app);
 
     let prefetch = app.config.thumbnails.prefetch_pages.min(3);
     let columns = app.rendered_columns.max(1);
@@ -337,7 +347,8 @@ pub fn overlay_rect(app: &App, size: Rect) -> Option<Rect> {
     if app.screen == Screen::Help {
         return Some(size);
     }
-    signin::modal_area(app, size)
+    settings::editor_area(app, size)
+        .or_else(|| signin::modal_area(app, size))
         .or_else(|| accounts::picker_area(app, size))
         .or_else(|| crate::actions::menu_rect(app, size))
         .or_else(|| cmdline::popup_area(app, size))

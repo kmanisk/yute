@@ -615,13 +615,16 @@ async fn handle_key_event(
         handle_item_menu(app, key, tx);
         return;
     }
-    if key.code == KeyCode::Char('e')
-        && key.modifiers == crossterm::event::KeyModifiers::ALT
-        && !app.confirming_quit
-        && !app.confirming_logout
-    {
-        focus_sidebar(app);
-        return;
+    if app.setting_editor.is_some() {
+        if let Some(saved) = ui::settings::handle_editor_key(app, key) {
+            if saved {
+                apply_stream_cache(app);
+                app.theme = yute::theme::Theme::load(&app.config.general.theme);
+                app.thumbs
+                    .set_picker(yute::terminal::initial_picker(&app.config.general.graphics));
+            }
+            return;
+        }
     }
     if app.focus == Focus::CommentInput {
         if key.code == KeyCode::Esc {
@@ -791,7 +794,8 @@ async fn handle_key_event(
 
     app.which_key = false;
     let in_watch = app.screen == Screen::Watch && app.focus != Focus::Sidebar;
-    let Some((action, count)) = keymap.handle_key(key, in_watch) else {
+    let Some((action, count)) = keymap.handle_key_with_config(key, in_watch, &app.config.keys)
+    else {
         return;
     };
 
@@ -800,7 +804,14 @@ async fn handle_key_event(
         return;
     }
     if action == Action::Quit {
-        app.should_quit = true;
+        if app.screen == Screen::Watch && app.close_comment_thread() {
+            app.status_text = "Back to comments".into();
+        } else if app.screen == Screen::Home || !app.config.ui.quit_on_home_only {
+            app.confirming_quit = true;
+        } else {
+            app.nav_back();
+            ensure_screen_loaded(app, tx);
+        }
         return;
     }
     if matches!(action, Action::NavBackHistory | Action::NavForwardHistory) {
@@ -878,6 +889,13 @@ async fn handle_key_event(
         app.focus = Focus::SearchInput;
         app.search_input.clear();
         app.suggestion_index = None;
+        return;
+    }
+    if action == Action::CenterSelection && app.focus == Focus::Content {
+        let columns = app.rendered_columns.max(1);
+        let row = app.selected_index / columns;
+        let half = app.rendered_rows.saturating_sub(1) / 2;
+        app.scroll_row = row.saturating_sub(half);
         return;
     }
     if app.focus == Focus::Content && app.screen != Screen::Watch {
@@ -1045,11 +1063,20 @@ async fn handle_key_event(
                         app.status_text = "Could not save setting".into();
                     }
                 }
-                Action::Right | Action::PlayDefault => {
+                Action::Right => {
                     ui::settings::cycle_setting(app, true);
                     apply_stream_cache(app);
                     if app.config.save().is_err() {
                         app.status_text = "Could not save setting".into();
+                    }
+                }
+                Action::PlayDefault => {
+                    if !ui::settings::open_editor(app) {
+                        ui::settings::cycle_setting(app, true);
+                        apply_stream_cache(app);
+                        if app.config.save().is_err() {
+                            app.status_text = "Could not save setting".into();
+                        }
                     }
                 }
                 Action::Back | Action::Quit => {
@@ -1102,7 +1129,12 @@ async fn handle_key_event(
 
         match action {
             Action::Quit => {
-                app.should_quit = true;
+                if app.screen == Screen::Home || !app.config.ui.quit_on_home_only {
+                    app.confirming_quit = true;
+                } else {
+                    app.nav_back();
+                    ensure_screen_loaded(app, tx.clone());
+                }
             }
             Action::Back => {
                 if app.screen == Screen::Watch {
@@ -1830,7 +1862,7 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
                     };
                 }
                 WatchPane::Comments => {
-                    let len = app.watch_data.as_ref().map_or(0, |w| w.comments.len());
+                    let len = app.visible_comments().len();
                     app.comments_cursor = if down {
                         app.comments_cursor
                             .saturating_add(count)
@@ -1854,9 +1886,12 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
         }
         Action::PlayDefault => match app.watch_pane {
             WatchPane::Suggestions => play_selected_card(app, tx),
-            WatchPane::Comments => compose_comment(app, true),
+            WatchPane::Comments => open_comment_thread(app, tx),
             WatchPane::Description => open_description_link(app, tx),
         },
+        Action::Back if app.watch_pane == WatchPane::Comments && app.close_comment_thread() => {
+            app.status_text = "Back to comments".into();
+        }
         Action::ComposeComment => compose_comment(app, false),
         Action::ReplyComment => {
             if app.watch_pane == WatchPane::Comments {
@@ -1883,7 +1918,13 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
                 let liked = app.watch_data.as_ref().and_then(|w| w.is_liked) == Some(true);
                 dispatch_command(app, yute::commands::Command::Like(!liked), tx);
             } else if app.watch_data.as_ref().and_then(|w| w.is_disliked) == Some(true) {
-                dispatch_command(app, yute::commands::Command::Like(false), tx);
+                if let Some(video_id) = app.player.current_video_id().map(str::to_string) {
+                    perform_mutation(
+                        app,
+                        yute::actions::AccountMutation::ClearDislike { video_id },
+                        tx,
+                    );
+                }
             } else if !authenticated(app) {
                 app.status_text = "Login required for ratings — use :login".into();
             } else if let Some(video_id) = app.player.current_video_id().map(str::to_string) {
@@ -1937,7 +1978,7 @@ fn compose_comment(app: &mut App, reply: bool) {
         return;
     };
     let (params, author) = if reply {
-        let comment = watch.comments.get(app.comments_cursor);
+        let comment = app.selected_comment();
         (
             comment.and_then(|c| c.reply_params.clone()),
             comment.map(|c| c.author.clone()),
@@ -1946,7 +1987,7 @@ fn compose_comment(app: &mut App, reply: bool) {
         (watch.comment_create_params.clone(), None)
     };
     let Some(params) = params else {
-        app.status_text = "Posting is unavailable for this YouTube client — use :open".into();
+        app.status_text = "This TV session does not expose comment posting/reply tokens; reading and reactions still work".into();
         return;
     };
     app.comment_draft = Some(yute::app::CommentDraft {
@@ -1999,30 +2040,92 @@ fn react_comment(app: &mut App, like: bool, tx: Sender<AppEvent>) {
         app.status_text = "Login required for comment reactions — use :login".into();
         return;
     }
-    let Some(watch) = &app.watch_data else {
+    let Some(comment) = app.selected_comment().cloned() else {
         return;
     };
-    let action = watch.comments.get(app.comments_cursor).and_then(|c| {
-        if like {
-            c.like_action.clone()
-        } else {
-            c.dislike_action.clone()
-        }
-    });
-    let Some(action) = action else {
-        app.status_text = "Comment reactions unavailable for this client — use :open".into();
+    let Some(id) = app.watch_data.as_ref().map(|watch| watch.video.id.clone()) else {
         return;
     };
-    let id = watch.video.id.clone();
     let generation = app.feed_generation;
     let backend = Arc::clone(&app.backend);
+    let direct_action = if like {
+        if comment.is_liked {
+            comment.unlike_action.clone()
+        } else {
+            comment.like_action.clone()
+        }
+    } else if comment.is_disliked {
+        comment.undislike_action.clone()
+    } else {
+        comment.dislike_action.clone()
+    };
+    let detail_token = comment.detail_token.clone();
+    app.status_text = if like {
+        if comment.is_liked {
+            "Removing comment like…"
+        } else {
+            "Liking comment…"
+        }
+    } else if comment.is_disliked {
+        "Removing comment dislike…"
+    } else {
+        "Disliking comment…"
+    }
+    .into();
     tokio::spawn(async move {
-        let result = backend.comment_action(&action).await;
+        let result = if let Some(token) = detail_token {
+            // Current TV responses omit reaction actions from the list row. Fetch the
+            // focused comment first, exactly as SmartTube's comment service does.
+            backend.react_comment(&token, !like).await
+        } else if let Some(action) = direct_action {
+            // Older renderer fallback.
+            backend.comment_action(&action).await
+        } else {
+            Err(anyhow::anyhow!("Comment reaction unavailable"))
+        };
         let _ = tx
             .send(AppEvent::CommentUpdated(generation, id, false, result))
             .await;
     });
 }
+
+fn open_comment_thread(app: &mut App, tx: Sender<AppEvent>) {
+    if app.comment_thread.is_some() {
+        return;
+    }
+    let Some(comment) = app.selected_comment().cloned() else {
+        return;
+    };
+    let Some(token) = comment
+        .replies_token
+        .clone()
+        .or_else(|| comment.detail_token.clone())
+    else {
+        app.status_text = "No reply thread is available for this comment".into();
+        return;
+    };
+    let Some(video_id) = app.watch_data.as_ref().map(|watch| watch.video.id.clone()) else {
+        return;
+    };
+    let root_cursor = app.comments_cursor;
+    let generation = app.feed_generation;
+    let backend = Arc::clone(&app.backend);
+    app.comments_loading = true;
+    app.status_text = format!("Opening replies to {}…", comment.author);
+    tokio::spawn(async move {
+        let result = backend.fetch_comments(&token).await;
+        let _ = tx
+            .send(AppEvent::CommentThreadLoaded(
+                generation,
+                video_id,
+                root_cursor,
+                comment.author,
+                result,
+            ))
+            .await;
+    });
+}
+
 fn open_description_link(app: &mut App, tx: Sender<AppEvent>) {
     let links = ui::watch::description_links(app);
     let Some((_, url)) = links.get(app.watch_link_index % links.len().max(1)) else {
@@ -2098,7 +2201,8 @@ fn navigate_to_screen(app: &mut App, screen: Screen, tx: Sender<AppEvent>) {
     }
     match screen {
         Screen::LocalVideos => {
-            app.items = scan_local_videos(&app.config.local.dirs).items;
+            app.items =
+                scan_local_videos(&app.config.local.dirs, &app.config.downloads.directory).items;
             return;
         }
         Screen::Queue => {
@@ -2107,6 +2211,22 @@ fn navigate_to_screen(app: &mut App, screen: Screen, tx: Sender<AppEvent>) {
         }
         Screen::Settings | Screen::Accounts => {
             app.status_text.clear();
+            return;
+        }
+        Screen::Watch => {
+            let Some(id) = app.player.current_video_id().map(str::to_string) else {
+                app.status_text = "No active video — select one and press Enter".into();
+                app.nav_back();
+                return;
+            };
+            app.watch_pane = yute::app::WatchPane::Description;
+            if app
+                .watch_data
+                .as_ref()
+                .is_none_or(|watch| watch.video.id != id)
+            {
+                trigger_watch_fetch(app, tx, id);
+            }
             return;
         }
         _ => {}
@@ -2233,6 +2353,7 @@ fn start_playback(app: &mut App, video: VideoCard, tx: Sender<AppEvent>) {
     app.watch_link_index = 0;
     app.comments_cursor = 0;
     app.comments_loading = false;
+    app.comment_thread = None;
     app.comment_draft = None;
     app.comment_input.clear();
     app.comment_posting = false;
@@ -2536,11 +2657,13 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             app.download_task = None;
             app.download_active = false;
             app.status_text = if ok {
-                "Download complete · ~/Videos/Yute · :local to browse"
+                format!(
+                    "Download complete · {} · :local",
+                    app.config.downloads.directory
+                )
             } else {
-                "Download failed · check yt-dlp, FFmpeg, disk space and account access"
-            }
-            .into();
+                "Download failed · check yt-dlp, FFmpeg, disk space and account access".into()
+            };
         }
 
         AppEvent::MutationFinished(generation, mutation, result) => {
@@ -2550,8 +2673,14 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             match result {
                 Err(error) => app.status_text = mutation_error_message(&error),
                 Ok(()) => match mutation {
-                    yute::actions::AccountMutation::ClearRating { video_id } => {
-                        app.ratings.insert(video_id, 0);
+                    yute::actions::AccountMutation::ClearDislike { video_id } => {
+                        app.ratings.insert(video_id.clone(), 0);
+                        if let Some(watch) = &mut app.watch_data {
+                            if watch.video.id == video_id {
+                                watch.is_liked = Some(false);
+                                watch.is_disliked = Some(false);
+                            }
+                        }
                         app.status_text = "Removed rating".into();
                     }
                     yute::actions::AccountMutation::WatchLater { video_id, remove } => {
@@ -2824,12 +2953,30 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                     let before = app.items.len();
                     let mut ids: std::collections::HashSet<String> =
                         app.items.iter().map(|c| c.id().to_string()).collect();
-                    app.items.extend(
-                        page.items
-                            .into_iter()
-                            .filter(|c| ids.insert(c.id().to_string())),
-                    );
-                    app.continuation_token = page.continuation.filter(|next| next != &token);
+                    let mut relevant = 0usize;
+                    let search_query = (screen == Screen::Search).then(|| app.search_query.clone());
+                    for card in page.items {
+                        if !ids.insert(card.id().to_string()) {
+                            continue;
+                        }
+                        // YouTube search continuations can silently degrade into a
+                        // personalized "recommended for you" shelf. Keep the primary
+                        // page untouched, but require lexical query evidence on later
+                        // pages so scrolling remains a search instead of turning into Home.
+                        if search_query
+                            .as_deref()
+                            .is_some_and(|query| !search_continuation_relevant(&card, query))
+                        {
+                            continue;
+                        }
+                        relevant += 1;
+                        app.items.push(card);
+                    }
+                    app.continuation_token = if screen == Screen::Search && relevant == 0 {
+                        None
+                    } else {
+                        page.continuation.filter(|next| next != &token)
+                    };
                     if app.screen == Screen::Subscriptions {
                         if app.items.len() == before {
                             app.autofill_pages += 1;
@@ -2841,7 +2988,11 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                             app.autofill_pages = 0;
                         }
                     }
-                    app.status_text = format!("Loaded {} more items", app.items.len() - before);
+                    app.status_text = if screen == Screen::Search && app.items.len() == before {
+                        "End of relevant search results".into()
+                    } else {
+                        format!("Loaded {} more items", app.items.len() - before)
+                    };
                 }
                 Err(error) => {
                     app.continuation_failed = true;
@@ -2892,6 +3043,34 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                     }
                 }
                 Err(_) => app.status_text = "Comments could not load — press c to retry".into(),
+            }
+        }
+        AppEvent::CommentThreadLoaded(generation, id, root_cursor, parent_author, result) => {
+            if generation != app.feed_generation
+                || app.player.current_video_id() != Some(id.as_str())
+            {
+                return;
+            }
+            app.comments_loading = false;
+            match result {
+                Ok(batch) => {
+                    let mut comments = batch.comments;
+                    // The detail response commonly repeats the selected parent as the
+                    // first item. Keep it: it gives the thread useful context and the
+                    // authoritative reaction state/actions.
+                    if comments.is_empty() {
+                        app.status_text = "This comment has no visible replies".into();
+                    } else {
+                        app.comment_thread = Some(yute::app::CommentThread {
+                            parent_author,
+                            comments: std::mem::take(&mut comments),
+                            root_cursor,
+                        });
+                        app.comments_cursor = 0;
+                        app.status_text = "Reply thread · Esc/q returns to comments".into();
+                    }
+                }
+                Err(_) => app.status_text = "Replies could not load — press Enter to retry".into(),
             }
         }
         AppEvent::CommentUpdated(generation, id, posted, result) => {
@@ -3222,7 +3401,7 @@ fn ensure_screen_loaded(app: &mut App, tx: Sender<AppEvent>) {
             }
         }
         Screen::LocalVideos => {
-            let page = scan_local_videos(&app.config.local.dirs);
+            let page = scan_local_videos(&app.config.local.dirs, &app.config.downloads.directory);
             app.items = page.items;
             app.status_text = format!("Loaded {} local videos", app.items.len());
         }
@@ -3669,6 +3848,59 @@ fn maybe_load_channel_avatars(app: &mut App, tx: Sender<AppEvent>) {
     }
 }
 
+fn search_continuation_relevant(card: &Card, query: &str) -> bool {
+    let normalize = |text: &str| {
+        text.chars()
+            .map(|c| {
+                if c.is_alphanumeric() {
+                    c.to_ascii_lowercase()
+                } else {
+                    ' '
+                }
+            })
+            .collect::<String>()
+    };
+    let stop = [
+        "the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "with", "how", "is",
+    ];
+    let query = normalize(query);
+    let terms = query
+        .split_whitespace()
+        .filter(|term| term.len() >= 2 && !stop.contains(term))
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return true;
+    }
+    let mut haystack = card.title().to_string();
+    match card {
+        Card::Video(video) => {
+            haystack.push(' ');
+            haystack.push_str(&video.channel);
+            haystack.push(' ');
+            haystack.push_str(&video.badges.join(" "));
+        }
+        Card::Playlist(playlist) => {
+            haystack.push(' ');
+            haystack.push_str(&playlist.channel);
+        }
+        Card::Channel(channel) => {
+            if let Some(handle) = &channel.handle {
+                haystack.push(' ');
+                haystack.push_str(handle);
+            }
+        }
+    }
+    let haystack = normalize(&haystack);
+    let words = haystack.split_whitespace().collect::<Vec<_>>();
+    terms.iter().any(|term| {
+        haystack.contains(term)
+            || words.iter().any(|word| {
+                word.starts_with(term)
+                    || (term.len() >= 5 && term.starts_with(*word) && word.len() >= 4)
+            })
+    })
+}
+
 fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
     if app.is_loading
         || app.is_loading_more
@@ -3839,6 +4071,105 @@ fn apply_stream_cache(app: &App) {
 fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<AppEvent>) {
     use yute::commands::{Command, CopyTarget};
     match command {
+        Command::Details => {
+            let Some(id) = app.player.current_video_id().map(str::to_string) else {
+                app.status_text = "No active video — select one and press Enter".into();
+                return;
+            };
+            if app.screen != Screen::Watch {
+                app.transition(Screen::Watch, true);
+            }
+            app.focus = Focus::Content;
+            app.watch_pane = yute::app::WatchPane::Description;
+            if app
+                .watch_data
+                .as_ref()
+                .is_none_or(|watch| watch.video.id != id)
+            {
+                trigger_watch_fetch(app, tx, id);
+            }
+        }
+        Command::View(mode) => {
+            let next = match mode.as_str() {
+                "grid" => yute::app::ViewMode::Grid,
+                "list" => yute::app::ViewMode::List,
+                _ => {
+                    app.toggle_view_mode();
+                    app.status_text = format!("View: {:?}", app.current_view_mode());
+                    return;
+                }
+            };
+            if app.screen == Screen::Search {
+                app.search_view_mode = next;
+            } else {
+                app.view_mode = next;
+            }
+            app.scroll_row = 0;
+            app.status_text = format!("View: {:?}", app.current_view_mode());
+        }
+        Command::WatchSection(section) => {
+            let Some(id) = app.player.current_video_id().map(str::to_string) else {
+                app.status_text = "No active video — select one and press Enter".into();
+                return;
+            };
+            if app.screen != Screen::Watch {
+                app.transition(Screen::Watch, true);
+            }
+            app.focus = Focus::Content;
+            app.watch_pane = match section.as_str() {
+                "comments" => yute::app::WatchPane::Comments,
+                "suggestions" => yute::app::WatchPane::Suggestions,
+                _ => yute::app::WatchPane::Description,
+            };
+            if app
+                .watch_data
+                .as_ref()
+                .is_none_or(|watch| watch.video.id != id)
+            {
+                trigger_watch_fetch(app, tx.clone(), id);
+            }
+            if app.watch_pane == yute::app::WatchPane::Comments {
+                ensure_comments(app, tx);
+            }
+        }
+        Command::Set(key, value) => {
+            match key.as_str() {
+                "theme" => {
+                    dispatch_command(app, Command::Theme(value), tx);
+                    return;
+                }
+                "graphics" => {
+                    dispatch_command(app, Command::Graphics(value), tx);
+                    return;
+                }
+                "quality" => {
+                    dispatch_command(app, Command::Quality(Some(value)), tx);
+                    return;
+                }
+                "scrolloff" => match value.parse::<u16>() {
+                    Ok(rows) if rows <= 12 => app.config.ui.scrolloff = rows,
+                    _ => {
+                        app.status_text = "scrolloff must be 0..12".into();
+                        return;
+                    }
+                },
+                "download-dir" => app.config.downloads.directory = value,
+                "sidebar-key" => app.config.keys.sidebar = value,
+                "sidebar-alt-key" => app.config.keys.sidebar_alt = value,
+                "copy-key" => app.config.keys.copy_url = value,
+                "center-key" => app.config.keys.center = value,
+                "quit-key" => app.config.keys.quit = value,
+                _ => {
+                    app.status_text = "Unknown setting key — :help set".into();
+                    return;
+                }
+            }
+            if app.config.save().is_ok() {
+                app.status_text = format!("Saved {key}");
+            } else {
+                app.status_text = "Could not save config.toml".into();
+            }
+        }
         Command::Download(args) => {
             let Some(card) = app.selected_card().cloned() else {
                 app.status_text = "Select a video or playlist first".into();
@@ -4167,7 +4498,14 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
             }
         }
         Command::Copy(target) => {
-            let Some(card) = app.selected_card() else {
+            let selected = if app.screen == Screen::Watch
+                && app.watch_pane != yute::app::WatchPane::Suggestions
+            {
+                app.player.current_video.clone().map(Card::Video)
+            } else {
+                app.selected_card().cloned()
+            };
+            let Some(card) = selected.as_ref() else {
                 app.status_text = "Select an item to copy".into();
                 return;
             };
@@ -4298,7 +4636,7 @@ fn mutate_card(app: &mut App, card: Card, action: yute::actions::ItemAction, tx:
         },
         ItemAction::Dislike => {
             if rating == -1 {
-                AccountMutation::ClearRating { video_id: id }
+                AccountMutation::ClearDislike { video_id: id }
             } else {
                 AccountMutation::Dislike { video_id: id }
             }
@@ -4336,7 +4674,7 @@ fn perform_mutation(app: &mut App, mutation: yute::actions::AccountMutation, tx:
     tokio::spawn(async move {
         use yute::actions::AccountMutation;
         let result = match &mutation {
-            AccountMutation::ClearRating { video_id } => backend.remove_rating(video_id).await,
+            AccountMutation::ClearDislike { video_id } => backend.remove_dislike(video_id).await,
             AccountMutation::WatchLater {
                 video_id,
                 remove: true,
@@ -5278,10 +5616,22 @@ mod feed_ui_tests {
             &mut app,
             &mut keys,
             KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            tx.clone(),
+        )
+        .await;
+        assert!(!app.should_quit);
+        assert!(!app.confirming_quit);
+        assert_eq!(app.screen, Screen::Search);
+        app.transition(Screen::Home, false);
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
             tx,
         )
         .await;
-        assert!(app.should_quit);
+        assert!(!app.should_quit);
+        assert!(app.confirming_quit);
     }
 
     #[tokio::test]

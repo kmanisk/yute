@@ -41,10 +41,7 @@ pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
     for (index, account) in app.accounts.iter().enumerate().skip(start).take(rows) {
         let selected = index == app.accounts_cursor;
         let style = if selected {
-            app.theme
-                .style("accent")
-                .patch(app.theme.style("selection"))
-                .add_modifier(Modifier::BOLD)
+            app.theme.style("accent").add_modifier(Modifier::BOLD)
         } else {
             app.theme.style("text")
         };

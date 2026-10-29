@@ -6,6 +6,10 @@ use std::collections::VecDeque;
 pub enum Command {
     Navigate(Screen),
     Search(String),
+    Details,
+    View(String),
+    WatchSection(String),
+    Set(String, String),
     Channel,
     Playlist,
     Play,
@@ -116,6 +120,37 @@ fn volume(args: &str) -> Result<Command, String> {
     }
     Ok(Command::Volume(value, relative))
 }
+
+fn set_command(args: &str) -> Result<Command, String> {
+    let Some((key, value)) = args.trim().split_once(char::is_whitespace) else {
+        return Err("Usage: :set <key> <value>".into());
+    };
+    let key = key.trim();
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("Setting value cannot be empty".into());
+    }
+    match key {
+        "graphics" => match value {
+            "auto" | "kitty" | "iterm2" | "sixel" | "halfblocks" | "off" | "none" => {}
+            _ => return Err("graphics must be auto|kitty|iterm2|sixel|halfblocks|off".into()),
+        },
+        "quality" => match value {
+            "480" | "480p" | "720" | "720p" | "1080" | "1080p" | "1440" | "1440p" | "2160"
+            | "2160p" | "4k" | "best" => {}
+            _ => return Err("quality must be 480p|720p|1080p|1440p|2160p|best".into()),
+        },
+        "scrolloff" => match value.parse::<u16>() {
+            Ok(rows) if rows <= 12 => {}
+            _ => return Err("scrolloff must be 0..12".into()),
+        },
+        "theme" | "download-dir" | "sidebar-key" | "sidebar-alt-key" | "copy-key"
+        | "center-key" | "quit-key" => {}
+        _ => return Err("Unknown setting key — :help set".into()),
+    }
+    Ok(Command::Set(key.into(), value.into()))
+}
+
 fn queue(args: &str) -> Result<Command, String> {
     match args {
         "" => Ok(Command::Navigate(Screen::Queue)),
@@ -139,10 +174,17 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"playlists", aliases:&[], usage:"playlists", description:"Open your library playlists.", parse:|a| no_args(a,Command::Navigate(Screen::Playlists)) },
     Spec { name:"queue", aliases:&[], usage:"queue [add|next|remove|clear]", description:"Open the local queue; add selected video, prepend it, remove selected queue entry, or clear. Example: :queue add", parse:queue },
     Spec { name:"local", aliases:&[], usage:"local", description:"Browse configured local videos.", parse:|a| no_args(a,Command::Navigate(Screen::LocalVideos)) },
-    Spec { name:"settings", aliases:&[], usage:"settings", description:"Open settings.", parse:|a| no_args(a,Command::Navigate(Screen::Settings)) },
+    Spec { name:"settings", aliases:&["config"], usage:"settings", description:"Open settings.", parse:|a| no_args(a,Command::Navigate(Screen::Settings)) },
     Spec { name:"account", aliases:&["accounts", "acc", "a"], usage:"account [name|index|add|remove <name>|anon|whoami]", description:"Switch accounts, add a TV login, remove a saved account, or inspect the active session.", parse:|a| Ok(Command::Account(a.into())) },
     Spec { name:"anonymous", aliases:&[], usage:"anonymous", description:"Switch to the built-in anonymous account.", parse:|a|no_args(a,Command::Account("anon".into())) },
     Spec { name:"search", aliases:&[], usage:"search <query>", description:"Search YouTube. Example: :search linux kernel", parse:|a| if a.is_empty(){Err("Usage: :search <query>".into())}else{Ok(Command::Search(a.into()))} },
+    Spec { name:"details", aliases:&["now","watch","video-info"], usage:"details", description:"Open the dashboard for the currently playing video with description, comments and suggestions.", parse:|a| no_args(a,Command::Details) },
+    Spec { name:"view", aliases:&[], usage:"view [toggle|grid|list]", description:"Switch the current feed between grid and list immediately.", parse:|a| match a {""|"toggle"|"grid"|"list"=>Ok(Command::View(if a.is_empty(){"toggle".into()}else{a.into()})),_=>Err("Usage: :view [toggle|grid|list]".into())} },
+    Spec { name:"grid", aliases:&[], usage:"grid", description:"Use grid view for the current feed.", parse:|a| no_args(a,Command::View("grid".into())) },
+    Spec { name:"list", aliases:&[], usage:"list", description:"Use list view for the current feed.", parse:|a| no_args(a,Command::View("list".into())) },
+    Spec { name:"comments", aliases:&[], usage:"comments", description:"Open/focus comments for the currently playing video.", parse:|a| no_args(a,Command::WatchSection("comments".into())) },
+    Spec { name:"description", aliases:&["desc"], usage:"description", description:"Open/focus the current video's description and chapters.", parse:|a| no_args(a,Command::WatchSection("description".into())) },
+    Spec { name:"suggestions", aliases:&["up-next"], usage:"suggestions", description:"Open/focus suggestions for the currently playing video.", parse:|a| no_args(a,Command::WatchSection("suggestions".into())) },
     Spec { name:"channel", aliases:&[], usage:"channel", description:"Open the selected item's channel when its channel ID is available.", parse:|a| no_args(a,Command::Channel) },
     Spec { name:"playlist", aliases:&[], usage:"playlist", description:"Open the selected playlist, without autoplay.", parse:|a| no_args(a,Command::Playlist) },
     Spec { name:"play", aliases:&[], usage:"play", description:"Activate the selected item; resume current playback if no item is selected.", parse:|a| no_args(a,Command::Play) },
@@ -173,7 +215,7 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"download", aliases:&[], usage:"download [playlist] [video|audio] [best|1080p|720p|480p|360p|opus|aac|mp3|flac|m4a]", description:"Download selected media; playlist video qualities are ceilings.", parse:|a|{if a.split_whitespace().all(|s|matches!(s,"playlist"|"video"|"audio"|"best"|"2160p"|"1440p"|"1080p"|"720p"|"480p"|"360p"|"opus"|"aac"|"mp3"|"flac"|"m4a")){Ok(Command::Download(a.into()))}else{Err("Invalid download mode or quality".into())}} },
     Spec { name:"theme", aliases:&[], usage:"theme terminal|auto|<name>|reload|list|check", description:"Select, reload or validate a semantic theme.", parse:|a| Ok(Command::Theme(if a.is_empty(){"list".into()}else{a.into()})) },
     Spec { name:"graphics", aliases:&[], usage:"graphics auto|kitty|iterm2|sixel|halfblocks|off", description:"Apply terminal graphics mode.", parse:|a| match a {"auto"|"kitty"|"iterm2"|"sixel"|"halfblocks"|"off"|"none"=>Ok(Command::Graphics(a.into())),_=>Err("Usage: :graphics auto|kitty|iterm2|sixel|halfblocks|off".into())} },
-    Spec { name:"set", aliases:&[], usage:"set graphics <sixel|kitty|halfblocks|none|auto>", description:"Save a graphics preference for the next launch.", parse:|a| {let parts=a.split_whitespace().collect::<Vec<_>>(); match parts.as_slice(){["graphics", mode @ ("sixel"|"kitty"|"iterm2"|"halfblocks"|"none"|"off"|"auto")]=>Ok(Command::Graphics((*mode).into())),_=>Err("Usage: :set graphics <sixel|kitty|halfblocks|none|auto>".into())}} },
+    Spec { name:"set", aliases:&[], usage:"set <key> <value>", description:"Change a persistent setting. Keys: graphics, theme, quality, scrolloff, download-dir, sidebar-key, sidebar-alt-key, copy-key, center-key, quit-key.", parse:set_command },
     Spec { name:"sidebar", aliases:&[], usage:"sidebar [show|hide]", description:"Toggle or set sidebar visibility.", parse:|a| match a {""|"toggle"=>Ok(Command::Sidebar(None)),"show"=>Ok(Command::Sidebar(Some(true))),"hide"=>Ok(Command::Sidebar(Some(false))),_=>Err("Usage: :sidebar [show|hide]".into())} },
     Spec { name:"help", aliases:&[], usage:"help [command]", description:"Show command help; ? shows keyboard shortcuts.", parse:|a| if a.split_whitespace().count()>1{Err("Usage: :help [command]".into())}else{Ok(Command::Help((!a.is_empty()).then(||a.into())))} },
     Spec { name:"quit", aliases:&["q"], usage:"quit", description:"Confirm application quit. Normal-mode q goes back.", parse:|a| no_args(a,Command::Quit(false)) },
@@ -220,10 +262,28 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
         ),
         ("sidebar", &["show", "hide", "toggle"]),
         ("shorts", &["on", "off", "toggle"]),
-        ("set", &["graphics"]),
+        (
+            "set",
+            &[
+                "graphics",
+                "theme",
+                "quality",
+                "scrolloff",
+                "download-dir",
+                "sidebar-key",
+                "sidebar-alt-key",
+                "copy-key",
+                "center-key",
+                "quit-key",
+            ],
+        ),
         (
             "set graphics",
-            &["sixel", "kitty", "halfblocks", "none", "auto"],
+            &["sixel", "kitty", "iterm2", "halfblocks", "none", "auto"],
+        ),
+        (
+            "set quality",
+            &["480p", "720p", "1080p", "1440p", "2160p", "best"],
         ),
         ("copy", &["url", "title", "channel"]),
         ("open", &["video", "channel"]),
@@ -289,7 +349,7 @@ pub fn help(topic: Option<&str>) -> Result<String, String> {
         let s = spec(topic).ok_or_else(|| format!("No command named '{topic}'"))?;
         Ok(format!(":{}\n{}", s.usage, s.description))
     } else {
-        Ok("Commands\n:help <name> shows syntax and an example.\nNavigate: home subscriptions history watch-later liked playlists queue local settings account\nUse: search channel playlist play pause toggle stop next prev seek volume mute\nMore: login logout subscribe unsubscribe like unlike open copy refresh filter set sidebar quit\nTab completes names; Up/Down recalls session commands. Esc closes.".into())
+        Ok("Commands\n:help <name> shows syntax and examples.\nNavigate: home subscriptions history watch-later liked playlists queue local settings account\nVideo: details comments description suggestions play pause toggle stop next prev seek volume mute quality\nBrowse: search filter view grid list channel playlist shorts sidebar\nAccount: login logout subscribe unsubscribe like unlike\nTools: download open copy graphics theme set refresh keys quit\nNormal mode: v toggles grid/list, yy copies URL, zz centers, Space-e or Alt-e sidebar. Tab completes commands.".into())
     }
 }
 

@@ -29,7 +29,7 @@ pub fn route_name(app: &App) -> String {
 pub fn label(app: &App, width: u16) -> String {
     crate::ui::text::truncate_str(&format!(" {}", route_name(app)), width.max(8) as usize)
 }
-pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
+pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
     let size = f.area();
     let account = if app.auth.lock().unwrap().needs_login {
         "! Sign in".to_string()
@@ -38,14 +38,38 @@ pub fn render_header(f: &mut Frame, app: &App, area: Rect) {
     } else {
         "Anonymous".into()
     };
+    let avatar_url = app
+        .accounts
+        .get(app.active_account_index)
+        .and_then(|profile| profile.avatar_url.clone());
+    let avatar_w = if avatar_url.is_some() && app.config.general.graphics != "none" {
+        3
+    } else {
+        0
+    };
     let width = (size.width / 4)
-        .min(account.chars().count() as u16 + 2)
-        .max(2);
+        .min(account.chars().count() as u16 + avatar_w + 3)
+        .max(2 + avatar_w);
+    let account_area = Rect::new(size.right() - width, size.y, width, 1);
+    let mut text_area = account_area;
+    if let Some(url) = avatar_url {
+        if avatar_w > 0 {
+            let avatar_area = Rect::new(account_area.x, account_area.y, avatar_w, 1);
+            if let Some(proto) = app.thumbs.get_cover_protocol(&url, avatar_area.as_size()) {
+                f.render_widget(proto, avatar_area);
+            }
+            text_area.x = text_area.x.saturating_add(avatar_w + 1);
+            text_area.width = text_area.width.saturating_sub(avatar_w + 1);
+        }
+    }
     f.render_widget(
-        Paragraph::new(crate::ui::text::truncate_str(&account, width as usize))
-            .alignment(ratatui::layout::Alignment::Right)
-            .style(app.theme.style("status")),
-        Rect::new(size.right() - width, size.y, width, 1),
+        Paragraph::new(crate::ui::text::truncate_str(
+            &account,
+            text_area.width as usize,
+        ))
+        .alignment(ratatui::layout::Alignment::Right)
+        .style(app.theme.style("status")),
+        text_area,
     );
     f.render_widget(
         Paragraph::new(label(app, area.width.min(size.width.saturating_sub(width))))

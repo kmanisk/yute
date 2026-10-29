@@ -41,7 +41,9 @@ impl GridGeometry {
             .width
             .saturating_sub(2 * columns.saturating_sub(1) as u16)
             / columns as u16;
-        let natural_width = slot_width.clamp(1, 40);
+        // Fill the content width instead of leaving symmetric dead bands on wide
+        // terminals. Column count still bounds density; each slot gets its width.
+        let natural_width = slot_width.max(1);
         let minimum_width = 28.min(natural_width);
         let aspect_height_for = |width: u16| {
             (width.saturating_sub(2) as f32 * cell_w / cell_h.max(1.0) * 9.0 / 16.0).round() as u16
@@ -157,19 +159,19 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let selected = app.selected_index.min(total_items.saturating_sub(1));
     let selected_row = selected / num_cols;
 
-    // Clean scroll-off navigation without spurious row offsets
-    if visible_rows >= 3 {
-        if selected_row < app.scroll_row + 1 && app.scroll_row > 0 {
-            app.scroll_row = selected_row.saturating_sub(1);
-        } else if selected_row + 1 >= app.scroll_row + visible_rows {
-            app.scroll_row = (selected_row + 2).saturating_sub(visible_rows);
+    // Vim-style scrolloff: preserve context above/below the selected row when
+    // the viewport is tall enough. `zz` can still center explicitly.
+    if visible_rows > 1 {
+        let margin = usize::from(app.config.ui.scrolloff).min(visible_rows.saturating_sub(1) / 2);
+        if selected_row < app.scroll_row.saturating_add(margin) {
+            app.scroll_row = selected_row.saturating_sub(margin);
+        } else if selected_row.saturating_add(margin) >= app.scroll_row + visible_rows {
+            app.scroll_row = selected_row
+                .saturating_add(margin + 1)
+                .saturating_sub(visible_rows);
         }
     } else {
-        if selected_row < app.scroll_row {
-            app.scroll_row = selected_row;
-        } else if selected_row >= app.scroll_row + visible_rows {
-            app.scroll_row = selected_row + 1 - visible_rows;
-        }
+        app.scroll_row = selected_row;
     }
     app.scroll_row = app.scroll_row.min(total_rows.saturating_sub(visible_rows));
 
@@ -376,9 +378,18 @@ fn render_grid_card(
     }
 
     let is_shorts = matches!(card, Card::Video(v) if v.badges.iter().any(|b| b == "SHORTS"));
-    let actual_thumb_h = inner.height.saturating_sub(title_h + 2).min(thumb_h).max(1);
+    let is_channel = matches!(card, Card::Channel(_));
+    let effective_title_h = if is_channel { 1 } else { title_h };
+    let available_art_h = inner.height.saturating_sub(effective_title_h + 2).max(1);
+    let actual_thumb_h = if is_channel {
+        // Channel artwork is a physical square. Use all available vertical space
+        // rather than inheriting the shorter 16:9 video thumbnail height.
+        available_art_h
+    } else {
+        available_art_h.min(thumb_h)
+    };
     let mut thumb_area = Rect::new(inner.x, inner.y, inner.width, actual_thumb_h);
-    if matches!(card, Card::Channel(_)) {
+    if is_channel {
         let width = ((actual_thumb_h as f32 * app.cell_h_px / app.cell_w_px.max(1.)).round()
             as u16)
             .min(inner.width)
@@ -389,9 +400,9 @@ fn render_grid_card(
     let text_x = inner.x;
     let text_y = inner.y + actual_thumb_h;
     let text_w = inner.width;
-    let title_area = Rect::new(text_x, text_y, text_w, title_h);
-    let channel_area = Rect::new(text_x, text_y + title_h, text_w, 1);
-    let meta_area = Rect::new(text_x, text_y + title_h + 1, text_w, 1);
+    let title_area = Rect::new(text_x, text_y, text_w, effective_title_h);
+    let channel_area = Rect::new(text_x, text_y + effective_title_h, text_w, 1);
+    let meta_area = Rect::new(text_x, text_y + effective_title_h + 1, text_w, 1);
 
     // Modal overlap suppression
     let screen_size = f.area();
@@ -576,15 +587,7 @@ fn render_grid_card(
                 );
                 super::thumbnail::badge(f, p_w, badge_rect);
             }
-            Card::Channel(_) => {
-                let rect = Rect::new(thumb_area.x, thumb_area.y, 9.min(thumb_area.width), 1);
-                super::thumbnail::badge(
-                    f,
-                    Paragraph::new(" CHANNEL ")
-                        .style(app.theme.style("text").bg(app.theme.surface)),
-                    rect,
-                );
-            }
+            Card::Channel(_) => {}
         }
     }
 
@@ -679,7 +682,7 @@ fn render_grid_card(
         Card::Channel(c) => {
             f.render_widget(
                 Paragraph::new(truncate_str(
-                    c.handle.as_deref().unwrap_or("Channel"),
+                    c.handle.as_deref().unwrap_or(""),
                     channel_area.width as usize,
                 ))
                 .style(app.theme.style("text")),

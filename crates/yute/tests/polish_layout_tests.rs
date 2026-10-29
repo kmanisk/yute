@@ -90,7 +90,7 @@ fn shell_geometry_and_rendering_matrix() {
             assert_eq!(shell.sidebar.y, 1, "{screen:?} {w}x{h}");
             assert_eq!(shell.tabs.y, shell.header.y);
             assert_eq!(shell.pane.y, 1);
-            assert_eq!(shell.content.x, shell.pane.x + 1);
+            assert_eq!(shell.content.x, shell.pane.x);
             assert_eq!(shell.title.x, shell.content.x);
             assert!(shell.tabs.x >= shell.sidebar.right());
             assert!(shell.player.is_empty());
@@ -150,13 +150,16 @@ fn selected_grid_card_uses_border_only_without_fill_tint() {
     let selected_x = shell.content.x + g.first_column_offset;
     let selected_y = shell.content.y;
     assert_eq!(buffer[(selected_x, selected_y)].fg, app.theme.accent);
-    for y in shell.content.y..shell.content.bottom() {
-        for x in shell.content.x..shell.content.right() {
-            assert_ne!(
-                buffer[(x, y)].bg,
-                app.theme.surface_hover,
-                "selection fill leaked into grid at {x},{y}"
-            );
+    assert_eq!(buffer[(selected_x + 1, selected_y + 1)].bg, app.theme.bg);
+    if app.theme.surface_hover != app.theme.bg {
+        for y in shell.content.y..shell.content.bottom() {
+            for x in shell.content.x..shell.content.right() {
+                assert_ne!(
+                    buffer[(x, y)].bg,
+                    app.theme.surface_hover,
+                    "selection fill leaked into grid at {x},{y}"
+                );
+            }
         }
     }
 }
@@ -196,7 +199,7 @@ fn channel_fallback_and_playlist_are_not_video_duration() {
         .iter()
         .map(|c| c.symbol())
         .collect::<String>();
-    assert!(text.contains("CHANNEL"));
+    assert!(!text.contains("CHANNEL"));
     assert!(text.contains("24 VIDEOS"));
     assert!(!text.contains("12:43"));
     assert!(matches!(
@@ -230,7 +233,10 @@ fn shorts_policy_preserves_saved_content_and_explicit_filter() {
 #[test]
 fn command_argument_completion_and_normalization() {
     assert_eq!(yute::commands::completions("filter ").len(), 6);
-    assert_eq!(yute::commands::completions("set "), vec!["set graphics"]);
+    let set = yute::commands::completions("set ");
+    assert!(set.contains(&"set graphics".to_string()));
+    assert!(set.contains(&"set theme".to_string()));
+    assert!(set.contains(&"set scrolloff".to_string()));
     assert!(yute::commands::parse(":sidebar toggle").is_ok());
     assert!(yute::commands::parse(":keys").is_ok());
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -259,7 +265,10 @@ fn active_playback_reserves_exactly_one_row_above_footer() {
         assert!(idle.player.is_empty());
         assert_eq!(active.player.height, 1);
         assert_eq!(active.player.bottom(), active.actions.y);
-        assert_eq!(idle.content.height, active.content.height + 1);
+        assert_eq!(
+            idle.content.height,
+            active.content.height + u16::from(idle.actions.is_empty())
+        );
         app.player.status.title = "Playback fixture".into();
         app.player.status.time_pos = 751.0;
         app.player.status.duration = 2892.0;

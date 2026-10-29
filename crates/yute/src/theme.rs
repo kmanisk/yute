@@ -316,12 +316,10 @@ impl Theme {
             std::fs::read_to_string(path)?
         } else {
             match name.as_str() {
-                "gruvbox-dark" | "youtube-dark" => {
-                    include_str!("../themes/gruvbox-dark.toml").into()
-                }
-                "gruvbox-light" | "youtube-light" => {
-                    include_str!("../themes/gruvbox-light.toml").into()
-                }
+                "gruvbox-dark" => include_str!("../themes/gruvbox-dark.toml").into(),
+                "gruvbox-light" => include_str!("../themes/gruvbox-light.toml").into(),
+                "youtube" | "youtube-dark" => include_str!("../themes/youtube-dark.toml").into(),
+                "youtube-light" => include_str!("../themes/gruvbox-light.toml").into(),
                 _ => bail!("Theme not found: {name}"),
             }
         };
@@ -333,7 +331,7 @@ impl Theme {
         Self::resolve(&c, None).unwrap_or_else(|_| Self::terminal())
     }
     pub fn youtube_dark() -> Self {
-        Self::load("gruvbox-dark")
+        Self::load("youtube-dark")
     }
     pub fn youtube_light() -> Self {
         Self::load("gruvbox-light")
@@ -374,6 +372,7 @@ impl Theme {
             "auto".into(),
             "gruvbox-dark".into(),
             "gruvbox-light".into(),
+            "youtube-dark".into(),
         ];
         if let Ok(entries) = std::fs::read_dir(crate::config::config_dir().join("themes")) {
             for entry in entries.flatten() {

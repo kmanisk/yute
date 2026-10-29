@@ -3,8 +3,10 @@ use ratatui::layout::Size;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{BufReader, Cursor};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::Notify;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -15,6 +17,15 @@ struct CoverKey {
 }
 use yute_core::media::cache::DiskCache;
 use yute_core::media::thumbs::ThumbnailLoader;
+
+struct AnimatedCover {
+    frames: Vec<EncodedCover>,
+    delays: Vec<Duration>,
+    index: usize,
+    next_at: Instant,
+}
+
+type AnimatedResult = (CoverKey, Option<(Vec<EncodedCover>, Vec<Duration>)>);
 
 pub struct ThumbnailManager {
     trace_requests: HashMap<CoverKey, (std::time::Instant, bool)>,
@@ -31,6 +42,12 @@ pub struct ThumbnailManager {
     cover_failed: HashSet<CoverKey>,
     disk_checked: HashSet<CoverKey>,
     wanted: HashSet<String>,
+    animated: HashMap<CoverKey, AnimatedCover>,
+    animated_pending: HashSet<CoverKey>,
+    animated_failed: HashSet<CoverKey>,
+    animated_wanted: HashSet<CoverKey>,
+    animated_tx: Sender<AnimatedResult>,
+    animated_rx: Receiver<AnimatedResult>,
     notify: Arc<Notify>,
     cover_tx: Sender<(CoverKey, Option<EncodedCover>, bool)>,
     cover_rx: Receiver<(CoverKey, Option<EncodedCover>, bool)>,
@@ -39,11 +56,18 @@ pub struct ThumbnailManager {
 impl ThumbnailManager {
     pub fn new(picker: Picker, cache: DiskCache) -> Self {
         let (cover_tx, cover_rx) = channel();
+        let (animated_tx, animated_rx) = channel();
         let loader = ThumbnailLoader::new(cache);
         let notify = loader.notifier();
         Self {
             disk_checked: HashSet::new(),
             wanted: HashSet::new(),
+            animated: HashMap::new(),
+            animated_pending: HashSet::new(),
+            animated_failed: HashSet::new(),
+            animated_wanted: HashSet::new(),
+            animated_tx,
+            animated_rx,
             notify,
             trace_requests: HashMap::new(),
             trace_completed: HashSet::new(),
@@ -82,6 +106,7 @@ impl ThumbnailManager {
     }
     pub fn begin_frame(&mut self) {
         self.wanted.clear();
+        self.animated_wanted.clear();
     }
     pub fn finish_frame(&mut self, preloads: Vec<String>, width: u32, height: u32) {
         for (index, url) in preloads.into_iter().enumerate() {
@@ -146,6 +171,27 @@ impl ThumbnailManager {
                 } else {
                     self.cover_failed.insert(key);
                 }
+            }
+        }
+        while let Ok((key, result)) = self.animated_rx.try_recv() {
+            self.animated_pending.remove(&key);
+            has_loaded = true;
+            if let Some((frames, delays)) = result.filter(|(frames, _)| !frames.is_empty()) {
+                let first_delay = delays
+                    .first()
+                    .copied()
+                    .unwrap_or(Duration::from_millis(120));
+                self.animated.insert(
+                    key,
+                    AnimatedCover {
+                        frames,
+                        delays,
+                        index: 0,
+                        next_at: Instant::now() + first_delay,
+                    },
+                );
+            } else {
+                self.animated_failed.insert(key);
             }
         }
         for (url, img) in loaded_images {
@@ -256,6 +302,85 @@ impl ThumbnailManager {
         None
     }
 
+    /// Animated comment media is loaded only when visible. Decoding and terminal
+    /// encoding are bounded so a GIF cannot create an unbounded redraw or memory loop.
+    pub fn get_animated_cover_protocol(&mut self, url: &str, size: Size) -> Option<&EncodedCover> {
+        if size.width == 0 || size.height == 0 {
+            return None;
+        }
+        let key = CoverKey {
+            url: url.to_string(),
+            size,
+            generation: self.generation,
+        };
+        self.animated_wanted.insert(key.clone());
+        if let Some(animation) = self.animated.get_mut(&key) {
+            if animation.frames.len() > 1 && Instant::now() >= animation.next_at {
+                animation.index = (animation.index + 1) % animation.frames.len();
+                animation.frames[animation.index].invalidate();
+                let delay = animation
+                    .delays
+                    .get(animation.index)
+                    .copied()
+                    .unwrap_or(Duration::from_millis(120));
+                animation.next_at = Instant::now() + delay;
+            }
+            return animation.frames.get(animation.index);
+        }
+        if self.animated_pending.contains(&key) || self.animated_failed.contains(&key) {
+            return None;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return None;
+        };
+        self.animated_pending.insert(key.clone());
+        let picker = self.picker.clone();
+        let tx = self.animated_tx.clone();
+        let notify = self.notify.clone();
+        let request_key = key.clone();
+        runtime.spawn(async move {
+            let bytes = match yute_core::http::client()
+                .get(&request_key.url)
+                .timeout(Duration::from_secs(12))
+                .send()
+                .await
+            {
+                Ok(response) if response.status().is_success() => response.bytes().await.ok(),
+                _ => None,
+            };
+            let result = if let Some(bytes) = bytes.filter(|bytes| bytes.len() <= 12 * 1024 * 1024)
+            {
+                let size = request_key.size;
+                tokio::task::spawn_blocking(move || decode_animation(&bytes, picker, size))
+                    .await
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
+            let _ = tx.send((request_key, result));
+            notify.notify_one();
+        });
+        None
+    }
+
+    pub fn has_active_animation(&self) -> bool {
+        self.animated_wanted.iter().any(|key| {
+            self.animated
+                .get(key)
+                .is_some_and(|animation| animation.frames.len() > 1)
+        })
+    }
+
+    pub fn animation_due(&self) -> bool {
+        let now = Instant::now();
+        self.animated_wanted.iter().any(|key| {
+            self.animated
+                .get(key)
+                .is_some_and(|animation| animation.frames.len() > 1 && now >= animation.next_at)
+        })
+    }
+
     pub fn is_portrait(&self, url: &str) -> bool {
         let Some(protocol) = self.ram_lru.get(url) else {
             return false;
@@ -327,6 +452,10 @@ impl ThumbnailManager {
         self.cover_order.clear();
         self.cover_pending.clear();
         self.cover_failed.clear();
+        self.animated.clear();
+        self.animated_pending.clear();
+        self.animated_failed.clear();
+        self.animated_wanted.clear();
         self.disk_checked.clear();
         self.trace_requests.clear();
         self.trace_completed.clear();
@@ -334,6 +463,63 @@ impl ThumbnailManager {
         self.ram_lru.clear();
         self.lru_order.clear();
     }
+}
+
+fn decode_animation(
+    bytes: &[u8],
+    picker: Picker,
+    size: Size,
+) -> Option<(Vec<EncodedCover>, Vec<Duration>)> {
+    use image::AnimationDecoder;
+    let format = image::guess_format(bytes).ok()?;
+    let frames = match format {
+        image::ImageFormat::Gif => {
+            let decoder =
+                image::codecs::gif::GifDecoder::new(BufReader::new(Cursor::new(bytes))).ok()?;
+            decoder
+                .into_frames()
+                .take(24)
+                .collect::<image::ImageResult<Vec<_>>>()
+                .ok()?
+        }
+        image::ImageFormat::WebP => {
+            let decoder = image::codecs::webp::WebPDecoder::new(Cursor::new(bytes)).ok()?;
+            decoder
+                .into_frames()
+                .take(24)
+                .collect::<image::ImageResult<Vec<_>>>()
+                .ok()?
+        }
+        _ => return None,
+    };
+    if frames.is_empty() {
+        return None;
+    }
+    let font = picker.font_size();
+    let pixel_w = u32::from(size.width) * u32::from(font.width.max(1));
+    let pixel_h = u32::from(size.height) * u32::from(font.height.max(1));
+    // Prevent pathological comment media from dominating encode time/RAM.
+    if pixel_w.saturating_mul(pixel_h) > 1_500_000 {
+        return None;
+    }
+    let mut encoded = Vec::with_capacity(frames.len());
+    let mut delays = Vec::with_capacity(frames.len());
+    for frame in frames {
+        let (num, den) = frame.delay().numer_denom_ms();
+        let ms = if den == 0 {
+            120
+        } else {
+            (u64::from(num) / u64::from(den)).clamp(70, 1000)
+        };
+        let image = image::DynamicImage::ImageRgba8(frame.into_buffer());
+        let image = yute_core::media::thumbs::resize(&image, pixel_w, pixel_h, false);
+        let protocol = picker
+            .new_protocol(image, size, ratatui_image::Resize::Fit(None))
+            .ok()?;
+        encoded.push(EncodedCover::new(&protocol, size));
+        delays.push(Duration::from_millis(ms));
+    }
+    Some((encoded, delays))
 }
 
 pub use yute_core::media::thumbs::cache_key_for_url;

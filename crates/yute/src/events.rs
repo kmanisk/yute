@@ -43,6 +43,13 @@ pub enum AppEvent {
         String,
         anyhow::Result<crate::backend::models::CommentsBatch>,
     ),
+    CommentThreadLoaded(
+        u64,
+        String,
+        usize,
+        String,
+        anyhow::Result<crate::backend::models::CommentsBatch>,
+    ),
     StatusMessage(String),
     MenuFormats(
         u64,

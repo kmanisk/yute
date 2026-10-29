@@ -24,20 +24,20 @@ pub fn render_chips(f: &mut Frame, app: &App, area: Rect) {
 
         let style = if is_active {
             app.theme
-                .style("chip_active")
+                .style("accent")
                 .add_modifier(if app.focus == Focus::Chips {
                     Modifier::BOLD | Modifier::UNDERLINED
                 } else {
-                    Modifier::BOLD
+                    Modifier::BOLD | Modifier::UNDERLINED
                 })
         } else {
-            app.theme.style("text_dim")
+            app.theme.style("text_dim").add_modifier(Modifier::DIM)
         };
 
         if !spans.is_empty() {
             spans.push(Span::raw(" "));
         }
-        spans.push(Span::styled(format!(" {} ", filter.label()), style));
+        spans.push(Span::styled(filter.label(), style));
     }
 
     let p = Paragraph::new(Line::from(spans)).scroll((0, active_end.saturating_sub(area.width)));

@@ -169,6 +169,21 @@ pub struct FeedPage {
     pub continuation: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommentMediaKind {
+    Image,
+    Gif,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CommentMedia {
+    pub url: String,
+    pub kind: CommentMediaKind,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CommentItem {
     pub id: String,
@@ -178,10 +193,24 @@ pub struct CommentItem {
     pub published: Option<String>,
     pub likes: Option<String>,
     pub reply_count: Option<u32>,
+    #[serde(default)]
+    pub media: Vec<CommentMedia>,
+    #[serde(default)]
+    pub is_liked: bool,
+    #[serde(default)]
+    pub is_disliked: bool,
+    /// Continuation for the focused comment detail. Current TV responses put
+    /// reaction/reply actions there rather than on the list item itself.
+    #[serde(default, skip_serializing)]
+    pub detail_token: Option<String>,
     #[serde(default, skip_serializing)]
     pub like_action: Option<String>,
     #[serde(default, skip_serializing)]
+    pub unlike_action: Option<String>,
+    #[serde(default, skip_serializing)]
     pub dislike_action: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub undislike_action: Option<String>,
     #[serde(default, skip_serializing)]
     pub reply_params: Option<String>,
     #[serde(default, skip_serializing)]

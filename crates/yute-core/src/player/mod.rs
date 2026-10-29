@@ -163,21 +163,29 @@ impl Player {
                 .arg(format!("--hwdec={hwdec}"))
                 .arg("--vo=gpu-next")
                 .arg("--cache=yes")
+                // Keep a bounded but generous seek cache. Large YouTube DASH
+                // jumps otherwise discard almost everything and can sit waiting
+                // on a fresh range request for far too long.
                 .arg(format!(
                     "--demuxer-max-bytes={}MiB",
-                    cfg.playback.stream_cache_mb()
+                    cfg.playback.stream_cache_mb().max(192)
                 ))
-                .arg("--demuxer-max-back-bytes=32MiB")
+                .arg("--demuxer-max-back-bytes=96MiB")
                 .arg(format!(
                     "--cache-secs={}",
-                    cfg.playback.stream_cache_seconds.clamp(5, 60)
+                    cfg.playback.stream_cache_seconds.clamp(20, 60)
                 ))
                 .arg(format!(
                     "--demuxer-readahead-secs={}",
-                    cfg.playback.stream_cache_seconds.clamp(5, 60)
+                    cfg.playback.stream_cache_seconds.clamp(20, 60)
                 ))
-                .arg("--cache-pause-wait=1")
+                .arg("--cache-pause=yes")
+                .arg("--cache-pause-wait=0.5")
+                .arg("--stream-buffer-size=4MiB")
+                .arg("--network-timeout=12")
+                .arg("--stream-lavf-o=reconnect=1,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,reconnect_streamed=1,reconnect_delay_max=2,reconnect_max_retries=6,reconnect_delay_total_max=12")
                 .arg("--demuxer-seekable-cache=yes")
+                .arg("--script-opts=osc-seekbarkeyframes=yes")
                 .arg("--hr-seek=no");
 
             if !cfg.playback.osd_bar {

@@ -30,6 +30,8 @@ pub struct Config {
     pub text: TextConfig,
     #[serde(default)]
     pub downloads: DownloadConfig,
+    #[serde(default)]
+    pub keys: KeyConfig,
 }
 
 impl Config {
@@ -52,6 +54,34 @@ pub struct UiConfig {
     pub action_bar: String,
     #[serde(default)]
     pub sidebar_channels: bool,
+    /// Vim-style context kept above/below the selected row when possible.
+    #[serde(default = "default_scrolloff")]
+    pub scrolloff: u16,
+    #[serde(default = "default_true")]
+    pub quit_on_home_only: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KeyConfig {
+    /// Configurable two-key or modified-key aliases. Examples: "space e", "alt-e".
+    pub sidebar: String,
+    pub sidebar_alt: String,
+    pub copy_url: String,
+    pub center: String,
+    pub quit: String,
+}
+
+impl Default for KeyConfig {
+    fn default() -> Self {
+        Self {
+            sidebar: "space e".into(),
+            sidebar_alt: "alt-e".into(),
+            copy_url: "yy".into(),
+            center: "zz".into(),
+            quit: "q".into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -348,9 +378,7 @@ pub struct LocalConfig {
 
 impl Default for LocalConfig {
     fn default() -> Self {
-        Self {
-            dirs: vec!["~/Videos".to_string()],
-        }
+        Self { dirs: Vec::new() }
     }
 }
 
@@ -370,6 +398,7 @@ impl Default for Config {
             ui: UiConfig::default(),
             text: TextConfig::default(),
             downloads: DownloadConfig::default(),
+            keys: KeyConfig::default(),
         }
     }
 }
@@ -418,7 +447,9 @@ impl Config {
             resolve_path("~/.config/ytui/config.toml")
         };
         if !path.exists() {
-            return Ok(Self::default());
+            let mut cfg = Self::default();
+            cfg.apply_env_overrides();
+            return Ok(cfg);
         }
         let content = fs::read_to_string(&path)
             .map_err(|_| anyhow::anyhow!("Cannot read config.toml; check file permissions"))?;
@@ -431,8 +462,45 @@ impl Config {
         {
             cfg.backend.cookies_file = "~/.config/yute/cookies.txt".into();
         }
+        cfg.apply_env_overrides();
         Ok(cfg)
     }
+    fn apply_env_overrides(&mut self) {
+        if let Ok(value) = std::env::var("YUTE_THEME") {
+            if !value.trim().is_empty() {
+                self.general.theme = value;
+            }
+        }
+        if let Ok(value) = std::env::var("YUTE_GRAPHICS") {
+            if !value.trim().is_empty() {
+                self.general.graphics = value;
+            }
+        }
+        if let Ok(value) = std::env::var("YUTE_DOWNLOAD_DIR") {
+            if !value.trim().is_empty() {
+                self.downloads.directory = value;
+            }
+        }
+        if let Ok(value) = std::env::var("YUTE_SCROLLOFF") {
+            if let Ok(value) = value.parse::<u16>() {
+                self.ui.scrolloff = value.min(12);
+            }
+        }
+        for (name, target) in [
+            ("YUTE_KEY_SIDEBAR", &mut self.keys.sidebar),
+            ("YUTE_KEY_SIDEBAR_ALT", &mut self.keys.sidebar_alt),
+            ("YUTE_KEY_COPY_URL", &mut self.keys.copy_url),
+            ("YUTE_KEY_CENTER", &mut self.keys.center),
+            ("YUTE_KEY_QUIT", &mut self.keys.quit),
+        ] {
+            if let Ok(value) = std::env::var(name) {
+                if !value.trim().is_empty() {
+                    *target = value;
+                }
+            }
+        }
+    }
+
     pub fn parse_checked(content: &str) -> anyhow::Result<Self> {
         toml::from_str(content).map_err(|_| anyhow::anyhow!("Invalid config.toml: malformed TOML, invalid field types or missing required fields (values redacted)"))
     }
@@ -536,6 +604,12 @@ mod migration_tests {
     }
 }
 
+fn default_scrolloff() -> u16 {
+    2
+}
+fn default_true() -> bool {
+    true
+}
 fn auto_mode() -> String {
     "auto".into()
 }
@@ -589,6 +663,8 @@ impl Default for UiConfig {
             strip_emoji: false,
             action_bar: auto_mode(),
             sidebar_channels: false,
+            scrolloff: default_scrolloff(),
+            quit_on_home_only: true,
         }
     }
 }

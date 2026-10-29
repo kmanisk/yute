@@ -92,6 +92,9 @@ pub trait Backend: Send + Sync {
     async fn remove_rating(&self, _video_id: &str) -> anyhow::Result<()> {
         anyhow::bail!("Remove rating not supported by this backend")
     }
+    async fn remove_dislike(&self, _video_id: &str) -> anyhow::Result<()> {
+        anyhow::bail!("Remove dislike not supported by this backend")
+    }
     async fn subscribe_channel(&self, _channel_id: &str) -> anyhow::Result<()> {
         anyhow::bail!("Subscribe not supported by this backend")
     }
@@ -102,6 +105,12 @@ pub trait Backend: Send + Sync {
         anyhow::bail!("RYD not supported by this backend")
     }
     async fn comment_action(&self, _action: &str) -> anyhow::Result<()> {
+        anyhow::bail!("Comment reactions are unavailable from this client")
+    }
+    /// Toggle a comment reaction from the comment detail continuation. Current
+    /// YouTube TV list rows intentionally omit the mutation token; the focused
+    /// detail response contains the authoritative toggle endpoint.
+    async fn react_comment(&self, _detail_token: &str, _dislike: bool) -> anyhow::Result<()> {
         anyhow::bail!("Comment reactions are unavailable from this client")
     }
     async fn submit_comment(&self, _params: &str, _text: &str, _reply: bool) -> anyhow::Result<()> {
@@ -423,6 +432,13 @@ impl Backend for BackendChain {
             .remove_rating(video_id)
             .await
     }
+    async fn remove_dislike(&self, video_id: &str) -> anyhow::Result<()> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .remove_dislike(video_id)
+            .await
+    }
 
     async fn subscribe_channel(&self, channel_id: &str) -> anyhow::Result<()> {
         self.backends
@@ -454,6 +470,14 @@ impl Backend for BackendChain {
             .first()
             .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
             .comment_action(action)
+            .await
+    }
+
+    async fn react_comment(&self, detail_token: &str, dislike: bool) -> anyhow::Result<()> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .react_comment(detail_token, dislike)
             .await
     }
 

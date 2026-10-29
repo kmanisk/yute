@@ -853,7 +853,22 @@ impl Backend for InnerTubeBackend {
                 "videoId": video_id
             }
         }));
-        let response = self.post_endpoint("like/removelike", body).await?;
+        let response = self
+            .post_endpoint(rating_remove_endpoint(false), body)
+            .await?;
+        acknowledge_mutation(&response)
+    }
+
+    async fn remove_dislike(&self, video_id: &str) -> Result<()> {
+        self.require_account()?;
+        let body = self.make_body(json!({
+            "target": {
+                "videoId": video_id
+            }
+        }));
+        let response = self
+            .post_endpoint(rating_remove_endpoint(true), body)
+            .await?;
         acknowledge_mutation(&response)
     }
 
@@ -901,6 +916,18 @@ impl Backend for InnerTubeBackend {
         }
         Ok(())
     }
+    async fn react_comment(&self, detail_token: &str, dislike: bool) -> Result<()> {
+        self.require_account()?;
+        let detail = self
+            .post_endpoint(
+                "next",
+                self.make_body(json!({"continuation": detail_token})),
+            )
+            .await?;
+        let action = comment_detail_reaction_action(&detail, dislike)
+            .context("YouTube did not expose this comment reaction")?;
+        self.comment_action(&action).await
+    }
     async fn submit_comment(&self, params: &str, text: &str, reply: bool) -> Result<()> {
         self.require_account()?;
         if text.trim().is_empty() || text.chars().count() > 10000 {
@@ -931,6 +958,68 @@ impl Backend for InnerTubeBackend {
         let val = self.post_endpoint("next", body).await?;
         Ok(parse_comments(&val))
     }
+}
+
+fn rating_remove_endpoint(disliked: bool) -> &'static str {
+    if disliked {
+        "like/removedislike"
+    } else {
+        "like/removelike"
+    }
+}
+
+fn comment_detail_reaction_action(value: &Value, dislike: bool) -> Option<String> {
+    fn active_comment(value: &Value) -> Option<&Value> {
+        if let Some(comment) = value.get("commentRenderer") {
+            if comment
+                .pointer("/actionButtons/commentActionButtonsRenderer")
+                .is_some()
+            {
+                return Some(comment);
+            }
+        }
+        match value {
+            Value::Object(map) => map.values().find_map(active_comment),
+            Value::Array(items) => items.iter().find_map(active_comment),
+            _ => None,
+        }
+    }
+    fn action(endpoint: Option<&Value>) -> Option<String> {
+        endpoint
+            .and_then(|value| {
+                crate::backend::parse::find_json_key(value, "performCommentActionEndpoint")
+            })
+            .and_then(|value| value.get("action"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+    let comment = active_comment(value)?;
+    let button = comment
+        .pointer("/actionButtons/commentActionButtonsRenderer")?
+        .get(if dislike {
+            "dislikeButton"
+        } else {
+            "likeButton"
+        })?;
+    let renderer = crate::backend::parse::find_json_key(button, "toggleButtonRenderer")?;
+    let toggled = if dislike {
+        renderer
+            .get("isToggled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    } else {
+        comment
+            .get("isLiked")
+            .and_then(Value::as_bool)
+            .or_else(|| renderer.get("isToggled").and_then(Value::as_bool))
+            .unwrap_or(false)
+    };
+    let key = if toggled {
+        "toggledServiceEndpoint"
+    } else {
+        "defaultServiceEndpoint"
+    };
+    action(renderer.get(key))
 }
 
 /// Empty account pages need an explicit empty renderer/container. Unknown or
@@ -1007,6 +1096,41 @@ mod account_feed_tests {
             Some("yute:account:next-subs-page")
         );
     }
+    #[test]
+    fn rating_removal_uses_distinct_like_and_dislike_endpoints() {
+        assert_eq!(rating_remove_endpoint(false), "like/removelike");
+        assert_eq!(rating_remove_endpoint(true), "like/removedislike");
+    }
+
+    #[test]
+    fn comment_detail_reactions_follow_active_toggle_endpoints() {
+        let value = json!({
+            "commentRenderer": {
+                "isLiked": true,
+                "actionButtons": {"commentActionButtonsRenderer": {
+                    "likeButton": {"toggleButtonRenderer": {
+                        "isToggled": true,
+                        "defaultServiceEndpoint": {"performCommentActionEndpoint": {"action": "like"}},
+                        "toggledServiceEndpoint": {"performCommentActionEndpoint": {"action": "unlike"}}
+                    }},
+                    "dislikeButton": {"toggleButtonRenderer": {
+                        "isToggled": false,
+                        "defaultServiceEndpoint": {"performCommentActionEndpoint": {"action": "dislike"}},
+                        "toggledServiceEndpoint": {"performCommentActionEndpoint": {"action": "undislike"}}
+                    }}
+                }}
+            }
+        });
+        assert_eq!(
+            comment_detail_reaction_action(&value, false).as_deref(),
+            Some("unlike")
+        );
+        assert_eq!(
+            comment_detail_reaction_action(&value, true).as_deref(),
+            Some("dislike")
+        );
+    }
+
     #[tokio::test]
     async fn legacy_session_cannot_fetch_account_libraries() {
         let auth = AuthContext {

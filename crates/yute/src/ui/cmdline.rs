@@ -160,10 +160,7 @@ pub fn render_cmdline(f: &mut Frame, app: &App) {
     for (i, name) in choices.iter().enumerate().skip(start).take(rows) {
         let selected = i == app.completion_index;
         let style = if selected {
-            app.theme
-                .style("accent")
-                .patch(app.theme.style("selection"))
-                .add_modifier(Modifier::BOLD)
+            app.theme.style("accent").add_modifier(Modifier::BOLD)
         } else {
             app.theme.style("text")
         };

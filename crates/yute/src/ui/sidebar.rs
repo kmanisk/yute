@@ -74,7 +74,7 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(block, area);
     let mut lines = Vec::new();
     let mut cursor_line = 0usize;
-    for (i, (name, _, hint)) in SIDEBAR_ITEMS.iter().enumerate() {
+    for (i, (name, _, _hint)) in SIDEBAR_ITEMS.iter().enumerate() {
         if i == 3 || i == 8 {
             lines.push(Line::from(""));
         }
@@ -113,7 +113,8 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
             Icon::Settings,
         ][i];
         let label = icon.label(app.config.icons(), name);
-        let hint = if inner.width < 20 { "" } else { *hint };
+        // Keep route chords in Help instead of repeating them on every row.
+        let hint = "";
         let name = super::text::truncate_str(
             &label,
             inner.width.saturating_sub(3 + hint.width() as u16) as usize,
@@ -130,11 +131,7 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
                 app.theme.style("text_dim").add_modifier(Modifier::DIM),
             ),
         ]);
-        lines.push(if cursor {
-            line.style(app.theme.style("selection"))
-        } else {
-            line
-        });
+        lines.push(line);
     }
     if app.config.ui.sidebar_channels
         && app.terminal_height >= 30
@@ -151,11 +148,11 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
                     card.title(),
                     inner.width as usize,
                 ))
-                .style(app.theme.style(if current {
-                    "selection"
+                .style(if current {
+                    app.theme.style("accent").add_modifier(Modifier::BOLD)
                 } else {
-                    "text_dim"
-                })),
+                    app.theme.style("text_dim")
+                }),
             );
         }
     }

@@ -719,30 +719,28 @@ pub fn parse_tile_renderer(v: &Value) -> Option<Card> {
             .skip(start_idx)
             .filter(|s| !s.chars().all(|c| matches!(c, '•' | '·' | ' ' | '|')))
         {
-            if item.contains("view")
+            if (item.contains("view")
                 || item.contains("watching")
                 || item.ends_with('M')
                 || item.ends_with('K')
-                || item.ends_with('B')
+                || item.ends_with('B'))
+                && views.is_none()
             {
-                if views.is_none() {
-                    views = Some(item.clone());
-                    continue;
-                }
+                views = Some(item.clone());
+                continue;
             }
-            if item.contains("ago")
+            if (item.contains("ago")
                 || item.contains("Streamed")
                 || item.contains("Premier")
                 || item.contains("year")
                 || item.contains("month")
                 || item.contains("day")
                 || item.contains("hour")
-                || item.contains("minute")
+                || item.contains("minute"))
+                && published.is_none()
             {
-                if published.is_none() {
-                    published = Some(item.clone());
-                    continue;
-                }
+                published = Some(item.clone());
+                continue;
             }
             if views.is_none() {
                 views = Some(item.clone());
@@ -1462,10 +1460,124 @@ pub fn find_json_key<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
 }
 
 pub fn parse_comments(val: &Value) -> CommentsBatch {
+    use crate::backend::models::{CommentMedia, CommentMediaKind};
+
     fn action(value: &Value, key: &str) -> Option<String> {
         find_json_key(value, key)
             .and_then(Value::as_str)
             .map(str::to_string)
+    }
+    fn continuation(value: &Value) -> Option<String> {
+        find_json_key(value, "continuationCommand")
+            .and_then(|v| v.get("token"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                find_json_key(value, "reloadContinuationData")
+                    .and_then(|v| v.get("continuation"))
+                    .and_then(Value::as_str)
+            })
+            .map(str::to_string)
+    }
+    fn button_action(button: Option<&Value>, toggled: bool) -> Option<String> {
+        let endpoint = if toggled {
+            "toggledServiceEndpoint"
+        } else {
+            "defaultServiceEndpoint"
+        };
+        button
+            .and_then(|value| find_json_key(value, endpoint))
+            .and_then(|value| find_json_key(value, "performCommentActionEndpoint"))
+            .and_then(|value| value.get("action"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }
+    fn media(value: &Value) -> Vec<CommentMedia> {
+        fn add(
+            out: &mut Vec<CommentMedia>,
+            url: &str,
+            kind: CommentMediaKind,
+            width: Option<u32>,
+            height: Option<u32>,
+        ) {
+            if url.is_empty() || out.iter().any(|m| m.url == url) {
+                return;
+            }
+            out.push(CommentMedia {
+                url: crate::media::thumbs::normalize_thumbnail_url(url).into_owned(),
+                kind,
+                width,
+                height,
+            });
+        }
+        fn walk(value: &Value, path: &str, out: &mut Vec<CommentMedia>) {
+            match value {
+                Value::Object(map) => {
+                    if let Some(url) = map.get("imageUrl").and_then(Value::as_str) {
+                        let kind = if path.to_ascii_lowercase().contains("gif")
+                            || path.to_ascii_lowercase().contains("animated")
+                            || url.to_ascii_lowercase().contains(".gif")
+                        {
+                            CommentMediaKind::Gif
+                        } else {
+                            CommentMediaKind::Image
+                        };
+                        add(out, url, kind, None, None);
+                    }
+                    for (key, child) in map {
+                        // Author avatars are rendered separately. Only attachment/image
+                        // renderers belong to the body of a comment.
+                        let lower = key.to_ascii_lowercase();
+                        let child_path = if path.is_empty() {
+                            key.clone()
+                        } else {
+                            format!("{path}.{key}")
+                        };
+                        if (lower.contains("gif")
+                            || lower.contains("animatedimage")
+                            || lower.contains("commentimage")
+                            || lower.contains("attachment"))
+                            && key != "authorThumbnail"
+                        {
+                            let url = extract_best_thumbnail(child);
+                            if !url.is_empty() {
+                                let thumb = find_json_key(child, "thumbnails")
+                                    .and_then(Value::as_array)
+                                    .and_then(|a| a.last());
+                                add(
+                                    out,
+                                    &url,
+                                    if lower.contains("gif") || lower.contains("animated") {
+                                        CommentMediaKind::Gif
+                                    } else {
+                                        CommentMediaKind::Image
+                                    },
+                                    thumb
+                                        .and_then(|v| v.get("width"))
+                                        .and_then(Value::as_u64)
+                                        .map(|v| v as u32),
+                                    thumb
+                                        .and_then(|v| v.get("height"))
+                                        .and_then(Value::as_u64)
+                                        .map(|v| v as u32),
+                                );
+                            }
+                        }
+                        if key != "authorThumbnail" {
+                            walk(child, &child_path, out);
+                        }
+                    }
+                }
+                Value::Array(items) => {
+                    for child in items {
+                        walk(child, path, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        walk(value, "", &mut out);
+        out
     }
     fn walk(value: &Value, comments: &mut Vec<CommentItem>) {
         if let Some(comment) = value.get("commentRenderer") {
@@ -1477,8 +1589,31 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
                 .get("contentText")
                 .map(extract_text)
                 .unwrap_or_default();
-            if !author.is_empty() && !text.is_empty() {
+            let media = media(comment);
+            if !author.is_empty() && (!text.is_empty() || !media.is_empty()) {
                 let buttons = comment.pointer("/actionButtons/commentActionButtonsRenderer");
+                let like_button = buttons.and_then(|b| b.get("likeButton"));
+                let dislike_button = buttons.and_then(|b| b.get("dislikeButton"));
+                let detail_token = comment
+                    .get("detailViewEndpoint")
+                    .and_then(continuation)
+                    .or_else(|| continuation(comment));
+                let reply_count = comment
+                    .get("replyCount")
+                    .and_then(Value::as_u64)
+                    .or_else(|| {
+                        comment
+                            .get("replyCount")
+                            .map(extract_text)
+                            .and_then(|text| {
+                                text.split_whitespace()
+                                    .next()?
+                                    .replace(',', "")
+                                    .parse::<u64>()
+                                    .ok()
+                            })
+                    })
+                    .map(|n| n as u32);
                 comments.push(CommentItem {
                     id: comment
                         .get("commentId")
@@ -1487,26 +1622,31 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
                         .into(),
                     author,
                     text,
-                    author_thumb: comment.get("authorThumbnail").map(extract_best_thumbnail),
+                    author_thumb: comment
+                        .get("authorThumbnail")
+                        .map(extract_best_thumbnail)
+                        .filter(|url| !url.is_empty()),
                     published: comment.get("publishedTimeText").map(extract_text),
                     likes: comment.get("voteCount").map(extract_text),
-                    reply_count: comment
-                        .get("replyCount")
-                        .and_then(Value::as_u64)
-                        .map(|n| n as u32),
-                    like_action: buttons
-                        .and_then(|b| b.get("likeButton"))
-                        .and_then(|b| find_json_key(b, "defaultServiceEndpoint"))
-                        .and_then(|b| action(b, "action")),
-                    dislike_action: buttons
-                        .and_then(|b| b.get("dislikeButton"))
-                        .and_then(|b| find_json_key(b, "defaultServiceEndpoint"))
-                        .and_then(|b| action(b, "action")),
+                    reply_count,
+                    media,
+                    is_liked: comment
+                        .get("isLiked")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    is_disliked: dislike_button
+                        .and_then(|b| find_json_key(b, "isToggled"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    detail_token: detail_token.clone(),
+                    like_action: button_action(like_button, false),
+                    unlike_action: button_action(like_button, true),
+                    dislike_action: button_action(dislike_button, false),
+                    undislike_action: button_action(dislike_button, true),
                     reply_params: action(comment, "createReplyParams"),
-                    replies_token: find_json_key(comment, "continuationCommand")
-                        .and_then(|v| v.get("token"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
+                    // Current TV list rows use detailViewEndpoint for both the
+                    // focused comment and its reply thread, matching SmartTube.
+                    replies_token: reply_count.filter(|n| *n > 0).and(detail_token),
                 });
             }
             return;
@@ -1521,7 +1661,8 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
                 .pointer("/author/displayName")
                 .map(extract_text)
                 .unwrap_or_default();
-            if !author.is_empty() && !text.is_empty() {
+            let media = media(entity);
+            if !author.is_empty() && (!text.is_empty() || !media.is_empty()) {
                 comments.push(CommentItem {
                     id: properties
                         .get("commentId")
@@ -1530,16 +1671,31 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
                         .into(),
                     author,
                     text,
-                    author_thumb: None,
+                    author_thumb: entity
+                        .pointer("/avatar/image")
+                        .map(extract_best_thumbnail)
+                        .filter(|url| !url.is_empty()),
                     published: properties.get("publishedTime").map(extract_text),
                     likes: entity
                         .pointer("/toolbar/likeCountNotliked")
                         .map(extract_text),
-                    reply_count: None,
+                    reply_count: entity
+                        .pointer("/toolbar/replyCount")
+                        .and_then(Value::as_u64)
+                        .map(|n| n as u32),
+                    media,
+                    is_liked: entity
+                        .pointer("/toolbar/likeState")
+                        .and_then(Value::as_str)
+                        .is_some_and(|v| v.eq_ignore_ascii_case("liked")),
+                    is_disliked: false,
+                    detail_token: continuation(entity),
                     like_action: None,
+                    unlike_action: None,
                     dislike_action: None,
-                    reply_params: None,
-                    replies_token: None,
+                    undislike_action: None,
+                    reply_params: action(entity, "createReplyParams"),
+                    replies_token: continuation(entity),
                 });
             }
             return;
