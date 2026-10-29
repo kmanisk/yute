@@ -36,6 +36,7 @@ zeroize = { version = "1", features = ["derive"] }
 getrandom = "0.4"
 argon2 = "0.5.3"
 tempfile = "3"
+libc = "0.2"
 
 fast_image_resize = "6.1"
 

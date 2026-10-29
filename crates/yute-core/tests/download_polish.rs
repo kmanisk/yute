@@ -127,6 +127,43 @@ async fn cancellation_kills_owned_download_process() {
     }
     panic!("owned child survived cancellation");
 }
+#[tokio::test]
+#[cfg(unix)]
+async fn cancellation_also_terminates_download_conversion_descendants() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("worker-pid");
+    let mut cmd = tokio::process::Command::new("sh");
+    cmd.args([
+        "-c",
+        "sleep 30 & worker_pid=$!; echo \"$worker_pid\" > \"$1\"; wait",
+        "fixture",
+    ])
+    .arg(&file);
+    let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(downloads::run_command(cmd, tx));
+    for _ in 0..50 {
+        if file.exists() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let pid = std::fs::read_to_string(file).unwrap();
+    task.abort();
+    let _ = task.await;
+    for _ in 0..50 {
+        let stat = std::fs::read_to_string(format!("/proc/{}/stat", pid.trim()));
+        if stat.is_err()
+            || stat
+                .unwrap()
+                .rsplit_once(") ")
+                .is_some_and(|(_, tail)| tail.starts_with('Z'))
+        {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("download conversion descendant survived cancellation");
+}
 #[test]
 fn baked_thumbnail_bars_are_removed_only_with_strong_evidence() {
     use image::{DynamicImage, Rgb, RgbImage};

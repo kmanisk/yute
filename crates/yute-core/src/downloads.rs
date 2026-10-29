@@ -174,6 +174,11 @@ pub async fn run_command(
     mut command: tokio::process::Command,
     updates: UnboundedSender<Progress>,
 ) -> Result<Progress> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.as_std_mut().process_group(0);
+    }
     command
         .kill_on_drop(true)
         .stdin(Stdio::null())
@@ -182,6 +187,7 @@ pub async fn run_command(
     let mut child = command
         .spawn()
         .map_err(|_| anyhow::anyhow!("Cannot start yt-dlp; run yute doctor"))?;
+    let mut group = DownloadProcessGroup(child.id());
     let mut out = BufReader::new(child.stdout.take().unwrap()).lines();
     let mut err = BufReader::new(child.stderr.take().unwrap()).lines();
     let (mut stdout_open, mut stderr_open) = (true, true);
@@ -198,10 +204,28 @@ pub async fn run_command(
         }
     }
     let status = child.wait().await?;
+    group.0 = None;
     if !status.success() && progress.completed == 0 {
         bail!("yt-dlp exited with {}; check access, network, disk space and ffmpeg (private stderr suppressed)",status);
     }
     Ok(progress)
+}
+struct DownloadProcessGroup(Option<u32>);
+impl Drop for DownloadProcessGroup {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(id) = self
+            .0
+            .and_then(|id| i32::try_from(id).ok())
+            .filter(|id| *id > 0)
+        {
+            // The child was made leader of its own group before exec. Kill its
+            // descendants too, including an ffmpeg merge/conversion on cancellation.
+            unsafe {
+                libc::kill(-id, libc::SIGKILL);
+            }
+        }
+    }
 }
 pub fn update_progress(progress: &mut Progress, line: &str) {
     if line == "YUTE_DONE" {
