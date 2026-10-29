@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+mod comment_write;
 pub mod innertube;
 pub mod models;
 pub mod parse;
@@ -8,7 +9,9 @@ pub mod sponsorblock;
 pub mod ytdlp;
 
 use async_trait::async_trait;
-use models::{ChannelTab, ChatBatch, CommentsBatch, FeedPage, SearchFilters, WatchData};
+use models::{
+    ChannelTab, ChatBatch, CommentItem, CommentsBatch, FeedPage, SearchFilters, WatchData,
+};
 
 #[async_trait]
 pub trait Backend: Send + Sync {
@@ -113,8 +116,23 @@ pub trait Backend: Send + Sync {
     async fn react_comment(&self, _detail_token: &str, _dislike: bool) -> anyhow::Result<()> {
         anyhow::bail!("Comment reactions are unavailable from this client")
     }
-    async fn submit_comment(&self, _params: &str, _text: &str, _reply: bool) -> anyhow::Result<()> {
+    async fn create_comment(
+        &self,
+        _video_id: &str,
+        _text: &str,
+    ) -> anyhow::Result<Option<CommentItem>> {
         anyhow::bail!("Comment posting is unavailable from this client")
+    }
+    async fn create_reply(
+        &self,
+        _video_id: &str,
+        _parent_id: &str,
+        _text: &str,
+    ) -> anyhow::Result<Option<CommentItem>> {
+        anyhow::bail!("Comment replies are unavailable from this client")
+    }
+    async fn delete_comment(&self, _video_id: &str, _comment_id: &str) -> anyhow::Result<()> {
+        anyhow::bail!("Comment deletion is unavailable from this client")
     }
     async fn fetch_comments(&self, _continuation: &str) -> anyhow::Result<CommentsBatch> {
         anyhow::bail!("Comments not supported by this backend")
@@ -481,11 +499,36 @@ impl Backend for BackendChain {
             .await
     }
 
-    async fn submit_comment(&self, params: &str, text: &str, reply: bool) -> anyhow::Result<()> {
+    async fn create_comment(
+        &self,
+        video_id: &str,
+        text: &str,
+    ) -> anyhow::Result<Option<CommentItem>> {
         self.backends
             .first()
             .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
-            .submit_comment(params, text, reply)
+            .create_comment(video_id, text)
+            .await
+    }
+
+    async fn create_reply(
+        &self,
+        video_id: &str,
+        parent_id: &str,
+        text: &str,
+    ) -> anyhow::Result<Option<CommentItem>> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .create_reply(video_id, parent_id, text)
+            .await
+    }
+
+    async fn delete_comment(&self, video_id: &str, comment_id: &str) -> anyhow::Result<()> {
+        self.backends
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No OAuth backend configured"))?
+            .delete_comment(video_id, comment_id)
             .await
     }
 

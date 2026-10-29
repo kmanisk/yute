@@ -1,6 +1,7 @@
 use crate::backend::auth::AuthContext;
 use crate::backend::models::{
-    ChannelTab, ChatBatch, ChatMessage, CommentsBatch, FeedPage, SearchFilters, WatchData,
+    ChannelTab, ChatBatch, ChatMessage, CommentItem, CommentsBatch, FeedPage, SearchFilters,
+    WatchData,
 };
 use crate::backend::parse::{extract_text, parse_comments, parse_feed_page, parse_watch_data};
 use crate::backend::Backend;
@@ -928,27 +929,56 @@ impl Backend for InnerTubeBackend {
             .context("YouTube did not expose this comment reaction")?;
         self.comment_action(&action).await
     }
-    async fn submit_comment(&self, params: &str, text: &str, reply: bool) -> Result<()> {
+    async fn create_comment(&self, video_id: &str, text: &str) -> Result<Option<CommentItem>> {
         self.require_account()?;
-        if text.trim().is_empty() || text.chars().count() > 10000 {
-            anyhow::bail!("Comment must contain 1 to 10000 characters");
+        validate_comment_text(text)?;
+        let params = crate::backend::comment_write::create_comment_params(video_id);
+        let response = self
+            .post_endpoint(
+                "comment/create_comment",
+                self.make_body(json!({"createCommentParams":params,"commentText":text})),
+            )
+            .await
+            .map_err(comment_write_error)?;
+        crate::backend::comment_write::created_comment(&response)
+    }
+
+    async fn create_reply(
+        &self,
+        video_id: &str,
+        parent_id: &str,
+        text: &str,
+    ) -> Result<Option<CommentItem>> {
+        self.require_account()?;
+        validate_comment_text(text)?;
+        if parent_id.is_empty() {
+            anyhow::bail!("Reply target is missing");
         }
-        let (endpoint, field) = if reply {
-            ("comment/create_comment_reply", "createReplyParams")
-        } else {
-            ("comment/create_comment", "createCommentParams")
-        };
-        let mut body = self.make_body(json!({"commentText":text}));
-        body[field] = params.into();
-        let response = self.post_endpoint(endpoint, body).await?;
-        if crate::backend::parse::find_json_key(&response, "commentRenderer").is_none()
-            && crate::backend::parse::find_json_key(&response, "commentEntityPayload").is_none()
-            && crate::backend::parse::find_json_key(&response, "createCommentAction").is_none()
-            && crate::backend::parse::find_json_key(&response, "createCommentReplyAction").is_none()
-        {
-            anyhow::bail!("YouTube did not confirm the posted comment");
+        let params = crate::backend::comment_write::create_reply_params(video_id, parent_id);
+        let response = self
+            .post_endpoint(
+                "comment/create_comment_reply",
+                self.make_body(json!({"createReplyParams":params,"commentText":text})),
+            )
+            .await
+            .map_err(comment_write_error)?;
+        crate::backend::comment_write::created_comment(&response)
+    }
+
+    async fn delete_comment(&self, video_id: &str, comment_id: &str) -> Result<()> {
+        self.require_account()?;
+        if comment_id.is_empty() {
+            anyhow::bail!("Comment ID is missing");
         }
-        Ok(())
+        let action = crate::backend::comment_write::delete_comment_params(video_id, comment_id);
+        let response = self
+            .post_endpoint(
+                "comment/perform_comment_action",
+                self.make_body(json!({"actions":[action]})),
+            )
+            .await
+            .map_err(comment_write_error)?;
+        crate::backend::comment_write::confirm_deleted(&response, comment_id)
     }
 
     async fn fetch_comments(&self, continuation: &str) -> Result<CommentsBatch> {
@@ -957,6 +987,23 @@ impl Backend for InnerTubeBackend {
         }));
         let val = self.post_endpoint("next", body).await?;
         Ok(parse_comments(&val))
+    }
+}
+
+fn validate_comment_text(text: &str) -> Result<()> {
+    let count = text.chars().count();
+    if text.trim().is_empty() || count > 10_000 {
+        anyhow::bail!("Comment must contain 1 to 10000 characters");
+    }
+    Ok(())
+}
+
+fn comment_write_error(error: anyhow::Error) -> anyhow::Error {
+    let diagnostic = error.to_string();
+    if diagnostic.contains("HTTP 403") {
+        anyhow!("Comment write scope is unavailable; re-login once with :account add")
+    } else {
+        error
     }
 }
 

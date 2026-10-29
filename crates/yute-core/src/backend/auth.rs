@@ -65,7 +65,7 @@ pub const OAUTH_CLIENT_ID: &str =
     "861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com";
 pub const OAUTH_CLIENT_SECRET: &str = "SboVhoG9s0rNafixCSGGKXAT";
 pub const OAUTH_SCOPE: &str =
-    "http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content";
+    "https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube-paid-content";
 pub const OAUTH_GRANT_TYPE_DEVICE: &str = "http://oauth.net/grant_type/device/1.0";
 pub const OAUTH_GRANT_TYPE_REFRESH: &str = "refresh_token";
 pub const OAUTH_MODEL_NAME: &str = "ytlr::";
@@ -611,5 +611,17 @@ impl std::fmt::Debug for DeviceCodeResponse {
 impl std::fmt::Debug for DeviceTokenResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("DeviceTokenResponse([REDACTED])")
+    }
+}
+
+#[cfg(test)]
+mod oauth_scope_tests {
+    use super::OAUTH_SCOPE;
+
+    #[test]
+    fn device_login_requests_youtube_write_scope_without_legacy_gdata_scope() {
+        assert!(OAUTH_SCOPE.contains("https://www.googleapis.com/auth/youtube"));
+        assert!(OAUTH_SCOPE.contains("https://www.googleapis.com/auth/youtube-paid-content"));
+        assert!(!OAUTH_SCOPE.contains("gdata.youtube.com"));
     }
 }

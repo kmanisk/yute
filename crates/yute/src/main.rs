@@ -646,6 +646,23 @@ async fn handle_key_event(
         }
         return;
     }
+    if app.pending_comment_delete.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                confirm_delete_comment(app, tx);
+            }
+            KeyCode::Char('n')
+            | KeyCode::Char('N')
+            | KeyCode::Char('q')
+            | KeyCode::Char('Q')
+            | KeyCode::Esc => {
+                app.pending_comment_delete = None;
+                app.status_text = "Comment deletion cancelled".into();
+            }
+            _ => {}
+        }
+        return;
+    }
     if app.focus == Focus::CommandLine {
         handle_command_input(app, key, tx);
         return;
@@ -1900,6 +1917,11 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
                 trigger_watch_fetch(app, tx, id);
             }
         }
+        Action::DeleteComment => {
+            if app.watch_pane == WatchPane::Comments {
+                request_delete_comment(app);
+            }
+        }
         Action::OpenDescriptionLink => open_description_link(app, tx),
         Action::PrevChip | Action::NextChip => {
             let len = ui::watch::description_links(app).len();
@@ -1977,28 +1999,40 @@ fn compose_comment(app: &mut App, reply: bool) {
     let Some(watch) = &app.watch_data else {
         return;
     };
-    let (params, author) = if reply {
-        let comment = app.selected_comment();
-        (
-            comment.and_then(|c| c.reply_params.clone()),
-            comment.map(|c| c.author.clone()),
-        )
+    let (parent_id, author) = if reply {
+        if let Some(thread) = &app.comment_thread {
+            (
+                Some(thread.parent_id.clone()),
+                Some(thread.parent_author.clone()),
+            )
+        } else {
+            let Some(comment) = app.selected_comment() else {
+                app.status_text = "Select a comment to reply".into();
+                return;
+            };
+            if comment.id.is_empty() {
+                app.status_text = "This comment cannot be replied to".into();
+                return;
+            }
+            (Some(comment.id.clone()), Some(comment.author.clone()))
+        }
     } else {
-        (watch.comment_create_params.clone(), None)
-    };
-    let Some(params) = params else {
-        app.status_text = "This TV session does not expose comment posting/reply tokens; reading and reactions still work".into();
-        return;
+        (None, None)
     };
     app.comment_draft = Some(yute::app::CommentDraft {
         video_id: watch.video.id.clone(),
-        params,
+        parent_id,
         reply,
         author,
     });
     app.focus = Focus::CommentInput;
     app.input_cursor = None;
-    app.status_text = "Enter posts · Esc cancels".into();
+    app.status_text = if reply {
+        "Reply · Enter posts · Esc cancels"
+    } else {
+        "New comment · Enter posts · Esc cancels"
+    }
+    .into();
 }
 fn post_comment_draft(app: &mut App, tx: Sender<AppEvent>) {
     if app.comment_posting {
@@ -2019,22 +2053,66 @@ fn post_comment_draft(app: &mut App, tx: Sender<AppEvent>) {
     let text = app.comment_input.clone();
     let backend = Arc::clone(&app.backend);
     let generation = app.feed_generation;
+    let video_id = draft.video_id.clone();
+    let parent_id = draft.parent_id.clone();
     app.comment_posting = true;
-    app.status_text = "Posting comment…".into();
+    app.status_text = if parent_id.is_some() {
+        "Posting reply…"
+    } else {
+        "Posting comment…"
+    }
+    .into();
     tokio::spawn(async move {
-        let result = backend
-            .submit_comment(&draft.params, &text, draft.reply)
-            .await;
+        let result = if let Some(parent) = parent_id.as_deref() {
+            backend.create_reply(&video_id, parent, &text).await
+        } else {
+            backend.create_comment(&video_id, &text).await
+        };
         let _ = tx
-            .send(AppEvent::CommentUpdated(
-                generation,
-                draft.video_id,
-                true,
-                result,
+            .send(AppEvent::CommentCreated(
+                generation, video_id, parent_id, result,
             ))
             .await;
     });
 }
+
+fn request_delete_comment(app: &mut App) {
+    if !authenticated(app) {
+        app.status_text = "Sign in before deleting comments".into();
+        return;
+    }
+    let Some(comment) = app.selected_comment().cloned() else {
+        app.status_text = "Select a comment first".into();
+        return;
+    };
+    if comment.id.is_empty() || !app.comment_is_own(&comment) {
+        app.status_text = "Delete is available only for your comments".into();
+        return;
+    }
+    let Some(video_id) = app.watch_data.as_ref().map(|w| w.video.id.clone()) else {
+        return;
+    };
+    app.pending_comment_delete = Some((video_id, comment.id));
+    app.status_text = "Delete this comment? y confirm · n/Esc cancel".into();
+}
+
+fn confirm_delete_comment(app: &mut App, tx: Sender<AppEvent>) {
+    let Some((video_id, comment_id)) = app.pending_comment_delete.take() else {
+        return;
+    };
+    let generation = app.feed_generation;
+    let backend = Arc::clone(&app.backend);
+    app.status_text = "Deleting comment…".into();
+    tokio::spawn(async move {
+        let result = backend.delete_comment(&video_id, &comment_id).await;
+        let _ = tx
+            .send(AppEvent::CommentDeleted(
+                generation, video_id, comment_id, result,
+            ))
+            .await;
+    });
+}
+
 fn react_comment(app: &mut App, like: bool, tx: Sender<AppEvent>) {
     if !authenticated(app) {
         app.status_text = "Login required for comment reactions — use :login".into();
@@ -2084,7 +2162,7 @@ fn react_comment(app: &mut App, like: bool, tx: Sender<AppEvent>) {
             Err(anyhow::anyhow!("Comment reaction unavailable"))
         };
         let _ = tx
-            .send(AppEvent::CommentUpdated(generation, id, false, result))
+            .send(AppEvent::CommentUpdated(generation, id, result))
             .await;
     });
 }
@@ -2119,6 +2197,7 @@ fn open_comment_thread(app: &mut App, tx: Sender<AppEvent>) {
                 generation,
                 video_id,
                 root_cursor,
+                comment.id,
                 comment.author,
                 result,
             ))
@@ -2148,7 +2227,12 @@ fn open_description_link(app: &mut App, tx: Sender<AppEvent>) {
 }
 fn mutation_error_message(error: &anyhow::Error) -> String {
     let diagnostic = error.to_string().to_ascii_lowercase();
-    if diagnostic.contains("401") || diagnostic.contains("403") || diagnostic.contains("expired") {
+    if diagnostic.contains("comment write scope") || diagnostic.contains("re-login") {
+        "Comment writing needs a one-time re-login — use :account add".into()
+    } else if diagnostic.contains("401")
+        || diagnostic.contains("403")
+        || diagnostic.contains("expired")
+    {
         "YouTube rejected this session — use :login, then retry".into()
     } else if diagnostic.contains("unavailable") || diagnostic.contains("unsupported") {
         "Action unavailable for this YouTube client — use :open".into()
@@ -3051,7 +3135,14 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 Err(_) => app.status_text = "Comments could not load — press c to retry".into(),
             }
         }
-        AppEvent::CommentThreadLoaded(generation, id, root_cursor, parent_author, result) => {
+        AppEvent::CommentThreadLoaded(
+            generation,
+            id,
+            root_cursor,
+            parent_id,
+            parent_author,
+            result,
+        ) => {
             if generation != app.feed_generation
                 || app.player.current_video_id() != Some(id.as_str())
             {
@@ -3068,6 +3159,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                         app.status_text = "This comment has no visible replies".into();
                     } else {
                         app.comment_thread = Some(yute::app::CommentThread {
+                            parent_id,
                             parent_author,
                             comments: std::mem::take(&mut comments),
                             root_cursor,
@@ -3079,7 +3171,21 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 Err(_) => app.status_text = "Replies could not load — press Enter to retry".into(),
             }
         }
-        AppEvent::CommentUpdated(generation, id, posted, result) => {
+        AppEvent::CommentUpdated(generation, id, result) => {
+            if generation != app.feed_generation
+                || app.player.current_video_id() != Some(id.as_str())
+            {
+                return;
+            }
+            match result {
+                Ok(()) => {
+                    app.status_text = "Comment reaction saved".into();
+                    trigger_watch_fetch(app, tx, id);
+                }
+                Err(error) => app.status_text = mutation_error_message(&error),
+            }
+        }
+        AppEvent::CommentCreated(generation, id, parent_id, result) => {
             if generation != app.feed_generation
                 || app.player.current_video_id() != Some(id.as_str())
             {
@@ -3087,17 +3193,47 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             }
             app.comment_posting = false;
             match result {
-                Ok(()) => {
+                Ok(created) => {
                     app.focus = Focus::Content;
                     app.comment_draft = None;
                     app.comment_input.clear();
-                    app.status_text = if posted {
-                        "Comment posted"
+                    if let Some(comment) = created {
+                        if !comment.id.is_empty() {
+                            app.owned_comment_ids.insert(comment.id.clone());
+                        }
+                        if parent_id.is_some() {
+                            if let Some(thread) = &mut app.comment_thread {
+                                if !thread.comments.iter().any(|c| c.id == comment.id) {
+                                    thread.comments.push(comment);
+                                    app.comments_cursor = thread.comments.len().saturating_sub(1);
+                                }
+                            } else if let Some(parent) = parent_id.as_deref() {
+                                if let Some(watch) = &mut app.watch_data {
+                                    if let Some(root) =
+                                        watch.comments.iter_mut().find(|c| c.id == parent)
+                                    {
+                                        root.reply_count =
+                                            Some(root.reply_count.unwrap_or(0).saturating_add(1));
+                                    }
+                                }
+                            }
+                        } else if let Some(watch) = &mut app.watch_data {
+                            if !watch.comments.iter().any(|c| c.id == comment.id) {
+                                watch.comments.insert(0, comment);
+                                app.comments_cursor = 0;
+                            }
+                        }
                     } else {
-                        "Comment reaction saved"
+                        // YouTube explicitly acknowledged the write but omitted the renderer.
+                        // Never retry automatically; reload instead to avoid duplicate comments.
+                        trigger_watch_fetch(app, tx.clone(), id.clone());
+                    }
+                    app.status_text = if parent_id.is_some() {
+                        "Reply posted"
+                    } else {
+                        "Comment posted"
                     }
                     .into();
-                    trigger_watch_fetch(app, tx, id);
                 }
                 Err(error) => {
                     app.status_text = mutation_error_message(&error);
@@ -3105,6 +3241,32 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                         app.focus = Focus::CommentInput;
                     }
                 }
+            }
+        }
+        AppEvent::CommentDeleted(generation, id, comment_id, result) => {
+            if generation != app.feed_generation
+                || app.player.current_video_id() != Some(id.as_str())
+            {
+                return;
+            }
+            match result {
+                Ok(()) => {
+                    app.owned_comment_ids.remove(&comment_id);
+                    if let Some(thread) = &mut app.comment_thread {
+                        thread.comments.retain(|c| c.id != comment_id);
+                        app.comments_cursor = app
+                            .comments_cursor
+                            .min(thread.comments.len().saturating_sub(1));
+                    }
+                    if let Some(watch) = &mut app.watch_data {
+                        watch.comments.retain(|c| c.id != comment_id);
+                        app.comments_cursor = app
+                            .comments_cursor
+                            .min(watch.comments.len().saturating_sub(1));
+                    }
+                    app.status_text = "Comment deleted".into();
+                }
+                Err(error) => app.status_text = mutation_error_message(&error),
             }
         }
         AppEvent::StatusMessage(msg) => {
@@ -4193,6 +4355,36 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
             }
             if app.watch_pane == yute::app::WatchPane::Comments {
                 ensure_comments(app, tx);
+            }
+        }
+        Command::Comment(action) => {
+            let Some(id) = app.player.current_video_id().map(str::to_string) else {
+                app.status_text = "No active video — play a video first".into();
+                return;
+            };
+            if app.screen != Screen::Watch {
+                app.transition(Screen::Watch, true);
+            }
+            app.focus = Focus::Content;
+            app.watch_pane = yute::app::WatchPane::Comments;
+            if app
+                .watch_data
+                .as_ref()
+                .is_none_or(|watch| watch.video.id != id)
+            {
+                trigger_watch_fetch(app, tx.clone(), id);
+                app.status_text =
+                    "Loading comments — run the comment command again when ready".into();
+                return;
+            }
+            ensure_comments(app, tx.clone());
+            match action.as_str() {
+                "new" => compose_comment(app, false),
+                "reply" => compose_comment(app, true),
+                "delete" => request_delete_comment(app),
+                "like" => react_comment(app, true, tx),
+                "dislike" => react_comment(app, false, tx),
+                _ => app.status_text = "Unknown comment action".into(),
             }
         }
         Command::Set(key, value) => {

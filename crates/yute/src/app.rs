@@ -160,6 +160,7 @@ pub enum SettingEditor {
 
 #[derive(Clone, Debug)]
 pub struct CommentThread {
+    pub parent_id: String,
     pub parent_author: String,
     pub comments: Vec<crate::backend::models::CommentItem>,
     pub root_cursor: usize,
@@ -168,7 +169,7 @@ pub struct CommentThread {
 #[derive(Clone)]
 pub struct CommentDraft {
     pub video_id: String,
-    pub params: String,
+    pub parent_id: Option<String>,
     pub reply: bool,
     pub author: Option<String>,
 }
@@ -200,6 +201,8 @@ pub struct App {
     pub comment_input: String,
     pub comment_draft: Option<CommentDraft>,
     pub comment_posting: bool,
+    pub owned_comment_ids: HashSet<String>,
+    pub pending_comment_delete: Option<(String, String)>,
 
     pub home_pages: std::collections::HashMap<FilterKind, TabState>,
     pub channel_items: Vec<Card>,
@@ -371,6 +374,8 @@ impl App {
             comment_input: String::new(),
             comment_draft: None,
             comment_posting: false,
+            owned_comment_ids: HashSet::new(),
+            pending_comment_delete: None,
             channel_items: Vec::new(),
             channels_revision: (u64::MAX, 0),
             scroll_row: 0,
@@ -465,6 +470,21 @@ impl App {
 
     pub fn selected_comment(&self) -> Option<&crate::backend::models::CommentItem> {
         self.visible_comments().get(self.comments_cursor)
+    }
+
+    pub fn comment_is_own(&self, comment: &crate::backend::models::CommentItem) -> bool {
+        if self.owned_comment_ids.contains(&comment.id) {
+            return true;
+        }
+        fn normalized(value: &str) -> String {
+            value.trim().trim_start_matches('@').to_ascii_lowercase()
+        }
+        let active = normalized(&self.account_handle);
+        !active.is_empty()
+            && comment
+                .author_handle
+                .as_deref()
+                .is_some_and(|handle| normalized(handle) == active)
     }
 
     pub fn close_comment_thread(&mut self) -> bool {

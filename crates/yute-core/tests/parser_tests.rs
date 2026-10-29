@@ -613,7 +613,8 @@ fn mix_pages_only_include_videos_from_the_requested_mix() {
 fn comments_keep_authors_unicode_and_real_action_params() {
     use serde_json::json;
     let raw = json!({"contents":[{"commentRenderer":{
-        "commentId":"c1","authorText":{"simpleText":"@reader"},
+        "commentId":"c1","authorText":{"simpleText":"Reader"},
+        "authorEndpoint":{"browseEndpoint":{"canonicalBaseUrl":"/@reader"}},
         "contentText":{"runs":[{"text":"Great हिन्दी "},{"emoji":{"emojiId":"\u{1f44d}"}}]},
         "actionButtons":{"commentActionButtonsRenderer":{
             "likeButton":{"toggleButtonRenderer":{"defaultServiceEndpoint":{"performCommentActionEndpoint":{"action":"test-like-opaque"}}}},
@@ -623,7 +624,8 @@ fn comments_keep_authors_unicode_and_real_action_params() {
     let batch = yute_core::backend::parse::parse_comments(&raw);
     assert_eq!(batch.comments.len(), 1);
     let comment = &batch.comments[0];
-    assert_eq!(comment.author, "@reader");
+    assert_eq!(comment.author, "Reader");
+    assert_eq!(comment.author_handle.as_deref(), Some("@reader"));
     assert_eq!(comment.text, "Great हिन्दी \u{1f44d}");
     assert_eq!(comment.like_action.as_deref(), Some("test-like-opaque"));
     assert_eq!(comment.reply_params.as_deref(), Some("test-reply-opaque"));

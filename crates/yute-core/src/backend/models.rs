@@ -188,6 +188,8 @@ pub struct CommentMedia {
 pub struct CommentItem {
     pub id: String,
     pub author: String,
+    #[serde(default)]
+    pub author_handle: Option<String>,
     pub author_thumb: Option<String>,
     pub text: String,
     pub published: Option<String>,

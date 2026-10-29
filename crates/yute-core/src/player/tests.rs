@@ -399,6 +399,25 @@ async fn native_resolver_failure_and_ytdlp_fallback_success() {
     http.abort();
 }
 
+#[test]
+fn stalled_network_seek_recovery_reloads_once_at_target_with_format() {
+    let command = super::ipc::seek_stall_reload_command(
+        "https://www.youtube.com/watch?v=fixture",
+        Some("bestvideo+bestaudio"),
+        428.42,
+    )
+    .unwrap();
+    assert_eq!(command["command"][0], "loadfile");
+    assert_eq!(
+        command["command"][1],
+        "https://www.youtube.com/watch?v=fixture"
+    );
+    assert_eq!(command["command"][2], "replace");
+    assert_eq!(command["command"][4]["start"], "428.42");
+    assert_eq!(command["command"][4]["ytdl-format"], "bestvideo+bestaudio");
+    assert!(super::ipc::seek_stall_reload_command("/tmp/local.mp4", None, 20.0).is_none());
+}
+
 #[tokio::test]
 async fn absolute_seek_commands_use_seconds_in_json_ipc() {
     let dir = TestDir::new();

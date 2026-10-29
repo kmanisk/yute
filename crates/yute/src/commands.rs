@@ -9,6 +9,7 @@ pub enum Command {
     Details,
     View(String),
     WatchSection(String),
+    Comment(String),
     Set(String, String),
     Channel,
     Playlist,
@@ -244,6 +245,7 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"comments", aliases:&[], usage:"comments", description:"Open/focus comments for the currently playing video.", parse:|a| no_args(a,Command::WatchSection("comments".into())) },
     Spec { name:"description", aliases:&["desc"], usage:"description", description:"Open/focus the current video's description and chapters.", parse:|a| no_args(a,Command::WatchSection("description".into())) },
     Spec { name:"suggestions", aliases:&["up-next"], usage:"suggestions", description:"Open/focus suggestions for the currently playing video.", parse:|a| no_args(a,Command::WatchSection("suggestions".into())) },
+    Spec { name:"comment", aliases:&[], usage:"comment new|reply|delete|like|dislike", description:"Create, reply to, delete, like or dislike comments in the current Watch comments view.", parse:|a| match a {"new"|"reply"|"delete"|"like"|"dislike"=>Ok(Command::Comment(a.into())),_=>Err("Usage: :comment new|reply|delete|like|dislike".into())} },
     Spec { name:"channel", aliases:&[], usage:"channel", description:"Open the selected item's channel when its channel ID is available.", parse:|a| no_args(a,Command::Channel) },
     Spec { name:"playlist", aliases:&[], usage:"playlist", description:"Open the selected playlist, without autoplay.", parse:|a| no_args(a,Command::Playlist) },
     Spec { name:"play", aliases:&[], usage:"play", description:"Activate the selected item; resume current playback if no item is selected.", parse:|a| no_args(a,Command::Play) },
@@ -311,6 +313,7 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
     let subcommands: &[(&str, &[&str])] = &[
         ("account", &["add", "remove", "anon", "whoami"]),
         ("queue", &["add", "next", "remove", "clear"]),
+        ("comment", &["new", "reply", "delete", "like", "dislike"]),
         (
             "filter",
             &["all", "videos", "shorts", "live", "playlists", "channels"],

@@ -769,6 +769,7 @@ fn watch_reactions_and_comment_bindings() {
         ('c', Action::ToggleComments),
         ('n', Action::ComposeComment),
         ('r', Action::ReplyComment),
+        ('x', Action::DeleteComment),
         ('w', Action::FocusSuggestions),
         ('[', Action::PrevChip),
         (']', Action::NextChip),

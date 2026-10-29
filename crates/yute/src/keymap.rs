@@ -95,6 +95,7 @@ pub enum Action {
     FocusSuggestions,
     ComposeComment,
     ReplyComment,
+    DeleteComment,
     OpenDescriptionLink,
 }
 
@@ -169,6 +170,12 @@ pub const WATCH_BINDINGS: &[(&str, Action, &str, bool)] = &[
         "r",
         Action::ReplyComment,
         "Reply to selected comment",
+        false,
+    ),
+    (
+        "x",
+        Action::DeleteComment,
+        "Delete your selected comment",
         false,
     ),
     (

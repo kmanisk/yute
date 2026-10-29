@@ -48,6 +48,7 @@ pub enum AppEvent {
         String,
         usize,
         String,
+        String,
         anyhow::Result<crate::backend::models::CommentsBatch>,
     ),
     StatusMessage(String),
@@ -62,5 +63,12 @@ pub enum AppEvent {
     DownloadStatus(u64, String),
     DownloadComplete(u64, anyhow::Result<yute_core::downloads::Progress>),
     Ffmpeg(bool),
-    CommentUpdated(u64, String, bool, anyhow::Result<()>),
+    CommentUpdated(u64, String, anyhow::Result<()>),
+    CommentCreated(
+        u64,
+        String,
+        Option<String>,
+        anyhow::Result<Option<crate::backend::models::CommentItem>>,
+    ),
+    CommentDeleted(u64, String, String, anyhow::Result<()>),
 }

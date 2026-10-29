@@ -189,7 +189,13 @@ impl Player {
                 .arg("--hr-seek=no");
 
             if !cfg.playback.osd_bar {
-                cmd.arg("--osd-bar=no");
+                // MPV's stock seekbar emits one seek per mouse-move while dragging.
+                // On fragmented YouTube DASH this can wedge the demuxer indefinitely.
+                // slimbottombar keeps the OSC transport controls but upstream disables
+                // the draggable seekbar for this layout. Users can opt back into the
+                // full stock seekbar with the existing MPV seekbar setting.
+                cmd.arg("--script-opts=osc-layout=slimbottombar")
+                    .arg("--osd-bar=no");
             }
         }
 

@@ -93,6 +93,12 @@ fn completion_and_aliases_are_unambiguous() {
     assert!(commands::completions("q").contains(&"queue".to_string()));
     assert!(commands::completions("q").contains(&"quit".to_string()));
     assert_eq!(commands::completions("queue a"), vec!["queue add"]);
+    assert_eq!(commands::completions("comment r"), vec!["comment reply"]);
+    assert_eq!(
+        commands::parse(":comment delete").unwrap(),
+        Command::Comment("delete".into())
+    );
+    assert!(commands::parse(":comment post").is_err());
     assert_eq!(commands::parse(":q").unwrap(), Command::Quit(false));
     assert_eq!(commands::parse(":logout").unwrap(), Command::Logout);
     assert_eq!(

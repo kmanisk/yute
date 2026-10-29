@@ -1478,6 +1478,28 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
             })
             .map(str::to_string)
     }
+    fn author_handle(value: &Value) -> Option<String> {
+        fn normalize(raw: &str) -> Option<String> {
+            let raw = raw.trim();
+            let handle = raw
+                .strip_prefix("https://www.youtube.com/")
+                .or_else(|| raw.strip_prefix("http://www.youtube.com/"))
+                .unwrap_or(raw)
+                .trim_start_matches('/');
+            let handle = handle.split(['?', '/']).next().unwrap_or("");
+            let handle = handle.strip_prefix('@').unwrap_or(handle).trim();
+            (!handle.is_empty()).then(|| format!("@{handle}"))
+        }
+        for key in ["canonicalBaseUrl", "vanityChannelUrl", "handle"] {
+            if let Some(raw) = find_json_key(value, key).and_then(Value::as_str) {
+                if let Some(handle) = normalize(raw) {
+                    return Some(handle);
+                }
+            }
+        }
+        None
+    }
+
     fn button_action(button: Option<&Value>, toggled: bool) -> Option<String> {
         let endpoint = if toggled {
             "toggledServiceEndpoint"
@@ -1620,7 +1642,9 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .into(),
-                    author,
+                    author: author.clone(),
+                    author_handle: author_handle(comment)
+                        .or_else(|| author.starts_with("@").then_some(author.clone())),
                     text,
                     author_thumb: comment
                         .get("authorThumbnail")
@@ -1669,7 +1693,9 @@ pub fn parse_comments(val: &Value) -> CommentsBatch {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .into(),
-                    author,
+                    author: author.clone(),
+                    author_handle: author_handle(entity)
+                        .or_else(|| author.starts_with("@").then_some(author.clone())),
                     text,
                     author_thumb: entity
                         .pointer("/avatar/image")

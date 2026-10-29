@@ -442,11 +442,10 @@ fn render_comments(f: &mut Frame, app: &mut App, area: Rect) {
                 ));
             }
             if active {
-                let hint = if comment.reply_params.is_some() {
-                    "   + like · - dislike · r reply"
-                } else {
-                    "   + like · - dislike"
-                };
+                let mut hint = "   + like · - dislike · r reply · n new".to_string();
+                if app.comment_is_own(comment) {
+                    hint.push_str(" · x delete");
+                }
                 spans.push(Span::styled(
                     hint,
                     app.theme.style("text_dim").add_modifier(Modifier::DIM),

@@ -11,7 +11,7 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Grid columns", "Automatic sizing adapts to the content pane. Resizing preserves selection."),
     ("Hardware decoding", "auto-safe lets MPV select an available hardware decoder."),
     ("Stream cache", "Readahead and a bounded memory budget. Applies to the active MPV session; rebuffering resumes after 1 second."),
-    ("MPV seekbar", "Show MPV's seek overlay in addition to its own bottom controls."),
+    ("MPV seekbar", "Full draggable MPV seekbar. Off keeps slim controls and avoids DASH seek storms."),
     ("User MPV profile", "Use your existing MPV configuration. Startup buffering follows your profile in this mode."),
     ("Autoplay next", "Play the next queued video when the current video ends."),
     ("Shorts", "Hidden outside Shorts also hides saved Shorts. Explicit Shorts tabs always work without changing this preference."),

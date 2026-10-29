@@ -10,6 +10,22 @@ use tokio::sync::mpsc::{channel, Sender};
 
 static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(1);
 
+pub(super) fn seek_stall_reload_command(
+    url: &str,
+    format: Option<&str>,
+    target: f64,
+) -> Option<Value> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return None;
+    }
+    let options = if let Some(format) = format {
+        json!({"start":target.to_string(),"ytdl-format":format,"pause":"no"})
+    } else {
+        json!({"start":target.to_string(),"pause":"no"})
+    };
+    Some(json!({"command":["loadfile",url,"replace",-1,options]}))
+}
+
 pub fn generate_socket_path() -> PathBuf {
     let pid = std::process::id();
     let counter = SOCKET_COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -182,8 +198,8 @@ impl MpvIpc {
             let mut watchdog_ticker = tokio::time::interval(Duration::from_secs(1));
             let mut last_adv_time = std::time::Instant::now();
             let mut prev_time_pos = -1.0f64;
-            let mut seek_recovery_attempts = 0u8;
-            let mut last_seek_recovery: Option<std::time::Instant> = None;
+            let mut current_media: Option<(String, Option<String>)> = None;
+            let mut seek_reload_attempted = false;
 
             loop {
                 tokio::select! {
@@ -192,43 +208,49 @@ impl MpvIpc {
                             if (status.time_pos - prev_time_pos).abs() > 0.05 {
                                 prev_time_pos = status.time_pos;
                                 last_adv_time = std::time::Instant::now();
-                                seek_recovery_attempts = 0;
-                                last_seek_recovery = None;
+                                seek_reload_attempted = false;
                                 if status.stall_error {
                                     status.stall_error = false;
                                     let _ = tx_status.send(status.clone()).await;
                                 }
                             } else {
-                                // MPV's built-in OSC deliberately starts a seekbar click
-                                // with an exact seek. On fragmented YouTube DASH that can
-                                // leave the demuxer paused for cache for a long time. After
-                                // a short grace period, retry the current target as an
-                                // explicit keyframe seek. Two bounded attempts are enough to
-                                // recover a bad range request without creating a seek loop.
+                                // MPV's OSC emits a seek for every distinct mouse position while
+                                // dragging. On fragmented YouTube DASH this can wedge the demuxer:
+                                // an additional keyframe seek remains queued behind the stuck work.
+                                // A real-network audit on g1qNCcxFWRo reproduced >30s of seeking
+                                // after a drag burst, while replacing the stream at the chosen
+                                // position recovered in about 6s. Reload at most once per stall;
+                                // playback progress resets this guard for a later independent seek.
+                                let network_media = current_media.as_ref().is_some_and(|(url, _)| {
+                                    url.starts_with("http://") || url.starts_with("https://")
+                                });
                                 let recovery_due = status.time_pos > 5.0
                                     && (status.paused_for_cache || status.seeking)
-                                    && last_adv_time.elapsed() >= Duration::from_secs(4)
-                                    && seek_recovery_attempts < 2
-                                    && last_seek_recovery
-                                        .is_none_or(|at| at.elapsed() >= Duration::from_secs(5));
+                                    && last_adv_time.elapsed() >= Duration::from_secs(3)
+                                    && network_media
+                                    && !seek_reload_attempted;
                                 if recovery_due {
-                                    let target = status.time_pos;
-                                    let recovery = json!({
-                                        "command": ["seek", target, "absolute+keyframes"]
-                                    });
-                                    if writer
-                                        .write_all(format!("{recovery}\n").as_bytes())
-                                        .await
-                                        .is_ok()
-                                    {
-                                        let _ = writer.flush().await;
-                                        seek_recovery_attempts += 1;
-                                        last_seek_recovery = Some(std::time::Instant::now());
-                                        last_adv_time = std::time::Instant::now();
-                                        log_ipc_event(&format!(
-                                            "WATCHDOG: retrying stalled post-seek position {:.2}s with keyframes (attempt {})",
-                                            target, seek_recovery_attempts
-                                        ));
+                                    if let Some((url, format)) = current_media.clone() {
+                                        let target = status.time_pos;
+                                        if let Some(recovery) =
+                                            seek_stall_reload_command(&url, format.as_deref(), target)
+                                        {
+                                            if writer
+                                                .write_all(format!("{recovery}\n").as_bytes())
+                                                .await
+                                                .is_ok()
+                                            {
+                                                let _ = writer.flush().await;
+                                                seek_reload_attempted = true;
+                                                status.file_loaded = false;
+                                                last_adv_time = std::time::Instant::now();
+                                                log_ipc_event(&format!(
+                                                    "WATCHDOG: reloading stalled network stream at {:.2}s after seek storm",
+                                                    target
+                                                ));
+                                                let _ = tx_status.send(status.clone()).await;
+                                            }
+                                        }
                                     }
                                 } else if last_adv_time.elapsed().as_secs() >= 15
                                     && !status.stall_error
@@ -260,8 +282,8 @@ impl MpvIpc {
                                 status.stall_error = false;
                                 prev_time_pos = -1.0;
                                 last_adv_time = std::time::Instant::now();
-                                seek_recovery_attempts = 0;
-                                last_seek_recovery = None;
+                                seek_reload_attempted = false;
+                                current_media = Some((url.clone(), None));
                                 log_ipc_event(&format!("Command: loadfile replace {url}"));
                                 json!({ "command": ["loadfile", url, "replace", -1, {"start": "0"}], "request_id": 1 })
                             }
@@ -275,8 +297,8 @@ impl MpvIpc {
                                 status.stall_error = false;
                                 prev_time_pos = -1.0;
                                 last_adv_time = std::time::Instant::now();
-                                seek_recovery_attempts = 0;
-                                last_seek_recovery = None;
+                                seek_reload_attempted = false;
+                                current_media = Some((url.clone(), None));
                                 log_ipc_event(&format!("Command: loadfile replace {url} start={start}"));
                                 json!({ "command": ["loadfile", url, "replace", -1, {"start": start.to_string()}], "request_id": 1 })
                             }
@@ -289,8 +311,8 @@ impl MpvIpc {
                                 status.time_pos = start;
                                 prev_time_pos = -1.0;
                                 last_adv_time = std::time::Instant::now();
-                                seek_recovery_attempts = 0;
-                                last_seek_recovery = None;
+                                seek_reload_attempted = false;
+                                current_media = Some((url.clone(), Some(format.clone())));
                                 json!({"command":["loadfile",url,"replace",-1,{"start":start.to_string(),"ytdl-format":format,"pause":if paused {"yes"} else {"no"}}],"request_id":1})
                             }
                             IpcCommand::ToggleMute => json!({ "command": ["cycle", "mute"] }),
