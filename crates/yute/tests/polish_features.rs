@@ -48,10 +48,12 @@ fn no_color_downgrade_and_contrast_do_not_invent_reset_rgb() {
         .iter()
         .any(|s| s.starts_with("text:")));
     assert!(Theme::terminal().contrast_warnings().is_empty());
-    assert!(Theme::parse("[roles.text]\nfg='black'\nbg='black'", caps())
-        .unwrap()
-        .contrast_warnings()
-        .is_empty());
+    assert!(
+        !Theme::parse("[roles.text]\nfg='black'\nbg='black'", caps())
+            .unwrap()
+            .contrast_warnings()
+            .is_empty()
+    );
     let no = Theme::parse(
         text,
         Capabilities {

@@ -346,12 +346,17 @@ impl Theme {
         };
         let mut warnings = vec![];
         for (role, s) in &self.styles {
-            let (Some(fg), Some(bg)) = (s.fg.and_then(rgb), s.bg.and_then(rgb)) else {
-                continue;
+            let ratio = if s.fg == s.bg && s.fg.is_some_and(|c| c != Color::Reset) {
+                // The same palette entry has zero contrast even when its RGB is unknown.
+                1.
+            } else {
+                let (Some(fg), Some(bg)) = (s.fg.and_then(rgb), s.bg.and_then(rgb)) else {
+                    continue;
+                };
+                let l = |c: (u8, u8, u8)| 0.2126 * lum(c.0) + 0.7152 * lum(c.1) + 0.0722 * lum(c.2);
+                let (a, b) = (l(fg), l(bg));
+                (a.max(b) + 0.05) / (a.min(b) + 0.05)
             };
-            let l = |c: (u8, u8, u8)| 0.2126 * lum(c.0) + 0.7152 * lum(c.1) + 0.0722 * lum(c.2);
-            let (a, b) = (l(fg), l(bg));
-            let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
             let min = if ["border", "badge", "badge_live", "badge_mix", "skeleton"]
                 .contains(&role.as_str())
             {
