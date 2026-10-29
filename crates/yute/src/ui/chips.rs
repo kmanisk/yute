@@ -23,14 +23,15 @@ pub fn render_chips(f: &mut Frame, app: &App, area: Rect) {
         }
 
         let style = if is_active {
-            app.theme
-                .style("accent")
-                .add_modifier(if app.focus == Focus::Chips {
-                    Modifier::BOLD | Modifier::UNDERLINED
-                } else {
-                    Modifier::BOLD | Modifier::UNDERLINED
-                })
+            let modifier = if app.focus == Focus::Chips {
+                Modifier::BOLD | Modifier::UNDERLINED
+            } else {
+                Modifier::BOLD
+            };
+            app.theme.style("accent").add_modifier(modifier)
         } else {
+            // Keep every non-selected content type visibly subordinate. This is
+            // intentionally stronger than ordinary secondary metadata dimming.
             app.theme.style("text_dim").add_modifier(Modifier::DIM)
         };
 

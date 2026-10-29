@@ -135,15 +135,74 @@ fn set_command(args: &str) -> Result<Command, String> {
             "auto" | "kitty" | "iterm2" | "sixel" | "halfblocks" | "off" | "none" => {}
             _ => return Err("graphics must be auto|kitty|iterm2|sixel|halfblocks|off".into()),
         },
+        "icons" => match value {
+            "auto" | "nerd" | "unicode" | "ascii" | "none" => {}
+            _ => return Err("icons must be auto|nerd|unicode|ascii|none".into()),
+        },
         "quality" => match value {
             "480" | "480p" | "720" | "720p" | "1080" | "1080p" | "1440" | "1440p" | "2160"
             | "2160p" | "4k" | "best" => {}
             _ => return Err("quality must be 480p|720p|1080p|1440p|2160p|best".into()),
         },
+        "columns" => {
+            if value != "auto"
+                && !value
+                    .parse::<u16>()
+                    .is_ok_and(|columns| (1..=8).contains(&columns))
+            {
+                return Err("columns must be auto or 1..8".into());
+            }
+        }
+        "min-card-width" => match value.parse::<u16>() {
+            Ok(width) if (28..=40).contains(&width) => {}
+            _ => return Err("min-card-width must be 28..40".into()),
+        },
         "scrolloff" => match value.parse::<u16>() {
             Ok(rows) if rows <= 12 => {}
             _ => return Err("scrolloff must be 0..12".into()),
         },
+        "cache-seconds" => match value {
+            "5" | "10" | "20" | "40" | "60" => {}
+            _ => return Err("cache-seconds must be 5|10|20|40|60".into()),
+        },
+        "thumbnail-cache" => match value.parse::<u64>() {
+            Ok(mb) if (32..=2048).contains(&mb) => {}
+            _ => return Err("thumbnail-cache must be 32..2048 MiB".into()),
+        },
+        "prefetch-pages" => match value.parse::<usize>() {
+            Ok(pages) if pages <= 4 => {}
+            _ => return Err("prefetch-pages must be 0..4".into()),
+        },
+        "codec" => match value {
+            "auto" | "av1" | "vp9" | "h264" => {}
+            _ => return Err("codec must be auto|av1|vp9|h264".into()),
+        },
+        "audio-codec" => match value {
+            "auto" | "opus" | "aac" => {}
+            _ => return Err("audio-codec must be auto|opus|aac".into()),
+        },
+        "hwdec" => match value {
+            "auto-safe" | "auto" | "no" | "nvdec" | "vaapi" | "vulkan" => {}
+            _ => return Err("hwdec must be auto-safe|auto|no|nvdec|vaapi|vulkan".into()),
+        },
+        "action-bar" => match value {
+            "auto" | "off" => {}
+            _ => return Err("action-bar must be auto|off".into()),
+        },
+        "emoji" => match value {
+            "auto" | "keep" | "strip" => {}
+            _ => return Err("emoji must be auto|keep|strip".into()),
+        },
+        "sidebar-channels" | "start-anonymous" | "autoplay" | "history-sync" | "osd-bar"
+        | "user-mpv-config" | "quit-home-only" => match value {
+            "on" | "off" | "true" | "false" | "yes" | "no" => {}
+            _ => return Err(format!("{key} must be on|off")),
+        },
+        "language" | "region" | "audio-language" | "subtitle-language" => {
+            if value.len() > 32 || value.contains(char::is_whitespace) {
+                return Err(format!("{key} must be a short language/region tag"));
+            }
+        }
         "theme" | "download-dir" | "sidebar-key" | "sidebar-alt-key" | "copy-key"
         | "center-key" | "quit-key" => {}
         _ => return Err("Unknown setting key — :help set".into()),
@@ -215,7 +274,7 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"download", aliases:&[], usage:"download [playlist] [video|audio] [best|1080p|720p|480p|360p|opus|aac|mp3|flac|m4a]", description:"Download selected media; playlist video qualities are ceilings.", parse:|a|{if a.split_whitespace().all(|s|matches!(s,"playlist"|"video"|"audio"|"best"|"2160p"|"1440p"|"1080p"|"720p"|"480p"|"360p"|"opus"|"aac"|"mp3"|"flac"|"m4a")){Ok(Command::Download(a.into()))}else{Err("Invalid download mode or quality".into())}} },
     Spec { name:"theme", aliases:&[], usage:"theme terminal|auto|<name>|reload|list|check", description:"Select, reload or validate a semantic theme.", parse:|a| Ok(Command::Theme(if a.is_empty(){"list".into()}else{a.into()})) },
     Spec { name:"graphics", aliases:&[], usage:"graphics auto|kitty|iterm2|sixel|halfblocks|off", description:"Apply terminal graphics mode.", parse:|a| match a {"auto"|"kitty"|"iterm2"|"sixel"|"halfblocks"|"off"|"none"=>Ok(Command::Graphics(a.into())),_=>Err("Usage: :graphics auto|kitty|iterm2|sixel|halfblocks|off".into())} },
-    Spec { name:"set", aliases:&[], usage:"set <key> <value>", description:"Change a persistent setting. Keys: graphics, theme, quality, scrolloff, download-dir, sidebar-key, sidebar-alt-key, copy-key, center-key, quit-key.", parse:set_command },
+    Spec { name:"set", aliases:&[], usage:"set <key> <value>", description:"Change persistent UI/content/playback settings directly. Tab completes supported keys and common values.", parse:set_command },
     Spec { name:"sidebar", aliases:&[], usage:"sidebar [show|hide]", description:"Toggle or set sidebar visibility.", parse:|a| match a {""|"toggle"=>Ok(Command::Sidebar(None)),"show"=>Ok(Command::Sidebar(Some(true))),"hide"=>Ok(Command::Sidebar(Some(false))),_=>Err("Usage: :sidebar [show|hide]".into())} },
     Spec { name:"help", aliases:&[], usage:"help [command]", description:"Show command help; ? shows keyboard shortcuts.", parse:|a| if a.split_whitespace().count()>1{Err("Usage: :help [command]".into())}else{Ok(Command::Help((!a.is_empty()).then(||a.into())))} },
     Spec { name:"quit", aliases:&["q"], usage:"quit", description:"Confirm application quit. Normal-mode q goes back.", parse:|a| no_args(a,Command::Quit(false)) },
@@ -267,8 +326,30 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
             &[
                 "graphics",
                 "theme",
+                "icons",
                 "quality",
+                "columns",
+                "min-card-width",
                 "scrolloff",
+                "action-bar",
+                "sidebar-channels",
+                "start-anonymous",
+                "autoplay",
+                "history-sync",
+                "osd-bar",
+                "user-mpv-config",
+                "cache-seconds",
+                "codec",
+                "audio-codec",
+                "hwdec",
+                "audio-language",
+                "subtitle-language",
+                "language",
+                "region",
+                "emoji",
+                "thumbnail-cache",
+                "prefetch-pages",
+                "quit-home-only",
                 "download-dir",
                 "sidebar-key",
                 "sidebar-alt-key",
@@ -285,6 +366,27 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
             "set quality",
             &["480p", "720p", "1080p", "1440p", "2160p", "best"],
         ),
+        ("set icons", &["auto", "nerd", "unicode", "ascii", "none"]),
+        (
+            "set columns",
+            &["auto", "1", "2", "3", "4", "5", "6", "7", "8"],
+        ),
+        ("set action-bar", &["auto", "off"]),
+        ("set codec", &["auto", "av1", "vp9", "h264"]),
+        ("set audio-codec", &["auto", "opus", "aac"]),
+        (
+            "set hwdec",
+            &["auto-safe", "auto", "no", "nvdec", "vaapi", "vulkan"],
+        ),
+        ("set cache-seconds", &["5", "10", "20", "40", "60"]),
+        ("set emoji", &["auto", "keep", "strip"]),
+        ("set sidebar-channels", &["on", "off"]),
+        ("set start-anonymous", &["on", "off"]),
+        ("set autoplay", &["on", "off"]),
+        ("set history-sync", &["on", "off"]),
+        ("set osd-bar", &["on", "off"]),
+        ("set user-mpv-config", &["on", "off"]),
+        ("set quit-home-only", &["on", "off"]),
         ("copy", &["url", "title", "channel"]),
         ("open", &["video", "channel"]),
     ];

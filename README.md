@@ -224,6 +224,11 @@ Press `:` from Normal mode.
 :queue add
 :sidebar toggle
 :set scrolloff 3
+:set columns auto
+:set icons nerd
+:set cache-seconds 40
+:set codec av1
+:set autoplay off
 :set download-dir ~/Videos/Yute
 :account
 :account whoami
@@ -235,6 +240,7 @@ Press `:` from Normal mode.
 ```
 
 Commands support completion and history. See [`docs/commands.md`](docs/commands.md) for the full reference.
+`:set` also exposes the main UI/playback preferences directly: icons, columns, card width, cache horizon, codec/hwdec, languages, autoplay/history sync, thumbnail cache/prefetch, sidebar/action-bar behavior and configurable keys.
 
 Use `:play-select` or Shift-Enter → Play / quality to choose real available
 video formats; `:audio` opens original audio streams. Playback stays in external

@@ -42,8 +42,10 @@ pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
         .accounts
         .get(app.active_account_index)
         .and_then(|profile| profile.avatar_url.clone());
+    // Two terminal cells by one row is approximately square with common 1:2
+    // cell geometry and keeps the account avatar compact like YouTube's header.
     let avatar_w = if avatar_url.is_some() && app.config.general.graphics != "none" {
-        3
+        2
     } else {
         0
     };
@@ -54,11 +56,15 @@ pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
     let mut text_area = account_area;
     if let Some(url) = avatar_url {
         if avatar_w > 0 {
-            let avatar_area = Rect::new(account_area.x, account_area.y, avatar_w, 1);
+            let avatar_area = Rect::new(
+                account_area.right().saturating_sub(avatar_w),
+                account_area.y,
+                avatar_w,
+                1,
+            );
             if let Some(proto) = app.thumbs.get_cover_protocol(&url, avatar_area.as_size()) {
                 f.render_widget(proto, avatar_area);
             }
-            text_area.x = text_area.x.saturating_add(avatar_w + 1);
             text_area.width = text_area.width.saturating_sub(avatar_w + 1);
         }
     }

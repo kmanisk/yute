@@ -198,7 +198,7 @@ impl VideoCardWidget {
                         .css_classes(["yt-title-compact"])
                         .build();
                     let sub_lbl = Label::builder()
-                        .label(c.subscribers.as_deref().unwrap_or("Channel"))
+                        .label(c.subscribers.as_deref().unwrap_or(""))
                         .halign(Align::Start)
                         .css_classes(["yt-meta"])
                         .build();
@@ -419,12 +419,12 @@ impl VideoCardWidget {
                 }
                 Card::Channel(c) => {
                     let title_lbl = Label::builder()
-                        .label(&format!("[CHANNEL] {}", c.title))
+                        .label(&c.title)
                         .halign(Align::Start)
                         .css_classes(["yt-title"])
                         .build();
                     let sub_lbl = Label::builder()
-                        .label(c.subscribers.as_deref().unwrap_or("Channel"))
+                        .label(c.subscribers.as_deref().unwrap_or(""))
                         .halign(Align::Start)
                         .css_classes(["yt-meta"])
                         .build();

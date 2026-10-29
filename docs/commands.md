@@ -14,7 +14,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Group | Syntax | Behavior |
 | --- | --- | --- |
 | Navigation | `home`, `subscriptions` (`subs`), `history`, `watch-later` (`wl`), `liked`, `playlists`, `queue`, `local`, `settings`, `account` (`accounts`, `acc`, `a`) | Open the corresponding route. |
-| Search | `search <query>` | YouTube search; preserves the previous route. Continuation pages are locally relevance-filtered to prevent drift into unrelated personalized recommendations. |
+| Search | `search <query>` | YouTube search; preserves the previous route. Continuation pages require direct query evidence in title/creator metadata and are locally re-ranked, preventing drift into unrelated personalized recommendations. |
 | Entities | `channel`, `playlist` | Open the selected item's channel ID or selected playlist. Missing identity is reported. |
 | Watch dashboard | `details` (`now`, `watch`, `video-info`), `comments`, `description` (`desc`), `suggestions` (`up-next`) | Open/focus the currently playing video dashboard without restarting MPV. |
 | Playback | `play`, `pause`, `toggle`, `stop`, `next`, `prev`, `mute` | External yute-managed MPV only. `next` consumes the next queued video; `prev` uses bounded session playback history. |
@@ -33,6 +33,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Route names | `goto <route>` | Navigate to a canonical route; Tab lists available routes. |
 | Theme | `theme terminal|auto|<name>`, `theme reload`, `theme list`, `theme check` | Apply/reload semantic themes live; invalid reloads keep the previous theme. |
 | Graphics | `graphics auto|kitty|iterm2|sixel|halfblocks|off`, `set graphics <mode>` | Apply graphics mode live. Auto promotes only after a terminal protocol reply and otherwise stays on halfblocks. |
+| Settings | `set <key> <value>` | Persist major UI/playback options without opening Settings. Tab completes keys/values for icons, columns/card width, cache, codec/hwdec, languages, autoplay/history sync, thumbnail cache/prefetch, action/sidebar behavior and key bindings. |
 | Media formats | `play-select`, `audio` | Show actual available video/audio formats for one playback. |
 | Download | `download [playlist] [video|audio] [best|2160p|1440p|1080p|720p|480p|360p|opus|aac|mp3|flac|m4a]` | Start a safe yt-dlp download. Playlist video qualities are per-item ceilings; conversion choices require ffmpeg. |
 | Sidebar | `sidebar`, `sidebar show`, `sidebar hide`, `sidebar toggle` | Toggle or explicitly set visibility; hidden reclaims all width. |

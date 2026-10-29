@@ -36,42 +36,40 @@ pub struct GridGeometry {
 }
 impl GridGeometry {
     pub fn new(area: Rect, config: &crate::config::GridConfig, cell_w: f32, cell_h: f32) -> Self {
-        let columns = column_count(area.width, config);
-        let slot_width = area
-            .width
-            .saturating_sub(2 * columns.saturating_sub(1) as u16)
-            / columns as u16;
-        // Fill the content width instead of leaving symmetric dead bands on wide
-        // terminals. Column count still bounds density; each slot gets its width.
-        let natural_width = slot_width.max(1);
-        let minimum_width = 28.min(natural_width);
         let aspect_height_for = |width: u16| {
             (width.saturating_sub(2) as f32 * cell_w / cell_h.max(1.0) * 9.0 / 16.0).round() as u16
         };
 
-        // Prefer two complete rows at normal desktop heights. Wide terminals can
-        // otherwise grow cards to 40 cells, making the second row only half-visible
-        // even though two slightly narrower cards fit cleanly. Column count still uses
-        // the configured minimum width; only the rendered cards may contract to the
-        // safe 28-cell floor. Keep the thumbnail's physical 16:9 ratio.
-        let mut card_width = natural_width;
-        let minimum_height = aspect_height_for(minimum_width).max(1).saturating_add(6);
-        if area.height >= minimum_height.saturating_mul(2) {
-            while card_width > minimum_width {
-                let current_height = aspect_height_for(card_width).max(1).saturating_add(6);
-                if area.height >= current_height.saturating_mul(2) {
+        // Auto layout may add a column when that is what lets two complete rows
+        // fit. Unlike the old width-shrinking path, every chosen column still
+        // consumes the whole content pane so wide terminals never grow dead
+        // bands at the left and right edges.
+        let mut columns = column_count(area.width, config);
+        if config.columns == 0 && area.height >= 20 {
+            loop {
+                let gutters = 2 * columns.saturating_sub(1) as u16;
+                let width = area.width.saturating_sub(gutters) / columns as u16;
+                let height = aspect_height_for(width).max(1).saturating_add(6);
+                if area.height >= height.saturating_mul(2).saturating_add(1) || columns >= 8 {
                     break;
                 }
-                card_width -= 1;
+                let next = columns + 1;
+                let next_gutters = 2 * next.saturating_sub(1) as u16;
+                let next_width = area.width.saturating_sub(next_gutters) / next as u16;
+                if next_width < 24 {
+                    break;
+                }
+                columns = next;
             }
         }
 
+        let gutters = 2 * columns.saturating_sub(1) as u16;
+        let usable = area.width.saturating_sub(gutters);
+        let card_width = (usable / columns as u16).max(1);
         let column_stride = card_width.saturating_add(2);
-        let occupied = card_width * columns as u16 + 2 * columns.saturating_sub(1) as u16;
-        let first_column_offset = area.width.saturating_sub(occupied) / 2;
+        let first_column_offset = 0;
         let thumbnail_width = card_width.saturating_sub(2);
-        let aspect_height = aspect_height_for(card_width);
-        let thumbnail_height = aspect_height.max(1);
+        let thumbnail_height = aspect_height_for(card_width).max(1);
         let title_rows = 2;
         let card_height = thumbnail_height.saturating_add(6);
         let row_stride = if area.height >= card_height.saturating_mul(2).saturating_add(1) {
@@ -93,8 +91,6 @@ impl GridGeometry {
             thumbnail_height,
             title_rows,
             card_height,
-            // Never advertise/render a clipped trailing row. Navigation scrolls the
-            // next row fully into view instead of showing thumbnail/title fragments.
             visible_rows: complete_rows as usize,
             complete_rows: complete_rows as usize,
             row_stride,
@@ -104,6 +100,17 @@ impl GridGeometry {
         let start = (scroll_row * self.columns).min(count);
         start..(start + self.visible_rows * self.columns).min(count)
     }
+}
+
+fn distributed_column_widths(width: u16, columns: usize) -> Vec<u16> {
+    let gutters = 2 * columns.saturating_sub(1) as u16;
+    let usable = width.saturating_sub(gutters);
+    let base = usable / columns.max(1) as u16;
+    let extra = usable % columns.max(1) as u16;
+    let extra_start = columns.saturating_sub(extra as usize);
+    (0..columns)
+        .map(|index| base + u16::from(index >= extra_start))
+        .collect()
 }
 
 pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
@@ -120,17 +127,20 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         f.render_widget(p, area);
         if app.is_loading && area.height >= 10 {
             let geometry = GridGeometry::new(area, &app.config.grid, app.cell_w_px, app.cell_h_px);
-            for col in 0..geometry.columns {
+            let widths = distributed_column_widths(area.width, geometry.columns);
+            let mut x = area.x;
+            for width in widths {
                 let rect = Rect::new(
-                    area.x + geometry.first_column_offset + 1 + col as u16 * geometry.column_stride,
+                    x + 1,
                     area.y + 3,
-                    geometry.thumbnail_width,
+                    width.saturating_sub(2),
                     geometry.thumbnail_height.min(area.height.saturating_sub(3)),
                 );
                 f.render_widget(
                     Block::default().style(Style::default().bg(app.theme.surface)),
                     rect,
                 );
+                x = x.saturating_add(width + 2);
             }
         }
         return;
@@ -147,8 +157,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     }
     let num_cols = geometry.columns;
     app.rendered_columns = num_cols;
-    let margin_x = geometry.first_column_offset;
-    let col_widths = vec![geometry.card_width; num_cols];
+    let col_widths = distributed_column_widths(area.width, num_cols);
     let card_h = geometry.card_height;
     let thumb_h = geometry.thumbnail_height;
     let row_stride = geometry.row_stride;
@@ -196,7 +205,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
             break;
         }
 
-        let mut card_x = area.x + margin_x;
+        let mut card_x = area.x;
         for (c, &card_w) in col_widths.iter().enumerate() {
             let i = r * num_cols + c;
 
@@ -207,7 +216,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
                 height: card_h.min(remaining),
             };
 
-            card_x += geometry.column_stride;
+            card_x = card_x.saturating_add(card_w + 2);
 
             if i < cards_to_render.len() {
                 if remaining < card_h {
@@ -380,17 +389,24 @@ fn render_grid_card(
     let is_shorts = matches!(card, Card::Video(v) if v.badges.iter().any(|b| b == "SHORTS"));
     let is_channel = matches!(card, Card::Channel(_));
     let effective_title_h = if is_channel { 1 } else { title_h };
-    let available_art_h = inner.height.saturating_sub(effective_title_h + 2).max(1);
+    let metadata_rows = if is_channel { 1 } else { 2 };
+    let available_art_h = inner
+        .height
+        .saturating_sub(effective_title_h + metadata_rows)
+        .max(1);
     let actual_thumb_h = if is_channel {
-        // Channel artwork is a physical square. Use all available vertical space
-        // rather than inheriting the shorter 16:9 video thumbnail height.
-        available_art_h
+        // Make the avatar the largest physical square that fits the card. Terminal
+        // cells are usually taller than they are wide, so square-in-cells would
+        // visibly distort a channel logo.
+        let square_h =
+            ((inner.width as f32 * app.cell_w_px / app.cell_h_px.max(1.0)).round() as u16).max(1);
+        available_art_h.min(square_h)
     } else {
         available_art_h.min(thumb_h)
     };
     let mut thumb_area = Rect::new(inner.x, inner.y, inner.width, actual_thumb_h);
     if is_channel {
-        let width = ((actual_thumb_h as f32 * app.cell_h_px / app.cell_w_px.max(1.)).round()
+        let width = ((actual_thumb_h as f32 * app.cell_h_px / app.cell_w_px.max(1.0)).round()
             as u16)
             .min(inner.width)
             .max(1);
@@ -401,8 +417,18 @@ fn render_grid_card(
     let text_y = inner.y + actual_thumb_h;
     let text_w = inner.width;
     let title_area = Rect::new(text_x, text_y, text_w, effective_title_h);
-    let channel_area = Rect::new(text_x, text_y + effective_title_h, text_w, 1);
-    let meta_area = Rect::new(text_x, text_y + effective_title_h + 1, text_w, 1);
+    let channel_area = Rect::new(
+        text_x,
+        text_y + effective_title_h,
+        text_w,
+        u16::from(!is_channel),
+    );
+    let meta_area = Rect::new(
+        text_x,
+        text_y + effective_title_h + u16::from(!is_channel),
+        text_w,
+        1,
+    );
 
     // Modal overlap suppression
     let screen_size = f.area();
@@ -680,16 +706,16 @@ fn render_grid_card(
             }
         }
         Card::Channel(c) => {
+            let meta = match (c.handle.as_deref(), c.subscribers.as_deref()) {
+                (Some(handle), Some(subs)) if !handle.is_empty() && !subs.is_empty() => {
+                    format!("{handle} · {subs}")
+                }
+                (Some(handle), _) => handle.to_string(),
+                (_, Some(subs)) => subs.to_string(),
+                _ => String::new(),
+            };
             f.render_widget(
-                Paragraph::new(truncate_str(
-                    c.handle.as_deref().unwrap_or(""),
-                    channel_area.width as usize,
-                ))
-                .style(app.theme.style("text")),
-                channel_area,
-            );
-            f.render_widget(
-                Paragraph::new(c.subscribers.as_deref().unwrap_or("")).style(sec_style),
+                Paragraph::new(truncate_str(&meta, meta_area.width as usize)).style(sec_style),
                 meta_area,
             );
         }

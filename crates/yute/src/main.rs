@@ -2955,18 +2955,24 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                         app.items.iter().map(|c| c.id().to_string()).collect();
                     let mut relevant = 0usize;
                     let search_query = (screen == Screen::Search).then(|| app.search_query.clone());
-                    for card in page.items {
+                    let mut incoming = page.items;
+                    if let Some(query) = search_query.as_deref() {
+                        // Later YouTube search pages can contain a personalized shelf.
+                        // Drop cards without direct lexical evidence and rank the rest
+                        // by query evidence while preserving server order for ties.
+                        let mut scored = incoming
+                            .into_iter()
+                            .enumerate()
+                            .filter_map(|(order, card)| {
+                                let score = search_continuation_score(&card, query);
+                                (score > 0).then_some((score, order, card))
+                            })
+                            .collect::<Vec<_>>();
+                        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+                        incoming = scored.into_iter().map(|(_, _, card)| card).collect();
+                    }
+                    for card in incoming {
                         if !ids.insert(card.id().to_string()) {
-                            continue;
-                        }
-                        // YouTube search continuations can silently degrade into a
-                        // personalized "recommended for you" shelf. Keep the primary
-                        // page untouched, but require lexical query evidence on later
-                        // pages so scrolling remains a search instead of turning into Home.
-                        if search_query
-                            .as_deref()
-                            .is_some_and(|query| !search_continuation_relevant(&card, query))
-                        {
                             continue;
                         }
                         relevant += 1;
@@ -3848,57 +3854,112 @@ fn maybe_load_channel_avatars(app: &mut App, tx: Sender<AppEvent>) {
     }
 }
 
-fn search_continuation_relevant(card: &Card, query: &str) -> bool {
-    let normalize = |text: &str| {
-        text.chars()
-            .map(|c| {
-                if c.is_alphanumeric() {
-                    c.to_ascii_lowercase()
-                } else {
-                    ' '
-                }
-            })
-            .collect::<String>()
-    };
+fn normalize_search_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ch.is_alphanumeric() {
+            for lower in ch.to_lowercase() {
+                out.push(lower);
+            }
+        } else {
+            out.push(' ');
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn search_continuation_score(card: &Card, query: &str) -> i32 {
     let stop = [
         "the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "with", "how", "is",
     ];
-    let query = normalize(query);
-    let terms = query
+    let normalized_query = normalize_search_text(query);
+    let terms = normalized_query
         .split_whitespace()
         .filter(|term| term.len() >= 2 && !stop.contains(term))
         .collect::<Vec<_>>();
     if terms.is_empty() {
-        return true;
+        return 1;
     }
-    let mut haystack = card.title().to_string();
+
+    let title = normalize_search_text(card.title());
+    let mut secondary = String::new();
     match card {
         Card::Video(video) => {
-            haystack.push(' ');
-            haystack.push_str(&video.channel);
-            haystack.push(' ');
-            haystack.push_str(&video.badges.join(" "));
+            secondary.push_str(&video.channel);
+            secondary.push(' ');
+            secondary.push_str(&video.badges.join(" "));
         }
-        Card::Playlist(playlist) => {
-            haystack.push(' ');
-            haystack.push_str(&playlist.channel);
-        }
+        Card::Playlist(playlist) => secondary.push_str(&playlist.channel),
         Card::Channel(channel) => {
             if let Some(handle) = &channel.handle {
-                haystack.push(' ');
-                haystack.push_str(handle);
+                secondary.push_str(handle);
             }
         }
     }
-    let haystack = normalize(&haystack);
-    let words = haystack.split_whitespace().collect::<Vec<_>>();
-    terms.iter().any(|term| {
-        haystack.contains(term)
-            || words.iter().any(|word| {
-                word.starts_with(term)
-                    || (term.len() >= 5 && term.starts_with(*word) && word.len() >= 4)
-            })
-    })
+    let secondary = normalize_search_text(&secondary);
+    let title_words = title.split_whitespace().collect::<Vec<_>>();
+    let secondary_words = secondary.split_whitespace().collect::<Vec<_>>();
+
+    let mut score = 0i32;
+    let mut matched = 0usize;
+    let mut title_matches = 0usize;
+    if title.contains(&normalized_query) {
+        score += 60;
+    }
+    if !secondary.is_empty() && secondary.contains(&normalized_query) {
+        score += 28;
+    }
+
+    for term in &terms {
+        let title_score = if title_words.iter().any(|word| word == term) {
+            40
+        } else if title_words.iter().any(|word| word.starts_with(term)) {
+            30
+        } else if term.len() >= 4 && title.contains(term) {
+            18
+        } else {
+            0
+        };
+        let secondary_score = if secondary_words.iter().any(|word| word == term) {
+            24
+        } else if secondary_words.iter().any(|word| word.starts_with(term)) {
+            18
+        } else if term.len() >= 5 && secondary.contains(term) {
+            10
+        } else {
+            0
+        };
+        let best = title_score.max(secondary_score);
+        if best > 0 {
+            matched += 1;
+            score += best;
+            if title_score > 0 {
+                title_matches += 1;
+            }
+        }
+    }
+
+    // A one-word continuation such as "reddit" must actually mention Reddit in
+    // its title/creator metadata. For longer searches require all important terms
+    // up to three terms, then a 75% majority. This intentionally prefers a shorter
+    // relevant result set over YouTube's unrelated personalized tail.
+    let required = if terms.len() <= 3 {
+        terms.len()
+    } else {
+        (terms.len() * 3).div_ceil(4)
+    };
+    if matched < required {
+        return 0;
+    }
+    if terms.len() > 1 && title_matches == 0 && score < 70 {
+        return 0;
+    }
+    score
+}
+
+#[cfg(test)]
+fn search_continuation_relevant(card: &Card, query: &str) -> bool {
+    search_continuation_score(card, query) > 0
 }
 
 fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
@@ -4051,15 +4112,17 @@ fn apply_stream_cache(app: &App) {
         for (name, value) in [
             (
                 "cache-secs",
-                serde_json::json!(app.config.playback.stream_cache_seconds),
+                serde_json::json!(app.config.playback.stream_cache_seconds.max(20)),
             ),
             (
                 "demuxer-readahead-secs",
-                serde_json::json!(app.config.playback.stream_cache_seconds),
+                serde_json::json!(app.config.playback.stream_cache_seconds.max(20)),
             ),
             (
                 "demuxer-max-bytes",
-                serde_json::json!(u64::from(app.config.playback.stream_cache_mb()) * 1024 * 1024),
+                serde_json::json!(
+                    u64::from(app.config.playback.stream_cache_mb().max(192)) * 1024 * 1024
+                ),
             ),
         ] {
             app.player
@@ -4133,6 +4196,7 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
             }
         }
         Command::Set(key, value) => {
+            let bool_value = |value: &str| matches!(value, "on" | "true" | "yes");
             match key.as_str() {
                 "theme" => {
                     dispatch_command(app, Command::Theme(value), tx);
@@ -4146,13 +4210,69 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                     dispatch_command(app, Command::Quality(Some(value)), tx);
                     return;
                 }
-                "scrolloff" => match value.parse::<u16>() {
-                    Ok(rows) if rows <= 12 => app.config.ui.scrolloff = rows,
-                    _ => {
-                        app.status_text = "scrolloff must be 0..12".into();
-                        return;
+                "icons" => {
+                    app.config.general.icons = value;
+                    app.config.ui.icons = None;
+                }
+                "columns" => {
+                    app.config.grid.columns = if value == "auto" {
+                        0
+                    } else {
+                        value.parse().unwrap_or(0)
+                    };
+                    app.scroll_row = 0;
+                }
+                "min-card-width" => app.config.grid.min_card_width = value.parse().unwrap_or(30),
+                "scrolloff" => app.config.ui.scrolloff = value.parse().unwrap_or(3),
+                "action-bar" => app.config.ui.action_bar = value,
+                "sidebar-channels" => app.config.ui.sidebar_channels = bool_value(&value),
+                "start-anonymous" => app.config.general.start_anonymous = bool_value(&value),
+                "autoplay" => app.config.playback.autoplay = bool_value(&value),
+                "history-sync" => app.config.playback.mark_watched = bool_value(&value),
+                "osd-bar" => app.config.playback.osd_bar = bool_value(&value),
+                "user-mpv-config" => app.config.playback.use_user_mpv_config = bool_value(&value),
+                "quit-home-only" => app.config.ui.quit_on_home_only = bool_value(&value),
+                "cache-seconds" => {
+                    app.config.playback.stream_cache_seconds = value.parse().unwrap_or(20);
+                    if app.player.is_alive() {
+                        for (name, property) in [
+                            (
+                                "cache-secs",
+                                serde_json::json!(app.config.playback.stream_cache_seconds.max(20)),
+                            ),
+                            (
+                                "demuxer-readahead-secs",
+                                serde_json::json!(app.config.playback.stream_cache_seconds.max(20)),
+                            ),
+                            (
+                                "demuxer-max-bytes",
+                                serde_json::json!(
+                                    u64::from(app.config.playback.stream_cache_mb().max(192))
+                                        * 1024
+                                        * 1024
+                                ),
+                            ),
+                        ] {
+                            app.player
+                                .send_command(IpcCommand::SetProperty(name, property));
+                        }
                     }
-                },
+                }
+                "codec" => app.config.playback.preferred_codec = value,
+                "audio-codec" => app.config.playback.preferred_audio_codec = value,
+                "hwdec" => app.config.playback.hwdec = value,
+                "audio-language" => app.config.playback.audio_language = value,
+                "subtitle-language" => app.config.playback.subtitle_language = value,
+                "language" => app.config.backend.hl = value,
+                "region" => app.config.backend.gl = value.to_uppercase(),
+                "emoji" => app.config.text.emoji = value,
+                "thumbnail-cache" => {
+                    app.config.thumbnails.cache_mb = value.parse().unwrap_or(256);
+                    app.thumbs.set_budget(app.config.thumbnails.cache_mb);
+                }
+                "prefetch-pages" => {
+                    app.config.thumbnails.prefetch_pages = value.parse().unwrap_or(1)
+                }
                 "download-dir" => app.config.downloads.directory = value,
                 "sidebar-key" => app.config.keys.sidebar = value,
                 "sidebar-alt-key" => app.config.keys.sidebar_alt = value,
@@ -5127,6 +5247,48 @@ mod feed_ui_tests {
             assert!(text.starts_with('X'));
             assert!(text.contains("qhistory/:?"));
         }
+    }
+
+    #[test]
+    fn search_continuations_reject_personalized_drift_and_rank_direct_matches() {
+        let video = |id: &str, title: &str, channel: &str| {
+            Card::Video(VideoCard {
+                id: id.into(),
+                title: title.into(),
+                channel: channel.into(),
+                channel_id: None,
+                verified: false,
+                duration: None,
+                views: None,
+                published: None,
+                thumb_url: String::new(),
+                progress_pct: None,
+                live: LiveState::None,
+                badges: Vec::new(),
+                resume_time_sec: None,
+            })
+        };
+        let reddit = video("reddit", "Reddit API changes explained", "Tech News");
+        let creator = video("creator", "Weekly discussion", "Reddit Recap");
+        let rdr2 = video(
+            "rdr2",
+            "Red Dead Redemption 2 movie review",
+            "Gaming Reviews",
+        );
+        let subscribed = video("sub", "My new desk setup", "Subscribed Creator");
+        assert!(search_continuation_relevant(&reddit, "reddit"));
+        assert!(search_continuation_relevant(&creator, "reddit"));
+        assert!(!search_continuation_relevant(&rdr2, "reddit"));
+        assert!(!search_continuation_relevant(&subscribed, "reddit"));
+        assert!(
+            search_continuation_score(&reddit, "reddit")
+                > search_continuation_score(&creator, "reddit")
+        );
+
+        let async_rust = video("rust", "Async programming in Rust", "Systems Lab");
+        let only_rust = video("rust-only", "Rust ownership guide", "Systems Lab");
+        assert!(search_continuation_relevant(&async_rust, "rust async"));
+        assert!(!search_continuation_relevant(&only_rust, "rust async"));
     }
 
     fn app_and_cards() -> (App, Vec<Card>) {

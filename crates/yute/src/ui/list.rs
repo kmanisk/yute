@@ -148,7 +148,11 @@ fn render_list_row(
     };
 
     if matches!(card, Card::Channel(_)) {
-        let width = ((actual_thumb_h as f32 * app.cell_h_px / app.cell_w_px.max(1.)).round()
+        let square_h = ((actual_thumb_w as f32 * app.cell_w_px / app.cell_h_px.max(1.0)).round()
+            as u16)
+            .max(1);
+        thumb_area.height = actual_thumb_h.min(square_h);
+        let width = ((thumb_area.height as f32 * app.cell_h_px / app.cell_w_px.max(1.0)).round()
             as u16)
             .min(actual_thumb_w)
             .max(1);
@@ -321,8 +325,15 @@ fn render_list_row(
             details_lines.push(Line::from(Span::styled(meta_text, sec_style)));
         }
         Card::Channel(c) => {
-            let subs = c.subscribers.as_deref().unwrap_or("Channel");
-            details_lines.push(Line::from(Span::styled(subs, sec_style)));
+            let meta = match (c.handle.as_deref(), c.subscribers.as_deref()) {
+                (Some(handle), Some(subs)) if !handle.is_empty() && !subs.is_empty() => {
+                    format!("{handle} · {subs}")
+                }
+                (Some(handle), _) => handle.to_string(),
+                (_, Some(subs)) => subs.to_string(),
+                _ => String::new(),
+            };
+            details_lines.push(Line::from(Span::styled(meta, sec_style)));
         }
     }
 

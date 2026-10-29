@@ -52,6 +52,8 @@ pub struct PlaybackStatus {
     pub duration: f64,
     pub paused: bool,
     pub paused_for_cache: bool,
+    pub seeking: bool,
+    pub percent_pos: f64,
     pub core_idle: bool,
     pub idle_active: bool,
     pub volume: f64,
@@ -156,6 +158,8 @@ impl MpvIpc {
                 (10, "core-idle"),
                 (11, "idle-active"),
                 (12, "demuxer-cache-duration"),
+                (13, "seeking"),
+                (14, "percent-pos"),
             ];
 
             for (id, prop) in observe_props {
@@ -178,6 +182,8 @@ impl MpvIpc {
             let mut watchdog_ticker = tokio::time::interval(Duration::from_secs(1));
             let mut last_adv_time = std::time::Instant::now();
             let mut prev_time_pos = -1.0f64;
+            let mut seek_recovery_attempts = 0u8;
+            let mut last_seek_recovery: Option<std::time::Instant> = None;
 
             loop {
                 tokio::select! {
@@ -186,17 +192,54 @@ impl MpvIpc {
                             if (status.time_pos - prev_time_pos).abs() > 0.05 {
                                 prev_time_pos = status.time_pos;
                                 last_adv_time = std::time::Instant::now();
+                                seek_recovery_attempts = 0;
+                                last_seek_recovery = None;
                                 if status.stall_error {
                                     status.stall_error = false;
                                     let _ = tx_status.send(status.clone()).await;
                                 }
-                            } else if last_adv_time.elapsed().as_secs() >= 15 && !status.stall_error {
-                                status.stall_error = true;
-                                log_ipc_event(&format!(
-                                    "WATCHDOG: time-pos has not advanced for 15s (stuck at {:.2}s), reporting stall error",
-                                    status.time_pos
-                                ));
-                                let _ = tx_status.send(status.clone()).await;
+                            } else {
+                                // MPV's built-in OSC deliberately starts a seekbar click
+                                // with an exact seek. On fragmented YouTube DASH that can
+                                // leave the demuxer paused for cache for a long time. After
+                                // a short grace period, retry the current target as an
+                                // explicit keyframe seek. Two bounded attempts are enough to
+                                // recover a bad range request without creating a seek loop.
+                                let recovery_due = status.time_pos > 5.0
+                                    && (status.paused_for_cache || status.seeking)
+                                    && last_adv_time.elapsed() >= Duration::from_secs(4)
+                                    && seek_recovery_attempts < 2
+                                    && last_seek_recovery
+                                        .is_none_or(|at| at.elapsed() >= Duration::from_secs(5));
+                                if recovery_due {
+                                    let target = status.time_pos;
+                                    let recovery = json!({
+                                        "command": ["seek", target, "absolute+keyframes"]
+                                    });
+                                    if writer
+                                        .write_all(format!("{recovery}\n").as_bytes())
+                                        .await
+                                        .is_ok()
+                                    {
+                                        let _ = writer.flush().await;
+                                        seek_recovery_attempts += 1;
+                                        last_seek_recovery = Some(std::time::Instant::now());
+                                        last_adv_time = std::time::Instant::now();
+                                        log_ipc_event(&format!(
+                                            "WATCHDOG: retrying stalled post-seek position {:.2}s with keyframes (attempt {})",
+                                            target, seek_recovery_attempts
+                                        ));
+                                    }
+                                } else if last_adv_time.elapsed().as_secs() >= 15
+                                    && !status.stall_error
+                                {
+                                    status.stall_error = true;
+                                    log_ipc_event(&format!(
+                                        "WATCHDOG: time-pos has not advanced for 15s (stuck at {:.2}s), reporting stall error",
+                                        status.time_pos
+                                    ));
+                                    let _ = tx_status.send(status.clone()).await;
+                                }
                             }
                         } else {
                             last_adv_time = std::time::Instant::now();
@@ -217,6 +260,8 @@ impl MpvIpc {
                                 status.stall_error = false;
                                 prev_time_pos = -1.0;
                                 last_adv_time = std::time::Instant::now();
+                                seek_recovery_attempts = 0;
+                                last_seek_recovery = None;
                                 log_ipc_event(&format!("Command: loadfile replace {url}"));
                                 json!({ "command": ["loadfile", url, "replace", -1, {"start": "0"}], "request_id": 1 })
                             }
@@ -230,6 +275,8 @@ impl MpvIpc {
                                 status.stall_error = false;
                                 prev_time_pos = -1.0;
                                 last_adv_time = std::time::Instant::now();
+                                seek_recovery_attempts = 0;
+                                last_seek_recovery = None;
                                 log_ipc_event(&format!("Command: loadfile replace {url} start={start}"));
                                 json!({ "command": ["loadfile", url, "replace", -1, {"start": start.to_string()}], "request_id": 1 })
                             }
@@ -242,6 +289,8 @@ impl MpvIpc {
                                 status.time_pos = start;
                                 prev_time_pos = -1.0;
                                 last_adv_time = std::time::Instant::now();
+                                seek_recovery_attempts = 0;
+                                last_seek_recovery = None;
                                 json!({"command":["loadfile",url,"replace",-1,{"start":start.to_string(),"ytdl-format":format,"pause":if paused {"yes"} else {"no"}}],"request_id":1})
                             }
                             IpcCommand::ToggleMute => json!({ "command": ["cycle", "mute"] }),
@@ -249,7 +298,7 @@ impl MpvIpc {
                             IpcCommand::Play => json!({ "command": ["set_property", "pause", false] }),
                             IpcCommand::Pause => json!({ "command": ["set_property", "pause", true] }),
                             IpcCommand::Seek(secs, true) => json!({ "command": ["seek", secs, "relative"] }),
-                            IpcCommand::Seek(secs, false) => json!({ "command": ["seek", secs, "absolute"] }),
+                            IpcCommand::Seek(secs, false) => json!({ "command": ["seek", secs, "absolute+keyframes"] }),
                             IpcCommand::SetVolume(v) => json!({ "command": ["set_property", "volume", v] }),
                             IpcCommand::AdjustVolume(dv) => json!({ "command": ["add", "volume", dv] }),
                             IpcCommand::SetSpeed(s) => json!({ "command": ["set_property", "speed", s] }),
@@ -299,6 +348,8 @@ impl MpvIpc {
                                                         "duration" => status.duration = data.and_then(|d| d.as_f64()).unwrap_or(status.duration),
                                                         "pause" => status.paused = data.and_then(|d| d.as_bool()).unwrap_or(status.paused),
                                                         "paused-for-cache" => status.paused_for_cache = data.and_then(|d| d.as_bool()).unwrap_or(false),
+                                                        "seeking" => status.seeking = data.and_then(|d| d.as_bool()).unwrap_or(false),
+                                                        "percent-pos" => status.percent_pos = data.and_then(|d| d.as_f64()).unwrap_or(status.percent_pos),
                                                         "core-idle" => status.core_idle = data.and_then(|d| d.as_bool()).unwrap_or(false),
                                                         "idle-active" => status.idle_active = data.and_then(|d| d.as_bool()).unwrap_or(false),
                                                         "volume" => status.volume = data.and_then(|d| d.as_f64()).unwrap_or(status.volume),

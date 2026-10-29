@@ -43,6 +43,7 @@ pub struct ThumbnailManager {
     disk_checked: HashSet<CoverKey>,
     wanted: HashSet<String>,
     animated: HashMap<CoverKey, AnimatedCover>,
+    animated_order: VecDeque<CoverKey>,
     animated_pending: HashSet<CoverKey>,
     animated_failed: HashSet<CoverKey>,
     animated_wanted: HashSet<CoverKey>,
@@ -63,6 +64,7 @@ impl ThumbnailManager {
             disk_checked: HashSet::new(),
             wanted: HashSet::new(),
             animated: HashMap::new(),
+            animated_order: VecDeque::new(),
             animated_pending: HashSet::new(),
             animated_failed: HashSet::new(),
             animated_wanted: HashSet::new(),
@@ -175,12 +177,23 @@ impl ThumbnailManager {
         }
         while let Ok((key, result)) = self.animated_rx.try_recv() {
             self.animated_pending.remove(&key);
+            if key.generation != self.generation {
+                continue;
+            }
             has_loaded = true;
             if let Some((frames, delays)) = result.filter(|(frames, _)| !frames.is_empty()) {
                 let first_delay = delays
                     .first()
                     .copied()
                     .unwrap_or(Duration::from_millis(120));
+                while self.animated.len() >= 8 {
+                    let Some(oldest) = self.animated_order.pop_front() else {
+                        break;
+                    };
+                    self.animated.remove(&oldest);
+                }
+                self.animated_order.retain(|existing| existing != &key);
+                self.animated_order.push_back(key.clone());
                 self.animated.insert(
                     key,
                     AnimatedCover {
@@ -191,6 +204,9 @@ impl ThumbnailManager {
                     },
                 );
             } else {
+                if self.animated_failed.len() >= 64 {
+                    self.animated_failed.clear();
+                }
                 self.animated_failed.insert(key);
             }
         }
@@ -330,6 +346,11 @@ impl ThumbnailManager {
         if self.animated_pending.contains(&key) || self.animated_failed.contains(&key) {
             return None;
         }
+        // At most four animated downloads/decodes may be in flight. Static
+        // thumbnails use their own bounded pipeline and are never blocked by GIFs.
+        if self.animated_pending.len() >= 4 {
+            return None;
+        }
         let Ok(runtime) = tokio::runtime::Handle::try_current() else {
             return None;
         };
@@ -453,6 +474,7 @@ impl ThumbnailManager {
         self.cover_pending.clear();
         self.cover_failed.clear();
         self.animated.clear();
+        self.animated_order.clear();
         self.animated_pending.clear();
         self.animated_failed.clear();
         self.animated_wanted.clear();

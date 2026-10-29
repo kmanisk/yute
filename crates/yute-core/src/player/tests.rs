@@ -77,7 +77,7 @@ async fn delayed_ipc_startup_preserves_queued_load_and_observes_before_loading()
         let (stream, _) = listener.accept().await.unwrap();
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
-        for _ in 0..12 {
+        for _ in 0..14 {
             let request: Value =
                 serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
             assert_eq!(request["command"][0], "observe_property");
@@ -414,7 +414,7 @@ async fn absolute_seek_commands_use_seconds_in_json_ipc() {
             let value: Value = serde_json::from_str(&line).unwrap();
             if value["command"][0] == "seek" {
                 assert_eq!(value["command"][1], 80.0);
-                assert_eq!(value["command"][2], "absolute");
+                assert_eq!(value["command"][2], "absolute+keyframes");
                 break;
             }
         }
@@ -437,7 +437,7 @@ async fn quality_reload_keeps_position_and_pause_and_sets_file_quality() {
         let (stream, _) = listener.accept().await.unwrap();
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
-        for _ in 0..12 {
+        for _ in 0..14 {
             lines.next_line().await.unwrap().unwrap();
         }
         let request: Value =

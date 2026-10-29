@@ -58,6 +58,36 @@ fn invalid_commands_never_panic_or_dispatch() {
     }
 }
 #[test]
+fn set_command_exposes_validated_ui_and_playback_settings() {
+    for input in [
+        ":set icons nerd",
+        ":set columns auto",
+        ":set columns 8",
+        ":set cache-seconds 40",
+        ":set codec av1",
+        ":set hwdec nvdec",
+        ":set autoplay off",
+        ":set history-sync on",
+        ":set thumbnail-cache 512",
+        ":set region IN",
+    ] {
+        assert!(commands::parse(input).is_ok(), "{input}");
+    }
+    for input in [
+        ":set columns 0",
+        ":set columns 9",
+        ":set cache-seconds 999",
+        ":set icons emoji",
+        ":set autoplay maybe",
+        ":set thumbnail-cache 4",
+    ] {
+        assert!(commands::parse(input).is_err(), "{input}");
+    }
+    assert_eq!(commands::completions("set col"), vec!["set columns"]);
+    assert!(commands::completions("set codec ").contains(&"set codec av1".to_string()));
+}
+
+#[test]
 fn completion_and_aliases_are_unambiguous() {
     assert_eq!(commands::completions("his"), vec!["history"]);
     assert!(commands::completions("q").contains(&"queue".to_string()));
