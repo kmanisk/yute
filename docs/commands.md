@@ -14,8 +14,9 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Group | Syntax | Behavior |
 | --- | --- | --- |
 | Navigation | `home`, `subscriptions` (`subs`), `history`, `watch-later` (`wl`), `liked`, `playlists`, `queue`, `local`, `settings`, `account` (`accounts`, `acc`, `a`) | Open the corresponding route. |
-| Search | `search <query>` | YouTube search; preserves the previous route. |
+| Search | `search <query>` | YouTube search; preserves the previous route. Continuation pages are locally relevance-filtered to prevent drift into unrelated personalized recommendations. |
 | Entities | `channel`, `playlist` | Open the selected item's channel ID or selected playlist. Missing identity is reported. |
+| Watch dashboard | `details` (`now`, `watch`, `video-info`), `comments`, `description` (`desc`), `suggestions` (`up-next`) | Open/focus the currently playing video dashboard without restarting MPV. |
 | Playback | `play`, `pause`, `toggle`, `stop`, `next`, `prev`, `mute` | External yute-managed MPV only. `next` consumes the next queued video; `prev` uses bounded session playback history. |
 | Seek | `seek +30`, `seek -10`, `seek 1:20`, `seek 1:02:30` | Relative seconds or absolute time, never percentages for colon timestamps. |
 | Volume | `volume 50`, `volume +5`, `volume -5` (`vol`) | Absolute 0–100 or bounded relative change. |
@@ -26,6 +27,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Browser | `open`, `open channel` | Open the typed entity URL or selected item's channel through `xdg-open`. No embedded browser. |
 | Clipboard | `copy url`, `copy title`, `copy channel` | Native `wl-copy` on Wayland or `xclip` on X11, invoked only by the copy action. |
 | Refresh | `refresh`, `refresh hard` | Network refresh of the current route; hard is an alias, not a disk-cache purge. Normal `r` can retry continuation failures. |
+| View | `view [toggle|grid|list]`, `grid`, `list` | Switch the active feed layout immediately without opening Settings. |
 | Filtering | `filter all/videos/shorts/live/playlists/channels`, `filter <query>`, `filter` | Named types select a tab; other text filters loaded titles. Omit the query to clear the title filter. |
 | Shorts | `shorts on`, `shorts off`, `shorts toggle` | Re-filter and save the visibility preference. Settings also offers Hidden outside Shorts, which also hides saved Shorts; explicitly opening Shorts always works. |
 | Route names | `goto <route>` | Navigate to a canonical route; Tab lists available routes. |
@@ -35,7 +37,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Download | `download [playlist] [video|audio] [best|2160p|1440p|1080p|720p|480p|360p|opus|aac|mp3|flac|m4a]` | Start a safe yt-dlp download. Playlist video qualities are per-item ceilings; conversion choices require ffmpeg. |
 | Sidebar | `sidebar`, `sidebar show`, `sidebar hide`, `sidebar toggle` | Toggle or explicitly set visibility; hidden reclaims all width. |
 | Help | `help`, `help <command>`, `keys` | Concise command help; Esc, q or Enter closes it. |
-| Quit | `quit` (`q`), `quit!` (`q!`) | Confirm application quit or quit immediately. Outside text input, q quits. |
+| Quit | `quit` (`q`), `quit!` (`q!`) | `:quit` confirms quit. Normal-mode `q` navigates back outside Home; on Home it opens a yes/no quit prompt. `:quit!` exits immediately. |
 
 Prefix commands with `:` in the application. Empty, malformed, unknown and
 non-finite numeric arguments produce status errors rather than launching a process.
@@ -54,7 +56,7 @@ MediaServiceCore's V2 accounts_list read mask and branded X-Goog-Pageid header.
 Subscription/rating commands use existing InnerTube endpoints; they are not locally
 simulated, and live authenticated mutations were not performed during development.
 
-Watch Later add/remove, like/dislike, subscription and supported history removal use authenticated backend mutations and update local state only after confirmation. Persistent command history remains intentionally absent. Runtime theme and graphics preferences apply live where the active terminal supports them; terminal-protocol changes still depend on what that terminal actually confirms.
+Watch Later add/remove, like/dislike, subscription and supported history removal use authenticated backend mutations and update local state only after confirmation. Command history is bounded to the current Yute session and is intentionally not persisted across launches. Runtime theme and graphics preferences apply live where the active terminal supports them; terminal-protocol changes still depend on what that terminal actually confirms.
 
 ## Browsing preferences
 
@@ -67,6 +69,8 @@ This supersedes the legacy `grid.show_shorts` preference. Home, Subscriptions,
 Search and ordinary channel tabs hide Shorts by default, without deleting cached
 items. Explicit Shorts filters/tabs show them. History, playlists, Watch Later,
 Liked, Queue and Local preserve explicit content. `never` also hides saved Shorts and suggestions; explicit Shorts filters and channel Shorts tabs still work. `:shorts` explicitly changes and saves this preference without fetching again.
+
+Local is intentionally offline-first: it always scans the configured `[downloads].directory` recursively (plus any optional `[local].dirs`) and does not require network access. This makes yt-dlp downloads immediately browsable when the laptop is offline.
 
 Search and command rows support Left/Right, Home/End, Ctrl+A/E, Ctrl+U/W and
 Unicode-safe editing. Command Up/Down recalls session history. `g` shows a small
@@ -86,15 +90,9 @@ claim endless server-side radio continuation.
 
 ## Watch and settings update
 
-Normal `q` quits; Esc or Shift+H goes back and Shift+L goes forward. `gq` still opens
-Queue. Alt+E shows and focuses the sidebar, or hides it when it already has focus.
-The header has no permanent sidebar hint, and the footer has no NORMAL label.
+Normal `q` goes back. On Home it opens a yes/no quit prompt; Ctrl+q and `:quit!` remain force-exit paths. Esc or Shift+H goes back and Shift+L goes forward. `gq` still opens Queue. `Space e` or Alt+E shows and focuses the sidebar, or hides it when it already has focus. `yy` copies the selected/current video URL, `zz` centers the current row, and `v` toggles grid/list view live. These bindings are configurable through `[keys]`, Settings, `:set`, and `YUTE_KEY_*` launch overrides. The header has no permanent sidebar hint, and the footer is limited to two functional rows.
 
-Watch: d/c/w focus Description/Comments/Suggestions. Tab or h/l move between
-sections; j/k scroll or select. Enter opens the selected suggestion/link. +/- rate
-the video or focused comment; n starts a comment and r replies. Text input consumes
-normal keys. Real action parameters and authentication are required; absent
-capabilities are reported rather than simulated. Enter posts a draft; Esc cancels.
+Watch: d/c/w focus Description/Comments/Suggestions. Tab or h/l move between sections; j/k scroll or select. Enter opens a selected suggestion or a comment reply thread. +/- rate the video or focused comment. Comment reactions first resolve the focused comment detail continuation and then use YouTube's active toggle endpoint. `n`/`r` open compose only when the response exposes create/reply parameters; otherwise Yute reports that posting is unavailable for the TV client rather than simulating success. Text input consumes normal keys; Enter submits a supported draft and Esc cancels.
 Description links are underlined; [/] selects a link and Shift+O opens it. Lowercase o opens the video in the browser.
 
 `:quality [480p|720p|1080p|1440p|2160p|best]` reports or changes quality. Numeric
@@ -102,10 +100,7 @@ aliases such as `:quality 720` and `:quality 4k` work. With active MPV this relo
 once at the current position, preserving pause. `yute --quality 720p` applies a
 session limit at startup. Quality completion offers actual supported presets.
 
-Settings uses compact step selectors/toggles and a stream buffer slider. Buffer
-presets are 5/10/20/40/60 seconds with 32/64/128/192/256 MiB packet budgets. The
-slider updates active MPV properties; dedicated-profile launches use the same
-values. Initial playback does not wait to fill the entire cache horizon.
+Settings uses compact selectors and Enter-driven choice/text editors; paths, language tags, and configurable key sequences can be typed directly. Large YouTube seeks use keyframe-oriented OSC dragging, a bounded seekable demux cache, short network timeouts, and bounded FFmpeg reconnects so fragmented DASH streams recover instead of stalling indefinitely. The configured stream cache remains bounded; dedicated YouTube playback enforces a 20-second minimum readahead for seek stability even if an older config selects 5 or 10 seconds. Yute does not pre-download media before playback.
 
 
 ## Item menu
@@ -166,7 +161,7 @@ icons. The sidebar and item menu share semantic glyphs with width-aware alignmen
 
 ## Theme, graphics and text
 
-`:theme terminal` follows the terminal palette using Reset/ANSI semantic roles. `:theme auto` selects `theme_dark` or `theme_light` after a bounded background query; config/theme files under `~/.config/yute/` reload from filesystem events. `NO_COLOR` removes decorative colors while retaining useful modifiers. `:theme check` reports known explicit-color contrast problems.
+`youtube-dark` is the built-in red/black YouTube-inspired theme. `:theme terminal` follows the terminal palette using Reset/ANSI semantic roles. `:theme auto` selects `theme_dark` or `theme_light` after a bounded background query; config/theme files under `~/.config/yute/` reload from filesystem events. `NO_COLOR` removes decorative colors while retaining useful modifiers. `:theme check` reports known explicit-color contrast problems.
 
 `:graphics auto` starts safely with halfblocks and promotes only after terminal replies confirm Kitty, Sixel or supported iTerm2 behavior. `YUTE_GRAPHICS` overrides the configured mode for one process. Multiplexed sessions conservatively fall back to halfblocks when passthrough has not been established.
 

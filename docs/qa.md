@@ -90,3 +90,14 @@ Interactive TV OAuth and personalized Subscriptions/History/Watch Later/Liked/
 Playlists/writes still require the user's authorization. No cookie session was
 used to substitute for that validation. Kitty/Sixel visual review also remains
 human QA; environment hints are not graphics-negotiation proof.
+
+## Watch dashboard/comment media
+
+- [ ] `:details` opens the active video without restarting MPV; d/c/w and Tab/h/l switch Description, Comments and Suggestions.
+- [ ] Comment avatars, reply counts and nested thread opening match the returned YouTube data.
+- [ ] Like/dislike on a focused comment resolves the detail continuation first and toggles the correct server action.
+- [ ] Image attachments render through the selected graphics protocol; GIFs/WebP animate only while visible and stop driving redraws after leaving Comments.
+- [ ] When create/reply params are absent, posting controls remain unavailable and the UI offers `:open` rather than reporting fake success.
+- [ ] `q` navigates back; Home `q` shows yes/no quit confirmation; `yy`, `zz`, `v`, `Space e`, and Alt-e work.
+- [ ] Local works with networking disabled and recursively discovers media under `[downloads].directory`.
+- [ ] Large MPV seek/scrub jumps recover without multi-minute stalls; verify several DASH/AV1/VP9 videos and inspect `~/.cache/yute/mpv.log` on failure.

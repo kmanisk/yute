@@ -147,7 +147,7 @@ Normal mode is the default.
 | `g` | Navigation prefix |
 | `ga` | Accounts |
 | `g,` | Settings (`go` remains compatible) |
-| `Alt-e` / `b` | Show, focus or hide the sidebar |
+| `Space e` / `Alt-e` / `b` | Show, focus or hide the sidebar |
 | `Tab` | Cycle pane focus |
 | `gg` / `G` | First / last item |
 | `Ctrl-d` / `Ctrl-u` | Half-page down / up |
@@ -156,10 +156,12 @@ Normal mode is the default.
 | `a` | Add selected video to queue |
 | `S` | Subscribe / unsubscribe when the selected entity has a channel |
 | `d` | Download the selected video or playlist |
-| `y` | Copy selected URL |
+| `yy` | Copy selected/current video URL |
 | `o` | Open selected entity in the browser |
+| `v` | Toggle grid/list view live |
+| `zz` | Center the selected row |
 | `?` | Contextual help |
-| `Esc` / `q` | Previous route / quit at root |
+| `Esc` / `q` | Previous route; on Home `q` opens a yes/no quit confirmation |
 
 `Enter` is driven by the selected entity type:
 
@@ -168,6 +170,14 @@ video / Short / live  ──▶ MPV
 channel               ──▶ Channel view
 playlist              ──▶ Playlist view
 ```
+
+## Watch dashboard
+
+`:details` (aliases `:now`, `:watch`, `:video-info`) opens the currently playing video's dashboard without restarting MPV. `d`, `c`, and `w` focus Description, Comments, and Suggestions; `Tab` or `h/l` moves between sections. Comments render author avatars, reply counts, reaction state, and supported image/GIF attachments. Animated media is decoded with bounded size/frame limits and only schedules redraws while the media is visible.
+
+Comment like/dislike follows YouTube's focused-comment detail continuation before using the active toggle action. Posting/reply controls are shown only when the current YouTube response exposes writable create/reply parameters; otherwise Yute reports that posting is unavailable for this TV client and `:open` remains the browser fallback.
+
+Search continuation pages receive an additional local relevance pass so long scrolling does not silently degrade into unrelated personalized recommendations. The first search page remains YouTube-ranked; later pages must still match the query in title/channel metadata.
 
 ## Item actions
 
@@ -198,6 +208,11 @@ Press `:` from Normal mode.
 ```text
 :search linux racing
 :filter videos
+:view toggle
+:details
+:comments
+:description
+:suggestions
 :shorts off
 :quality 1080p
 :quality best
@@ -208,6 +223,8 @@ Press `:` from Normal mode.
 :graphics auto
 :queue add
 :sidebar toggle
+:set scrolloff 3
+:set download-dir ~/Videos/Yute
 :account
 :account whoami
 :copy url
@@ -265,13 +282,22 @@ Example:
 [general]
 graphics = "auto"        # auto | kitty | iterm2 | sixel | halfblocks | none
 icons = "auto"           # auto | nerd | unicode | ascii | none
-theme = "terminal"       # terminal | auto | gruvbox-dark | gruvbox-light | custom name
+theme = "terminal"       # terminal | auto | youtube-dark | gruvbox-dark | gruvbox-light | custom name
 theme_dark = "gruvbox-dark"
 theme_light = "gruvbox-light"
 
 [ui]
 action_bar = "auto"      # auto | off
 sidebar_channels = false
+scrolloff = 3             # Vim-style context rows
+quit_on_home_only = true
+
+[keys]
+sidebar = "space e"
+sidebar_alt = "alt-e"
+copy_url = "yy"
+center = "zz"
+quit = "q"
 
 [text]
 emoji = "auto"           # auto | keep | strip
@@ -287,7 +313,7 @@ sidebar_expanded = false
 [playback]
 max_resolution = "1080p" # 480p | 720p | 1080p | 1440p | 2160p | best
 hwdec = "auto-safe"
-stream_cache_seconds = 20
+stream_cache_seconds = 20    # dedicated YouTube playback uses at least 20s for seek stability
 use_user_mpv_config = false
 osd_bar = false
 autoplay = true
