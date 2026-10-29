@@ -175,7 +175,7 @@ playlist              ──▶ Playlist view
 
 `:details` (aliases `:now`, `:watch`, `:video-info`) opens the currently playing video's dashboard without restarting MPV. `d`, `c`, and `w` focus Description, Comments, and Suggestions; `Tab` or `h/l` moves between sections. Comments render author avatars, reply counts, reaction state, and supported image/GIF attachments. Animated media is decoded with bounded size/frame limits and only schedules redraws while the media is visible.
 
-Comment like/dislike follows YouTube's focused-comment detail continuation before using the active toggle action. Posting/reply controls are shown only when the current YouTube response exposes writable create/reply parameters; otherwise Yute reports that posting is unavailable for this TV client and `:open` remains the browser fallback.
+Comment like/dislike follows YouTube's focused-comment detail continuation before using the active toggle action. `n` creates a top-level comment, `r` replies to the selected thread, and `x` offers confirmed deletion only for comments Yute can identify as yours. The same operations are available through `:comment new|reply|delete|like|dislike`. Create/reply/delete parameters are generated from the TVHTML5 write protocol and local state changes happen only after YouTube acknowledges the request. Older saved OAuth tokens may require one `:account add` re-login to receive the current YouTube write scope; reading and reactions continue to use the existing session.
 
 Search continuation pages receive an additional local relevance pass so long scrolling does not silently degrade into unrelated personalized recommendations. The first search page remains YouTube-ranked; later pages must still match the query in title/channel metadata.
 
@@ -211,6 +211,9 @@ Press `:` from Normal mode.
 :view toggle
 :details
 :comments
+:comment new
+:comment reply
+:comment delete
 :description
 :suggestions
 :shorts off
@@ -245,7 +248,19 @@ Commands support completion and history. See [`docs/commands.md`](docs/commands.
 Use `:play-select` or Shift-Enter → Play / quality to choose real available
 video formats; `:audio` opens original audio streams. Playback stays in external
 MPV, with no pre-download or conversion. Manual choices apply to one playback.
-Run `yute doctor` from your shell for bounded diagnostics without token output.
+
+For large seek/scrub jumps, Yute uses keyframe-oriented IPC seeks and watches MPV's
+`seeking`/cache state. A real MPV 0.41 DASH audit on the problematic seek case showed
+a single 40% seek recovering in about two seconds, while the stock OSC's rapid
+mouse-drag seek burst remained stuck past 30 seconds. With **MPV seekbar** off (the
+safe default), Yute uses MPV's upstream `slimbottombar` OSC layout: normal transport
+controls remain, but the draggable seekbar that produced the storm is absent. Turn
+**MPV seekbar** on if you explicitly want the stock draggable bar. If a network
+stream still stalls, Yute performs one bounded fresh-stream reload of the same
+URL/format at the selected position; the controlled audit recovered the wedged
+stream in about nine seconds. It never loops reloads and never applies this recovery
+to Local files. Run `yute doctor` from your shell for bounded diagnostics without
+token output.
 
 ## Accounts
 

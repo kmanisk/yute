@@ -97,7 +97,7 @@ human QA; environment hints are not graphics-negotiation proof.
 - [ ] Comment avatars, reply counts and nested thread opening match the returned YouTube data.
 - [ ] Like/dislike on a focused comment resolves the detail continuation first and toggles the correct server action.
 - [ ] Image attachments render through the selected graphics protocol; GIFs/WebP animate only while visible and stop driving redraws after leaving Comments.
-- [ ] When create/reply params are absent, posting controls remain unavailable and the UI offers `:open` rather than reporting fake success.
+- [ ] With a freshly authorized TV OAuth account, `n` posts a top-level comment and `r` posts a thread reply; local state changes only after YouTube acknowledges the write. Older tokens should show the one-time `:account add` write-scope re-login message instead of fake success.
 - [ ] `q` navigates back; Home `q` shows yes/no quit confirmation; `yy`, `zz`, `v`, `Space e`, and Alt-e work.
 - [ ] Local works with networking disabled and recursively discovers media under `[downloads].directory`.
-- [ ] Large MPV seek/scrub jumps recover without multi-minute stalls; verify several DASH/AV1/VP9 videos and inspect `~/.cache/yute/mpv.log` on failure.
+- [ ] With `MPV seekbar` off, MPV keeps slim OSC transport controls without the draggable seekbar; repeated large seeks must not produce a seek storm. With the full seekbar explicitly enabled, verify the one-shot stream-reload fallback recovers a stalled DASH seek. Test AV1/VP9/H.264 and inspect `~/.cache/yute/mpv.log` on failure.
