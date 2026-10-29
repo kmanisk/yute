@@ -48,6 +48,10 @@ fn no_color_downgrade_and_contrast_do_not_invent_reset_rgb() {
         .iter()
         .any(|s| s.starts_with("text:")));
     assert!(Theme::terminal().contrast_warnings().is_empty());
+    assert!(Theme::parse("[roles.text]\nfg='black'\nbg='black'", caps())
+        .unwrap()
+        .contrast_warnings()
+        .is_empty());
     let no = Theme::parse(
         text,
         Capabilities {
@@ -80,6 +84,21 @@ fn no_color_downgrade_and_contrast_do_not_invent_reset_rgb() {
     )
     .unwrap();
     assert!(!matches!(low.text, Color::Rgb(..) | Color::Indexed(_)));
+    let ansi = Capabilities {
+        truecolor: false,
+        colors256: false,
+        ..caps()
+    };
+    for index in 0..=255 {
+        assert!(!matches!(
+            yute::theme::downgrade(Color::Indexed(index), ansi),
+            Color::Rgb(..) | Color::Indexed(_)
+        ));
+    }
+    assert_eq!(
+        yute::theme::downgrade(Color::Indexed(200), caps()),
+        Color::Indexed(200)
+    );
 }
 #[test]
 fn reports_are_separate_from_keys_and_parse_fragmented_backgrounds() {
@@ -111,6 +130,10 @@ fn malformed_reports_do_not_overflow_or_leak_as_keys() {
     let mut d = Decoder::default();
     let _ = d.feed(b"\x1b]11;rgb:ffffffff/0/0\x07");
     assert_eq!(d.report.background, None);
+    assert!(d.feed(b"\x1b[6;0;0t\x1b[6;99999;10t").is_empty());
+    assert_eq!(d.report.cells, None);
+    assert!(d.feed(b"\x1b]1337;ReportCellSize=17.5;8;2\x07").is_empty());
+    assert_eq!(d.report.cells, Some((16, 35)));
 }
 #[test]
 fn graphics_auto_needs_a_reply_and_mux_is_safe() {
@@ -125,6 +148,24 @@ fn graphics_auto_needs_a_reply_and_mux_is_safe() {
         graphics_kind("iterm2", &Default::default(), false),
         ProtocolType::Iterm2
     );
+}
+#[test]
+fn image_visibility_honours_off_alias_and_exact_overlay_intersections() {
+    use ratatui::layout::Rect;
+    let mut app = app();
+    let image = Rect::new(10, 10, 8, 4);
+    for mode in ["off", "none"] {
+        app.config.general.graphics = mode.into();
+        assert!(!ui::thumbnail::visible(&app, image));
+    }
+    app.config.general.graphics = "halfblocks".into();
+    assert!(ui::thumbnail::visible(&app, image));
+    app.overlay_area = Some(Rect::new(17, 13, 4, 3));
+    assert!(!ui::thumbnail::visible(&app, image));
+    app.overlay_area = Some(Rect::new(18, 14, 4, 3));
+    assert!(ui::thumbnail::visible(&app, image));
+    app.overlay_area = None;
+    assert!(ui::thumbnail::visible(&app, image));
 }
 #[test]
 fn text_keeps_long_word_remainder_and_complex_scripts_inside_bounds() {

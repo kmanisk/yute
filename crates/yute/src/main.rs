@@ -117,6 +117,7 @@ async fn run() -> anyhow::Result<()> {
     let _ = execute!(
         out,
         EnterAlternateScreen,
+        crossterm::event::EnableFocusChange,
         crossterm::cursor::Hide,
         PushKeyboardEnhancementFlags(
             KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
@@ -129,8 +130,10 @@ async fn run() -> anyhow::Result<()> {
     // Setup panic hook to cleanly restore terminal
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
+        yute::terminal::stop_notifications();
         let _ = execute!(
             stdout(),
+            crossterm::event::DisableFocusChange,
             PopKeyboardEnhancementFlags,
             LeaveAlternateScreen,
             crossterm::cursor::Show
@@ -186,6 +189,7 @@ async fn run() -> anyhow::Result<()> {
     let mut first_frame = true;
     let mut first_home = true;
     let mut graphics_layout = String::new();
+    let mut kitty_placements = false;
 
     while !app.should_quit {
         if dirty {
@@ -194,8 +198,13 @@ async fn run() -> anyhow::Result<()> {
                 &app,
                 ratatui::layout::Rect::new(0, 0, terminal.size()?.width, terminal.size()?.height),
             );
+            let next_kitty = yute::terminal::images_enabled(&app.config.general.graphics)
+                && matches!(
+                    yute::terminal::initial_picker(&app.config.general.graphics).protocol_type(),
+                    ratatui_image::picker::ProtocolType::Kitty
+                );
             let next_layout = format!(
-                "{:?}:{:?}:{:?}:{}:{}:{:?}:{}:{}:{}:{:?}",
+                "{:?}:{:?}:{:?}:{}:{}:{:?}:{}:{}:{}:{:?}:{:?}",
                 terminal.size()?,
                 app.screen,
                 app.focus,
@@ -210,7 +219,8 @@ async fn run() -> anyhow::Result<()> {
                     app.account_picker,
                     app.login_modal.is_some(),
                     app.command_help.is_some()
-                )
+                ),
+                (&app.config.general.graphics, yute::terminal::report())
             );
             if next_layout != graphics_layout {
                 // Nothing exists to erase before the initial frame. Structural
@@ -219,11 +229,7 @@ async fn run() -> anyhow::Result<()> {
                 // Crossterm full-screen clear while preventing stale overlay cells.
                 if !first_frame {
                     use std::io::Write;
-                    if matches!(
-                        yute::terminal::initial_picker(&app.config.general.graphics)
-                            .protocol_type(),
-                        ratatui_image::picker::ProtocolType::Kitty
-                    ) {
+                    if kitty_placements || next_kitty {
                         terminal
                             .backend_mut()
                             .write_all(b"\x1b_Ga=d,d=a,q=2;\x1b\\")?;
@@ -232,6 +238,7 @@ async fn run() -> anyhow::Result<()> {
                     terminal.draw(|f| f.render_widget(ratatui::widgets::Clear, f.area()))?;
                 }
                 graphics_layout = next_layout;
+                kitty_placements = next_kitty;
             }
             terminal.draw(|f| ui::draw(f, &mut app))?;
             if let Some(start) = app.trace_account_frame.take() {
@@ -328,7 +335,12 @@ async fn run() -> anyhow::Result<()> {
     }
     let _ = app.thumbs.cache().prune_thumbnails();
     let _ = app.thumbs.cache().prune_feeds(3);
-    let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+    yute::terminal::stop_notifications();
+    let _ = execute!(
+        stdout(),
+        crossterm::event::DisableFocusChange,
+        PopKeyboardEnhancementFlags
+    );
     disable_raw_mode()?;
     execute!(stdout(), LeaveAlternateScreen, crossterm::cursor::Show)?;
 
@@ -5241,6 +5253,7 @@ async fn run_doctor() -> anyhow::Result<()> {
         {
             yute::terminal::remember_report(report);
         }
+        yute::terminal::stop_notifications();
         crossterm::terminal::disable_raw_mode()?;
     }
     let theme = yute::theme::Theme::resolve(&config, yute::terminal::background_light())?;
@@ -5263,9 +5276,14 @@ async fn run_doctor() -> anyhow::Result<()> {
         display_text(&std::env::var("TERM_PROGRAM").unwrap_or_else(|_| "unset".into()))
     );
     println!(
-        "Graphics: {:?} (configured={}; auto requires protocol replies, otherwise safe halfblocks)",
+        "Graphics: {:?} (configured={}; detection method: {})",
         yute::terminal::initial_picker(&config.general.graphics).protocol_type(),
-        display_text(&config.general.graphics)
+        display_text(&config.general.graphics),
+        yute::terminal::graphics_method(
+            &config.general.graphics,
+            &yute::terminal::report(),
+            yute::terminal::multiplexed()
+        )
     );
     match crossterm::terminal::window_size() {
         Ok(size) => println!(
@@ -5276,7 +5294,10 @@ async fn run_doctor() -> anyhow::Result<()> {
             println!("Warning · terminal dimensions unavailable (stdout may not be a terminal)")
         }
     }
-    match yute::terminal::cell_size().await {
+    match yute::terminal::cell_size()
+        .await
+        .or(yute::terminal::report().cells)
+    {
         Some((w, h)) => println!("Terminal cell dimensions: {w}x{h} pixels"),
         None => println!(
             "Warning · terminal cell dimensions unavailable; rendering uses cached/default hints"

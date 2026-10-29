@@ -2,6 +2,14 @@
 use ratatui::{buffer::CellDiffOption, layout::Rect, widgets::Paragraph, Frame};
 use std::num::NonZeroU16;
 
+pub fn visible(app: &crate::app::App, area: Rect) -> bool {
+    !area.is_empty()
+        && crate::terminal::images_enabled(&app.config.general.graphics)
+        && !app
+            .overlay_area
+            .is_some_and(|overlay| overlay.intersects(area))
+}
+
 pub fn badge(f: &mut Frame, widget: Paragraph<'_>, area: Rect) {
     if area.is_empty() {
         return;

@@ -109,8 +109,6 @@ pub fn parse_color(s: &str) -> Result<Color> {
 fn rgb(c: Color) -> Option<(u8, u8, u8)> {
     match c {
         Color::Rgb(r, g, b) => Some((r, g, b)),
-        Color::Black => Some((0, 0, 0)),
-        Color::White => Some((255, 255, 255)),
         Color::Indexed(i) if i >= 232 => {
             let v = 8 + 10 * (i - 232);
             Some((v, v, v))
@@ -127,25 +125,7 @@ pub fn downgrade(c: Color, caps: Capabilities) -> Color {
     if caps.no_color {
         return Color::Reset;
     }
-    let Color::Rgb(r, g, b) = c else {
-        return c;
-    };
-    if caps.truecolor {
-        return c;
-    }
-    let distance = |p: (u8, u8, u8)| {
-        (i32::from(r) - i32::from(p.0)).pow(2)
-            + (i32::from(g) - i32::from(p.1)).pow(2)
-            + (i32::from(b) - i32::from(p.2)).pow(2)
-    };
-    if caps.colors256 {
-        return Color::Indexed(
-            (16..=255)
-                .min_by_key(|i| distance(rgb(Color::Indexed(*i)).unwrap()))
-                .unwrap(),
-        );
-    }
-    let ansi = [
+    const ANSI: [Color; 16] = [
         Color::Black,
         Color::Red,
         Color::Green,
@@ -163,6 +143,25 @@ pub fn downgrade(c: Color, caps: Capabilities) -> Color {
         Color::LightCyan,
         Color::White,
     ];
+    let (r, g, b) = match c {
+        Color::Rgb(..) if caps.truecolor => return c,
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Indexed(i) if i < 16 && !caps.colors256 => return ANSI[i as usize],
+        Color::Indexed(_) if !caps.colors256 => rgb(c).unwrap(),
+        _ => return c,
+    };
+    let distance = |p: (u8, u8, u8)| {
+        (i32::from(r) - i32::from(p.0)).pow(2)
+            + (i32::from(g) - i32::from(p.1)).pow(2)
+            + (i32::from(b) - i32::from(p.2)).pow(2)
+    };
+    if caps.colors256 {
+        return Color::Indexed(
+            (16..=255)
+                .min_by_key(|i| distance(rgb(Color::Indexed(*i)).unwrap()))
+                .unwrap(),
+        );
+    }
     let values = [
         (0, 0, 0),
         (128, 0, 0),
@@ -181,7 +180,7 @@ pub fn downgrade(c: Color, caps: Capabilities) -> Color {
         (0, 255, 255),
         (255, 255, 255),
     ];
-    ansi[(0..16).min_by_key(|i| distance(values[*i])).unwrap()]
+    ANSI[(0..16).min_by_key(|i| distance(values[*i])).unwrap()]
 }
 impl Theme {
     pub fn terminal() -> Self {

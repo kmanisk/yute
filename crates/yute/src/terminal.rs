@@ -73,6 +73,30 @@ pub fn background_light() -> Option<bool> {
 pub fn multiplexed() -> bool {
     std::env::var_os("TMUX").is_some() || std::env::var_os("ZELLIJ").is_some()
 }
+pub fn images_enabled(mode: &str) -> bool {
+    let override_mode = std::env::var("YUTE_GRAPHICS").ok();
+    !matches!(override_mode.as_deref().unwrap_or(mode), "off" | "none")
+}
+pub fn graphics_method(mode: &str, r: &crate::terminal_input::Report, mux: bool) -> &'static str {
+    if !images_enabled(mode) {
+        return "disabled";
+    }
+    if mux {
+        return "multiplexer fallback; passthrough not confirmed";
+    }
+    let mode = std::env::var("YUTE_GRAPHICS").unwrap_or_else(|_| mode.into());
+    match mode.as_str() {
+        "auto" => match graphics_kind(&mode, r, false) {
+            ProtocolType::Kitty => "Kitty query confirmed",
+            ProtocolType::Sixel => "Sixel primary device attributes confirmed",
+            ProtocolType::Iterm2 => "iTerm2 cell report and terminal identity",
+            _ => "halfblocks fallback; no image protocol confirmed",
+        },
+        "halfblocks" => "explicit halfblocks selection",
+        "kitty" | "sixel" | "iterm2" => "explicit protocol override; confirmation bypassed",
+        _ => "halfblocks fallback; unknown configured protocol",
+    }
+}
 pub fn graphics_kind(mode: &str, r: &crate::terminal_input::Report, mux: bool) -> ProtocolType {
     if mux {
         return ProtocolType::Halfblocks;
@@ -104,4 +128,12 @@ pub fn query() {
     let mut out = std::io::stdout();
     let _=out.write_all(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c\x1b]11;?\x1b\\\x1b[?996n\x1b[?2031h\x1b[16t\x1b]1337;ReportCellSize\x07");
     let _ = out.flush();
+}
+pub fn stop_notifications() {
+    use std::io::Write;
+    if !multiplexed() {
+        let mut out = std::io::stdout();
+        let _ = out.write_all(b"\x1b[?2031l");
+        let _ = out.flush();
+    }
 }

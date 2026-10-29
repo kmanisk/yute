@@ -313,7 +313,7 @@ fn render_partial_card(f: &mut Frame, app: &mut App, card: &Card, area: Rect, th
     }
     let url = yute_core::media::thumbs::card_thumbnail_url(card).into_owned();
     let can_draw = app.thumbs.supports_partial()
-        && app.config.general.graphics != "none"
+        && crate::terminal::images_enabled(&app.config.general.graphics)
         && app.overlay_area.is_none()
         && !app.confirming_quit
         && !app.confirming_logout;
@@ -452,7 +452,8 @@ fn render_grid_card(
         f.render_widget(p, thumb_area);
     } else if matches!(card, Card::Channel(_)) && thumb_url.is_empty() {
         render_monogram(f, app, card, thumb_area);
-    } else if !thumb_url.is_empty() && app.config.general.graphics != "none" {
+    } else if !thumb_url.is_empty() && crate::terminal::images_enabled(&app.config.general.graphics)
+    {
         if let Some(proto) = app
             .thumbs
             .get_cover_protocol(&thumb_url, thumb_area.as_size())

@@ -190,7 +190,12 @@ impl Decoder {
                     if final_byte == b'c' && args.starts_with('?') {
                         self.report.sixel = nums.contains(&4);
                     }
-                    if final_byte == b't' && nums.len() == 3 && nums[0] == 6 {
+                    if final_byte == b't'
+                        && nums.len() == 3
+                        && nums[0] == 6
+                        && (1..=1024).contains(&nums[1])
+                        && (1..=1024).contains(&nums[2])
+                    {
                         self.report.cells = Some((nums[2] as u16, nums[1] as u16));
                     }
                     if final_byte == b'I' {

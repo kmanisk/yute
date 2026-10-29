@@ -110,10 +110,16 @@ impl ThumbnailManager {
         self.wanted.clear();
         self.animated_wanted.clear();
     }
-    pub fn finish_frame(&mut self, preloads: Vec<String>, width: u32, height: u32) {
+    pub fn finish_frame(
+        &mut self,
+        preloads: Vec<String>,
+        near_count: usize,
+        width: u32,
+        height: u32,
+    ) {
         for (index, url) in preloads.into_iter().enumerate() {
             self.wanted.insert(url.clone());
-            if index < 8 {
+            if index < near_count {
                 self.loader.near_visible(&url, width, height);
             } else {
                 self.loader.prefetch(&url, width, height);

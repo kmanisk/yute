@@ -1,5 +1,6 @@
 use crate::app::{App, Screen};
 use ratatui::{layout::Rect, style::Modifier, widgets::Paragraph, Frame};
+use unicode_width::UnicodeWidthStr;
 
 pub fn route_name(app: &App) -> String {
     match app.screen {
@@ -44,13 +45,14 @@ pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
         .and_then(|profile| profile.avatar_url.clone());
     // Two terminal cells by one row is approximately square with common 1:2
     // cell geometry and keeps the account avatar compact like YouTube's header.
-    let avatar_w = if avatar_url.is_some() && app.config.general.graphics != "none" {
-        2
-    } else {
-        0
-    };
+    let avatar_w =
+        if avatar_url.is_some() && crate::terminal::images_enabled(&app.config.general.graphics) {
+            2
+        } else {
+            0
+        };
     let width = (size.width / 4)
-        .min(account.chars().count() as u16 + avatar_w + 3)
+        .min((account.width().min(u16::MAX as usize) as u16).saturating_add(avatar_w + 3))
         .max(2 + avatar_w);
     let account_area = Rect::new(size.right() - width, size.y, width, 1);
     let mut text_area = account_area;
@@ -62,8 +64,10 @@ pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
                 avatar_w,
                 1,
             );
-            if let Some(proto) = app.thumbs.get_cover_protocol(&url, avatar_area.as_size()) {
-                f.render_widget(proto, avatar_area);
+            if super::thumbnail::visible(app, avatar_area) {
+                if let Some(proto) = app.thumbs.get_cover_protocol(&url, avatar_area.as_size()) {
+                    f.render_widget(proto, avatar_area);
+                }
             }
             text_area.width = text_area.width.saturating_sub(avatar_w + 1);
         }

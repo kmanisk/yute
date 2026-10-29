@@ -331,7 +331,7 @@ fn render_comments(f: &mut Frame, app: &mut App, area: Rect) {
         if avatar_w > 0 {
             let avatar_area = Rect::new(row_x, y, avatar_w, avatar_h);
             if let Some(url) = &comment.author_thumb {
-                if app.config.general.graphics != "none" {
+                if super::thumbnail::visible(app, avatar_area) {
                     if let Some(proto) = app.thumbs.get_cover_protocol(url, avatar_area.as_size()) {
                         f.render_widget(proto, avatar_area);
                     }
@@ -376,7 +376,13 @@ fn render_comments(f: &mut Frame, app: &mut App, area: Rect) {
 
         if let Some(media) = comment.media.first() {
             let media_h = inner.bottom().saturating_sub(next_y + 1).min(6);
-            if media_h >= 2 && text_w >= 12 && app.config.general.graphics != "none" {
+            if media_h >= 2
+                && text_w >= 12
+                && super::thumbnail::visible(
+                    app,
+                    Rect::new(text_x, next_y, text_w.min(24), media_h),
+                )
+            {
                 let media_w = text_w.min(24);
                 let media_area = Rect::new(text_x, next_y, media_w, media_h);
                 // Animated GIFs use the same bounded image pipeline; when animation
@@ -509,7 +515,7 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
         let image_area = Rect::new(rect.x + u16::from(selected), rect.y, thumb_w, thumb_h);
         let thumbnail_url = yute_core::media::thumbs::card_thumbnail_url(item);
         if !thumbnail_url.is_empty()
-            && app.config.general.graphics != "none"
+            && crate::terminal::images_enabled(&app.config.general.graphics)
             && !app.overlay_area.is_some_and(|a| a.intersects(image_area))
         {
             if let Some(protocol) = app

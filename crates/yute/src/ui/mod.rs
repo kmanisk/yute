@@ -239,8 +239,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let prefetch = app.config.thumbnails.prefetch_pages.min(3);
     let columns = app.rendered_columns.max(1);
     let rows = app.rendered_rows.max(1);
-    let start = (app.scroll_row + rows.saturating_sub(1)) * columns;
-    let preloads = if app.config.general.graphics != "none" {
+    let start = (app.scroll_row + rows) * columns;
+    let preloads = if crate::terminal::images_enabled(&app.config.general.graphics) {
         app.filtered_items()
             .into_iter()
             .skip(start)
@@ -258,6 +258,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     );
     app.thumbs.finish_frame(
         preloads,
+        columns,
         geometry.thumbnail_width as u32 * app.cell_w_px as u32,
         geometry.thumbnail_height as u32 * app.cell_h_px as u32,
     );

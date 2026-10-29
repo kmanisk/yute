@@ -178,7 +178,7 @@ fn render_list_row(
             thumb_area,
         );
     } else if !thumb_url.is_empty()
-        && app.config.general.graphics != "none"
+        && crate::terminal::images_enabled(&app.config.general.graphics)
         && !app
             .overlay_area
             .is_some_and(|area| area.intersects(thumb_area))

@@ -643,10 +643,12 @@ mod pipeline_tests {
         };
         let mut queue = BinaryHeap::new();
         queue.push(make(Priority::Prefetch, 0));
+        queue.push(make(Priority::NearVisible, 3));
         queue.push(make(Priority::Visible, 2));
         queue.push(make(Priority::Visible, 1));
         assert_eq!(queue.pop().unwrap().sequence, 1);
         assert_eq!(queue.pop().unwrap().sequence, 2);
+        assert_eq!(queue.pop().unwrap().sequence, 3);
         assert_eq!(queue.pop().unwrap().sequence, 0);
     }
     #[tokio::test]
