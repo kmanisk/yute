@@ -19,6 +19,35 @@ fn args(mode: Mode, playlist: bool, ffmpeg: bool) -> Vec<String> {
         .collect()
 }
 #[test]
+fn download_command_parser_rejects_invalid_quality_instead_of_selecting_best() {
+    let config = Config::default();
+    for invalid in [
+        "video typo",
+        "video 0p",
+        "video 99999p",
+        "audio wav",
+        "playlist audio best extra",
+        "video playlist 720p",
+    ] {
+        assert!(
+            downloads::parse_mode(invalid, &config).is_err(),
+            "{invalid}"
+        );
+    }
+    for (input, playlist, mode) in [
+        ("video 1080p", false, Mode::Video(Some(1080))),
+        ("video best", false, Mode::Video(None)),
+        ("audio best", false, Mode::Audio("best".into())),
+        ("playlist video 720p", true, Mode::Video(Some(720))),
+        ("playlist audio opus", true, Mode::Audio("opus".into())),
+    ] {
+        assert_eq!(
+            downloads::parse_mode(input, &config).unwrap(),
+            (playlist, mode)
+        );
+    }
+}
+#[test]
 fn command_arguments_cover_ceilings_audio_conversion_archive_and_templates() {
     let a = args(Mode::Video(Some(720)), true, false);
     assert!(a.contains(&"bestvideo[height<=720]+bestaudio/best[height<=720]".into()));

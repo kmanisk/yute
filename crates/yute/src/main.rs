@@ -1812,15 +1812,10 @@ fn open_system_url(url: String, tx: Sender<AppEvent>) {
     });
 }
 fn start_download(app: &mut App, card: Card, tx: Sender<AppEvent>) {
-    let mode = yute_core::downloads::Mode::Video(
-        app.config
-            .downloads
-            .video_quality
-            .trim_end_matches('p')
-            .parse()
-            .ok(),
-    );
-    start_download_mode(app, card, mode, tx);
+    match yute_core::downloads::parse_mode("video", &app.config) {
+        Ok((_, mode)) => start_download_mode(app, card, mode, tx),
+        Err(error) => app.status_text = error.to_string(),
+    }
 }
 fn start_download_mode(
     app: &mut App,
@@ -1828,6 +1823,19 @@ fn start_download_mode(
     mode: yute_core::downloads::Mode,
     tx: Sender<AppEvent>,
 ) {
+    start_download_job(app, card, mode, None, tx);
+}
+fn start_download_job(
+    app: &mut App,
+    card: Card,
+    mode: yute_core::downloads::Mode,
+    exact_height: Option<u32>,
+    tx: Sender<AppEvent>,
+) {
+    if matches!(card, Card::Channel(_)) {
+        app.status_text = "Select a video or playlist to download".into();
+        return;
+    }
     if app.download_active {
         app.status_text = "A download is already running; x in item actions cancels it".into();
         return;
@@ -1835,15 +1843,42 @@ fn start_download_mode(
     app.download_active = true;
     app.download_request = app.download_request.wrapping_add(1);
     let request = app.download_request;
-    app.status_text = "Starting download...".into();
+    app.status_text = if exact_height.is_some() {
+        "Resolving download formats...".into()
+    } else if let yute_core::downloads::Mode::Video(Some(height)) = &mode {
+        format!("Downloading best available quality up to {height}p")
+    } else {
+        "Starting download...".into()
+    };
     let config = app.config.clone();
-    let job = yute_core::downloads::Request {
+    let resolver = app.format_resolver.clone();
+    let video_id = card.id().to_owned();
+    let mut job = yute_core::downloads::Request {
         url: yute::actions::url(&card),
         playlist: matches!(card, Card::Playlist(_)),
         mode,
         ffmpeg: app.ffmpeg,
     };
     let task = tokio::spawn(async move {
+        if let Some(height) = exact_height {
+            let result = async {
+                let formats = resolver.resolve(&video_id, Default::default()).await?;
+                let selected = formats.video(Some(height), None, Some(&config.playback.preferred_codec))?;
+                if selected.height != Some(height) {
+                    anyhow::bail!("{height}p is not available for this video; use the download menu to choose an available quality");
+                }
+                formats.selector(&selected.id)
+            }.await;
+            match result {
+                Ok(selector) => job.mode = yute_core::downloads::Mode::Exact(selector),
+                Err(error) => {
+                    let _ = tx
+                        .send(AppEvent::DownloadComplete(request, Err(error)))
+                        .await;
+                    return;
+                }
+            }
+        }
         let (updates, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let run = yute_core::downloads::run(job, config, updates);
         tokio::pin!(run);
@@ -4499,7 +4534,15 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 app.status_text = "Select a video or playlist first".into();
                 return;
             };
-            if args.is_empty() {
+            if !matches!(card, Card::Video(_) | Card::Playlist(_)) {
+                app.status_text = "Select a video or playlist to download".into();
+                return;
+            }
+            if args.trim() == "playlist" && !matches!(card, Card::Playlist(_)) {
+                app.status_text = "Select a playlist for this download".into();
+                return;
+            }
+            if args.trim().is_empty() || args.trim() == "playlist" {
                 open_item_menu(app);
                 if let Some(menu) = &mut app.action_menu {
                     menu.download = true;
@@ -4507,38 +4550,23 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 }
                 return;
             }
-            if args.contains("playlist") && !matches!(card, Card::Playlist(_)) {
-                app.status_text = "Select a playlist for this download".into();
-                return;
-            }
-            let tokens = args
-                .split_whitespace()
-                .filter(|s| *s != "playlist")
-                .collect::<Vec<_>>();
-            let mode = match tokens.as_slice() {
-                ["video"] => Some(yute_core::downloads::Mode::Video(
-                    app.config
-                        .downloads
-                        .video_quality
-                        .trim_end_matches('p')
-                        .parse()
-                        .ok(),
-                )),
-                ["video", q] => Some(yute_core::downloads::Mode::Video(
-                    q.trim_end_matches('p').parse().ok(),
-                )),
-                ["audio"] => Some(yute_core::downloads::Mode::Audio(
-                    app.config.downloads.audio_mode.clone(),
-                )),
-                ["audio", kind] => Some(yute_core::downloads::Mode::Audio((*kind).into())),
-                _ => None,
-            };
-            if let Some(mode) = mode {
-                start_download_mode(app, card, mode, tx);
-            } else {
-                app.status_text =
-                    "Usage: :download [playlist] video [720p] | audio [best|opus|aac|mp3|flac|m4a]"
-                        .into();
+            match yute_core::downloads::parse_mode(&args, &app.config) {
+                Ok((true, _)) if !matches!(card, Card::Playlist(_)) => {
+                    app.status_text = "Select a playlist for this download".into();
+                }
+                Ok((_, mode)) => {
+                    let exact = match &mode {
+                        yute_core::downloads::Mode::Video(height)
+                            if matches!(card, Card::Video(_))
+                                && args.split_whitespace().count() == 2 =>
+                        {
+                            *height
+                        }
+                        _ => None,
+                    };
+                    start_download_job(app, card, mode, exact, tx);
+                }
+                Err(error) => app.status_text = error.to_string(),
             }
         }
         Command::Theme(name) => match name.as_str() {
@@ -6147,6 +6175,66 @@ mod feed_ui_tests {
         .await;
         assert!(app.action_menu.is_none());
         assert!(app.command_help.is_some());
+    }
+    #[tokio::test]
+    async fn config_reload_is_atomic_and_failed_reload_keeps_theme_and_selection() {
+        let (mut app, cards) = app_and_cards();
+        app.items = cards;
+        app.selected_index = 2;
+        let selected = app.selected_card().unwrap().id().to_string();
+        let mut config = app.config.clone();
+        config.grid.columns = 4;
+        config.general.theme = "gruvbox-light".into();
+        let theme = yute::theme::Theme::load("gruvbox-light");
+        let expected = theme.text;
+        let (tx, _) = channel(16);
+        handle_app_event(
+            &mut app,
+            AppEvent::ConfigReloaded(Box::new(Ok((config, theme)))),
+            tx.clone(),
+        );
+        assert_eq!(app.config.grid.columns, 4);
+        assert_eq!(app.theme.text, expected);
+        assert_eq!(app.selected_card().unwrap().id(), selected);
+        handle_app_event(
+            &mut app,
+            AppEvent::ConfigReloaded(Box::new(Err(anyhow::anyhow!("invalid theme")))),
+            tx,
+        );
+        assert_eq!(app.config.general.theme, "gruvbox-light");
+        assert_eq!(app.theme.text, expected);
+        assert_eq!(app.selected_card().unwrap().id(), selected);
+        assert!(app.status_text.contains("previous state kept"));
+    }
+    #[tokio::test]
+    async fn invalid_download_commands_and_channel_downloads_never_start_jobs() {
+        let (mut app, cards) = app_and_cards();
+        app.items = cards;
+        let (tx, _) = channel(16);
+        dispatch_command(
+            &mut app,
+            yute::commands::Command::Download("video invalid".into()),
+            tx.clone(),
+        );
+        assert!(!app.download_active);
+        assert!(app.status_text.contains("Invalid video quality"));
+        let channel = Card::Channel(yute_core::backend::models::ChannelCard {
+            id: "UCfixture".into(),
+            title: "Fixture".into(),
+            handle: None,
+            subscribers: None,
+            avatar_url: None,
+            verified: false,
+        });
+        start_download_mode(
+            &mut app,
+            channel,
+            yute_core::downloads::Mode::Video(None),
+            tx,
+        );
+        assert!(!app.download_active);
+        assert!(app.download_task.is_none());
+        assert!(app.status_text.contains("Select a video or playlist"));
     }
     #[tokio::test]
     async fn cancelling_download_ignores_already_queued_completion_from_old_job() {

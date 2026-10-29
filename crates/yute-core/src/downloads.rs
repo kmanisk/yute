@@ -12,6 +12,42 @@ pub enum Mode {
     Exact(String),
     Audio(String),
 }
+/// Parse a command before starting a job. Invalid quality must never mean best.
+pub fn parse_mode(input: &str, config: &Config) -> Result<(bool, Mode)> {
+    let mut words = input.split_whitespace().collect::<Vec<_>>();
+    let playlist = words.first() == Some(&"playlist");
+    if playlist {
+        words.remove(0);
+    }
+    let mode = match words.as_slice() {
+        ["video"] => Mode::Video(parse_quality(&config.downloads.video_quality)?),
+        ["video", quality] => Mode::Video(parse_quality(quality)?),
+        ["audio"] => Mode::Audio(config.downloads.audio_mode.clone()),
+        ["audio", kind] => Mode::Audio((*kind).into()),
+        _ => bail!(
+            "Usage: :download [playlist] video [720p|best] | audio [best|opus|aac|mp3|flac|m4a]"
+        ),
+    };
+    if let Mode::Audio(kind) = &mode {
+        if !matches!(
+            kind.as_str(),
+            "best" | "opus" | "aac" | "mp3" | "flac" | "m4a"
+        ) {
+            bail!("Unknown audio mode; choose best, opus, aac, mp3, flac or m4a");
+        }
+    }
+    Ok((playlist, mode))
+}
+fn parse_quality(value: &str) -> Result<Option<u32>> {
+    if value == "best" {
+        return Ok(None);
+    }
+    let height = value.strip_suffix('p').unwrap_or(value).parse::<u32>();
+    match height {
+        Ok(height @ 1..=8640) => Ok(Some(height)),
+        _ => bail!("Invalid video quality; use a resolution such as 720p or best"),
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Request {
     pub url: String,
