@@ -1,3 +1,7 @@
+Historical backend checkpoint; later work is integrated on main. Branch/push
+instructions and incomplete-feature statements below describe that earlier pass.
+See [delivery-validation.md](delivery-validation.md) for the current delivery.
+
 # Historical backend pass: 2026-10-28
 
 This report records the earlier partial pass. The OAuth/UI delivery on 2026-10-29

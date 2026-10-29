@@ -1,5 +1,9 @@
 # Yute UI and release review
 
+This is a historical review. Current theme/graphics/download behavior is documented
+in [configuration.md](configuration.md), and current verification is recorded in
+[delivery-validation.md](delivery-validation.md).
+
 This review supersedes the earlier UI pass notes. The existing project is now
 Yute: crates `yute` and `yute-core`, binary `yute`, configuration in
 `~/.config/yute/`. The separate existing GTK frontend is `yute-gui` and is not

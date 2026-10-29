@@ -128,3 +128,17 @@ manager fullscreen changes, interactive Google approval, multiple Google/brand
 identities, cross-platform keyrings, and the GTK runtime were not verified here.
 The GTK frontend compiles with all features. Native MPV smoke tests use local
 generated media and null outputs; they do not validate remote playback latency.
+
+
+## Terminal polish continuation, 2026-10-29
+
+Final source 403d2cc, using the existing YUTE_TRACE first_frame metric and an
+isolated anonymous 200x40 PTY with 10x20-pixel cells. The historical initial
+polish baseline was 1.419 ms; final-source samples were 2.244 ms and 1.851 ms.
+These individual samples do not establish a statistically controlled improvement.
+An early interval contained one 19-byte style/cursor-only follow-up draw. After
+eight additional settling seconds, two idle seconds produced 0 bytes and 0 CPU
+ticks at 10 ms tick resolution. There is no continuous idle redraw loop.
+Current terminal queries are read by terminal_input.rs; older sections describing
+Crossterm as the input owner or environment-only protocol selection are historical.
+See [delivery-validation.md](delivery-validation.md) for quality gates and limits.

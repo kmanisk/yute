@@ -73,7 +73,7 @@ For each available terminal, test dark and light palettes on Wayland and X11 whe
 | Konsole | Sixel when reported | [ ] | [ ] | [ ] | [ ] | [ ] |
 | xterm + Sixel | Sixel | [ ] | [ ] | [ ] | [ ] | [ ] |
 | Alacritty | halfblocks | [ ] | [ ] | [ ] | [ ] | [ ] |
-| tmux/zellij | halfblocks unless passthrough is established | [ ] | [ ] | [ ] | [ ] | [ ] |
+| tmux/zellij | halfblocks; passthrough not negotiated | [ ] | [ ] | [ ] | [ ] | [ ] |
 
 Exact manual checks: 16:9 crop with no black strip, no image/text ghosts after every overlay, terminal background/color-scheme response handling, terminal palette switch while unfocused then FocusGained, config/theme hot reload, Hindi/CJK/emoji boundaries, subscribed-channel avatars/sidebar, playlist density and action-menu scrolling at short heights.
 
@@ -86,9 +86,11 @@ Unicode/grapheme/cursor safety and icon fallbacks. The live anonymous channel
 avatar/CDN decode test and three native MPV tests (generated local media with
 null audio/video outputs) passed explicitly.
 
-Interactive TV OAuth and personalized Subscriptions/History/Watch Later/Liked/
-Playlists/writes still require the user's authorization. No cookie session was
-used to substitute for that validation. Kitty/Sixel visual review also remains
+TV OAuth sign-in is user-confirmed working. Read-only OAuth probes exercised
+Subscriptions, History, Watch Later, Liked and their next pages, subscribed
+channels, and owned-playlist listing/opening. Fresh login/QR behavior, account
+mutations and cross-client history/resume still require interactive QA. No cookie
+session substituted for account validation. Kitty/Sixel visual review remains
 human QA; environment hints are not graphics-negotiation proof.
 
 ## Watch dashboard/comment media
@@ -101,3 +103,28 @@ human QA; environment hints are not graphics-negotiation proof.
 - [ ] `q` navigates back; Home `q` shows yes/no quit confirmation; `yy`, `zz`, `v`, `Space e`, and Alt-e work.
 - [ ] Local works with networking disabled and recursively discovers media under `[downloads].directory`.
 - [ ] With `MPV seekbar` off, MPV keeps slim OSC transport controls without the draggable seekbar; repeated large seeks must not produce a seek storm. With the full seekbar explicitly enabled, verify the one-shot stream-reload fallback recovers a stalled DASH seek. Test AV1/VP9/H.264 and inspect `~/.cache/yute/mpv.log` on failure.
+
+
+## Continued delivery checks
+
+- [ ] `graphics = "off"` and `:graphics off` hide account/comment images as well as cards.
+- [ ] Switching Kitty to halfblocks/off removes previous placements.
+- [ ] Focus returns re-query background; exiting restores terminal notification modes.
+- [ ] `:download video typo` rejects the value; unavailable explicit single-video
+  resolution reports an error instead of silently selecting best.
+- [ ] `:download playlist` opens the playlist menu; channel entities cannot start downloads.
+- [ ] Owned playlist cards open their returned browse IDs; old mixed library cache
+  entries do not appear in Playlists.
+
+Automated PTY checks confirm native config notifications, valid light-theme
+reload, malformed-file rejection retaining the previous state, focus query
+emission and cleanup. They do not verify physical image placement or font
+shaping. The current environment contains Kitty, foot and tmux executables;
+Ghostty, WezTerm, Konsole, xterm, Alacritty and zellij were not found on PATH.
+No physical terminal/Wayland/X11 cell in the matrix above is marked passed.
+
+
+Observed TV owned-playlist limitation: the next-page response repeated the same
+41 identities with a different token. Verify that this leaves the 41 cards and
+selection intact, stops automatic pagination, and shows an explicit retry error.
+Do not count replayed cards as new results or a proven additional page.

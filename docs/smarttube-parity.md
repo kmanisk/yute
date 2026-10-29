@@ -218,3 +218,34 @@ interactive authorization to validate for the user's identity.
 Grid Auto uses 1–8 content-width columns; settings supports each fixed choice.
 Semantic icon mappings were verified against the installed Iosevka Nerd cmap;
 Unicode and ASCII remain portable fallbacks. See [icons](icons.md).
+
+
+## Owned playlists and TV browse identities, 2026-10-29
+
+The read-only MediaServiceCore reference in `target/smarttube-reference` maps
+`BrowseService2.getMyPlaylists` through `BrowseApiHelper.getMyPlaylistQuery` to
+`FEplaylist_aggregation`. `FElibrary` is a general library shelf and must not be
+used as the owned-playlist listing. Yute now uses the aggregation endpoint over
+its existing OAuth TV client. Live read-only probes returned 41 typed playlists
+and opened a playlist containing 15 videos; account names, IDs, tokens and raw
+responses were not logged.
+
+TV playlist tiles can navigate with a `browseEndpoint.browseId` beginning with
+`VL`, as well as `watchEndpoint.playlistId` or `watchPlaylistEndpoint.playlistId`.
+The parser preserves these typed browse identities and rejects playlist tiles
+without one. The playlist cache key is versioned to avoid loading old mixed
+library cards. Synthetic fixtures cover this shape and separator-only date
+metadata. These protocol facts were implemented independently; no reference
+implementation code was copied.
+
+
+The current TV response places a token under
+`tvSurfaceContentRenderer.content.gridRenderer.continuations.nextContinuationData`.
+An observed continuation response repeated all 41 known playlist identities while
+rotating its token. Token inequality therefore does not establish forward
+progress. Yute now remembers bounded per-backend account-page identity sets and
+returns a typed error on a complete replay. Existing cards remain visible with
+an actionable retry message. Distinct additional owned-playlist pages remain
+unverified; the replay is not represented as a successful empty account library.
+A sanitized regression covers a repeated page with a changed token, a genuinely
+new page and a recognized empty terminal page.

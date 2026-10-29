@@ -357,6 +357,8 @@ Shorts modes:
 - `hide` — hide them in ordinary feeds but allow explicit Shorts/saved content
 - `show` — show normally
 
+See [configuration reference](docs/configuration.md) for semantic theme roles, live reload, codec/language options and downloads.
+
 Visible thumbnails take priority over prefetch work. The cache stores source images and encoded terminal payloads. `:theme` and `:graphics` apply supported visual changes live. Custom themes live in `~/.config/yute/themes/<name>.toml`; the packaged Gruvbox files are examples. `YUTE_GRAPHICS` can override graphics selection for one launch.
 
 ## Architecture
@@ -405,7 +407,8 @@ ContentItem ──▶ Action ──▶ Router / Player
 - [MPV tuning](docs/mpv-tuning.md)
 - [Performance measurements](docs/performance.md)
 - [SmartTube protocol notes](docs/smarttube-parity.md)
-- [UI verification](docs/ui-polish-review.md)
+- [Current delivery validation](docs/delivery-validation.md)
+- [Historical UI verification](docs/ui-polish-review.md)
 - [Manual QA matrix](docs/qa.md)
 
 ## Development

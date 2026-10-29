@@ -165,3 +165,33 @@ Background and graphics reports share the single `/dev/tty` reader in `terminal_
 `yute-core::downloads` builds yt-dlp commands as argument arrays only. Single-item downloads can use exact resolved selectors; playlist video resolutions are ceilings per item. Audio conversion requires ffmpeg, playlist jobs use local archive files, and one owned asynchronous child is active at a time.
 
 Home's Channels tab is not synthesized from Home recommendations. It uses the authenticated subscribed-channel browse path and an account-scoped stale cache; signed-out state does not reveal cached account channel names. The optional tall-sidebar channel list reuses the same typed channel cards.
+
+
+### Terminal protocol sources
+
+The query/parser contract follows primary terminal specifications:
+
+- [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/):
+  the non-storing `a=q` image probe followed by primary device attributes, and
+  lowercase placement deletion. Switching away from Kitty also deletes previous
+  Kitty placements before repainting.
+- [XTerm control sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html):
+  OSC 11 background queries, device attributes, and character-cell pixel reports.
+- [Contour light/dark notifications](https://contour-terminal.org/vt-extensions/color-palette-update-notifications/):
+  query CSI ? 996 n; response CSI ? 997 ; 1/2 n; notification mode 2031.
+  Focus reporting is enabled while Yute runs; notification/focus modes are
+  disabled on normal exit and panic cleanup.
+- [iTerm2 escape codes](https://iterm2.com/documentation-escape-codes.html):
+  ReportCellSize height/width and optional physical-pixel scale. A cell-size
+  response is combined with the terminal identity before auto-selecting iTerm2.
+
+No desktop portal dependency is enabled. Unsupported queries fall back without
+holding first paint. Image visibility checks cover comment media and account
+avatars as well as grid/list images; off and none are equivalent disabled modes.
+
+
+Account continuations keep a bounded, backend-local record of issued page tokens
+and identities. Complete page replays raise RepeatedAccountPage even if the
+server changes its token. The TUI preserves content/selection, terminates loading
+and disables automatic retry until the user requests it. This guard also applies
+to authenticated playlist contents and does not rewrite OAuth/session ownership.

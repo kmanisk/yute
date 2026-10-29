@@ -21,3 +21,5 @@ This directory contains technical documentation for `yute` and `yute-core`.
 
 - [Manual QA](qa.md): Human verification checklist, including outstanding features.
 - [Configuration notes](configuration.md): Quality ceilings, paths and current limitations.
+
+Current terminal polish validation: [delivery-validation.md](delivery-validation.md).

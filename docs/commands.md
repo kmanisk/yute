@@ -168,3 +168,11 @@ icons. The sidebar and item menu share semantic glyphs with width-aware alignmen
 `:graphics auto` starts safely with halfblocks and promotes only after terminal replies confirm Kitty, Sixel or supported iTerm2 behavior. `YUTE_GRAPHICS` overrides the configured mode for one process. Multiplexed sessions conservatively fall back to halfblocks when passthrough has not been established.
 
 `[text] emoji = "auto|keep|strip"` controls complex emoji handling. Titles and input use grapheme-safe, display-width-aware truncation, including extra safety for complex Indic text.
+
+
+Explicit `:download video 1080p` checks the available streams before downloading.
+Unknown qualities and audio modes are errors. `:download playlist` opens the
+playlist download menu; `:download playlist video 1080p` selects the best available
+stream up to that ceiling per item. Single-video menus list only actual formats.
+See [configuration.md](configuration.md) for original versus converted audio,
+archives, output directories and cancellation behavior.
