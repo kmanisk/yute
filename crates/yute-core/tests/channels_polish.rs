@@ -156,16 +156,28 @@ async fn live_owned_playlists_protocol() {
     );
     if let Some(token) = &page.continuation {
         let next = backend.continue_feed(token).await;
-        assert!(
-            next.is_ok(),
-            "Owned playlist continuation failed (details redacted)"
-        );
-        let next = next.unwrap();
-        assert!(next
-            .items
-            .iter()
-            .all(|card| matches!(card, Card::Playlist(p) if !p.id.is_empty())));
-        println!("Owned playlists next page: {} cards", next.items.len());
+        if let Err(error) = &next {
+            assert!(
+                error.is::<yute_core::backend::innertube::RepeatedAccountPage>(),
+                "Owned playlist continuation failed (details redacted)"
+            );
+            println!("Owned playlist continuation: server replay detected; existing cards retained, explicit error returned");
+        }
+        if let Ok(next) = next {
+            assert!(next
+                .items
+                .iter()
+                .all(|card| matches!(card, Card::Playlist(p) if !p.id.is_empty())));
+            assert!(
+                next.items.is_empty()
+                    || next
+                        .items
+                        .iter()
+                        .any(|card| !page.items.iter().any(|first| first.id() == card.id())),
+                "Owned playlist continuation repeated the first page"
+            );
+            println!("Owned playlists next page: {} cards", next.items.len());
+        }
     }
     if let Some(Card::Playlist(playlist)) = page.items.first() {
         let contents = backend.playlist(&playlist.id).await;

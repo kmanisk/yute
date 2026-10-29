@@ -18,7 +18,19 @@ pub struct InnerTubeBackend {
     pub auth: Arc<Mutex<AuthContext>>,
     history_actions: Mutex<std::collections::HashMap<String, String>>,
     history_tokens: Mutex<std::collections::HashSet<String>>,
+    account_pages: Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>,
 }
+
+#[derive(Debug)]
+pub struct RepeatedAccountPage;
+impl std::fmt::Display for RepeatedAccountPage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "YouTube repeated the current page; could not load more results. Press r to retry",
+        )
+    }
+}
+impl std::error::Error for RepeatedAccountPage {}
 
 impl InnerTubeBackend {
     pub fn new(auth: AuthContext) -> Self {
@@ -26,6 +38,7 @@ impl InnerTubeBackend {
             client: crate::http::client(),
             history_actions: Default::default(),
             history_tokens: Default::default(),
+            account_pages: Default::default(),
             auth: Arc::new(Mutex::new(auth)),
         }
     }
@@ -35,6 +48,7 @@ impl InnerTubeBackend {
             client: crate::http::client(),
             history_actions: Default::default(),
             history_tokens: Default::default(),
+            account_pages: Default::default(),
             auth,
         }
     }
@@ -215,7 +229,37 @@ impl InnerTubeBackend {
         if browse_id == "FEhistory" {
             self.capture_history_actions(&value);
         }
-        self.read_account_feed(&value)
+        let page = self.read_account_feed(&value)?;
+        self.remember_account_page(&page, None)?;
+        Ok(page)
+    }
+    fn remember_account_page(&self, page: &FeedPage, previous: Option<&str>) -> Result<()> {
+        let mut pages = self.account_pages.lock().unwrap();
+        if previous
+            .and_then(|token| pages.get(token))
+            .is_some_and(|seen| {
+                !page.items.is_empty() && page.items.iter().all(|card| seen.contains(card.id()))
+            })
+        {
+            return Err(RepeatedAccountPage.into());
+        }
+        if let Some(previous) = previous {
+            pages.remove(previous);
+        }
+        if let Some(token) = page
+            .continuation
+            .as_deref()
+            .and_then(|t| t.strip_prefix("yute:account:"))
+        {
+            if pages.len() >= 16 {
+                pages.clear();
+            }
+            pages.insert(
+                token.to_owned(),
+                page.items.iter().map(|card| card.id().to_owned()).collect(),
+            );
+        }
+        Ok(())
     }
     fn capture_history_actions(&self, value: &Value) {
         fn visit(v: &Value, map: &mut std::collections::HashMap<String, String>) {
@@ -379,7 +423,9 @@ impl Backend for InnerTubeBackend {
             if self.history_tokens.lock().unwrap().contains(token) {
                 self.capture_history_actions(&value);
             }
-            return self.read_account_feed(&value);
+            let page = self.read_account_feed(&value)?;
+            self.remember_account_page(&page, Some(token))?;
+            return Ok(page);
         }
         if let Some(token) = token.strip_prefix("yute:reel:") {
             return self.reel_sequence(token).await;
@@ -460,7 +506,9 @@ impl Backend for InnerTubeBackend {
         }));
         let val = self.post_endpoint("browse", body).await?;
         if self.auth.lock().unwrap().has_oauth() {
-            self.read_account_feed(&val)
+            let page = self.read_account_feed(&val)?;
+            self.remember_account_page(&page, None)?;
+            Ok(page)
         } else {
             Ok(parse_feed_page(&val))
         }
@@ -1124,6 +1172,31 @@ fn parse_account_feed(value: &Value) -> Result<FeedPage> {
 #[cfg(test)]
 mod account_feed_tests {
     use super::*;
+    #[test]
+    fn repeated_account_page_is_an_error_even_when_server_rotates_the_token() {
+        let backend = InnerTubeBackend::new(AuthContext::default());
+        let page = |id: &str, token: &str| FeedPage {
+            chips: vec![],
+            items: vec![crate::backend::parse::parse_card(
+                &json!({"videoRenderer":{"videoId":id,"title":{"simpleText":"Fixture"}}}),
+            )
+            .unwrap()],
+            continuation: Some(format!("yute:account:{token}")),
+        };
+        backend
+            .remember_account_page(&page("fixture-one", "first"), None)
+            .unwrap();
+        let error = backend
+            .remember_account_page(&page("fixture-one", "rotated"), Some("first"))
+            .unwrap_err();
+        assert!(error.is::<RepeatedAccountPage>());
+        backend
+            .remember_account_page(&page("fixture-two", "second"), Some("first"))
+            .unwrap();
+        backend
+            .remember_account_page(&FeedPage::default(), Some("second"))
+            .unwrap();
+    }
     #[test]
     fn account_responses_distinguish_empty_error_and_tv_continuation() {
         assert!(parse_account_feed(&json!({"responseContext":{}})).is_err());

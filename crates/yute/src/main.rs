@@ -3869,6 +3869,9 @@ async fn run_dump_tv(query: &str) -> anyhow::Result<()> {
 
 // Keep diagnostics concise; never display request URLs, headers or response bodies.
 fn feed_error_message(error: &anyhow::Error) -> &'static str {
+    if error.is::<yute_core::backend::innertube::RepeatedAccountPage>() {
+        return "YouTube repeated this page — existing items kept; r retry";
+    }
     let diagnostic = format!("{error:#}").to_ascii_lowercase();
     if diagnostic.contains("401")
         || diagnostic.contains("unauthorized")
@@ -5254,7 +5257,7 @@ fn feed_cache_key(app: &App, key: &str) -> String {
     let key = if key == "feed_home" {
         "feed_home_tv_default"
     } else if key == "feed_playlists" {
-        "feed_playlists_aggregation_v1"
+        "feed_playlists_aggregation_v2"
     } else {
         key
     };
@@ -6175,6 +6178,50 @@ mod feed_ui_tests {
         .await;
         assert!(app.action_menu.is_none());
         assert!(app.command_help.is_some());
+    }
+    #[tokio::test]
+    async fn repeated_continuation_preserves_cards_selection_and_explicit_error() {
+        let (mut app, _) = app_and_cards();
+        app.screen = Screen::Playlists;
+        app.items = (0..5).map(|index| yute_core::backend::parse::parse_card(&serde_json::json!({"playlistRenderer":{"playlistId":format!("PLfixture{index}"),"title":{"simpleText":"Fixture"}}})).unwrap()).collect();
+        app.selected_index = 2;
+        let selected = app.selected_card().unwrap().id().to_string();
+        let ids = app
+            .items
+            .iter()
+            .map(|c| c.id().to_string())
+            .collect::<Vec<_>>();
+        let token = "yute:account:fixture".to_string();
+        app.continuation_token = Some(token.clone());
+        app.is_loading_more = true;
+        let (tx, _) = channel(2);
+        let generation = app.feed_generation;
+        handle_app_event(
+            &mut app,
+            AppEvent::FeedContinued(
+                generation,
+                Screen::Playlists,
+                String::new(),
+                token,
+                Err(yute_core::backend::innertube::RepeatedAccountPage.into()),
+            ),
+            tx,
+        );
+        assert_eq!(
+            app.items
+                .iter()
+                .map(|c| c.id().to_string())
+                .collect::<Vec<_>>(),
+            ids
+        );
+        assert_eq!(app.selected_card().unwrap().id(), selected);
+        assert!(!app.is_loading_more);
+        assert!(app.continuation_failed);
+        assert!(app
+            .feed_error
+            .as_deref()
+            .unwrap()
+            .contains("repeated this page"));
     }
     #[tokio::test]
     async fn config_reload_is_atomic_and_failed_reload_keeps_theme_and_selection() {
