@@ -69,22 +69,27 @@ pseudo-terminal tests, not physical image/font validation.
 ## Performance and installation
 
 Historical before-polish YUTE_TRACE first-frame sample: 1.419 ms. Two final-source
-samples: 2.244 ms and 1.851 ms. These are individual Rust-entry-to-first-frame
+samples: 1.322 ms and 1.328 ms. These are individual Rust-entry-to-first-frame
 measurements, not process-launch timings or a statistically controlled speedup.
 The 200x40 PTY used 10x20-pixel cells and isolated anonymous config/cache/state.
-During the initial interval one follow-up draw emitted 19 style/cursor bytes
-without text-cell updates. After settling, a two-second interval emitted 0 bytes
-and recorded 0 CPU ticks; CPU tick granularity is 10 ms.
+Both final package-build idle samples emitted 0 bytes and recorded 0 CPU ticks;
+the additional settled two-second interval also recorded 0/0. CPU tick
+granularity is 10 ms. An earlier workspace-build sample had one startup
+follow-up draw with 19 style/cursor bytes and no text-cell updates.
 
 Installed path: `/home/onyx/.local/bin/yute`. The prior executable was backed up
 under `~/.local/state/yute/binary-backups/`. Installed and release SHA256:
 
 ```text
-f6757e1645528db76022bcf2c6424b831198258900bec1f5a08eab5abb1f19c8
+43fcc6fea67d92a8431c0db79450fef513ccbdb71e96f72068014d7486499a3d
 ```
 
-Release size is 12,262,536 bytes (21,624 bytes above the executable found when
+Release size is 12,262,264 bytes (21,352 bytes above the executable found when
 this continued pass began). Existing running instances require restarting.
+The installed artifact is from cargo build --release -p yute. The workspace
+release gate produces a different hash through Cargo feature unification
+(including smallvec union and tracing-subscriber env-filter); the final package
+build was measured and verified separately.
 There is no existing PATH installation of yute-gui, so no new GUI packaging was
 introduced. Installed --help and doctor both exited 0. Doctor ran through a pipe:
 terminal protocol/cell/background detection was unavailable there and reported

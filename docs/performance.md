@@ -134,11 +134,13 @@ generated media and null outputs; they do not validate remote playback latency.
 
 Final source 403d2cc, using the existing YUTE_TRACE first_frame metric and an
 isolated anonymous 200x40 PTY with 10x20-pixel cells. The historical initial
-polish baseline was 1.419 ms; final-source samples were 2.244 ms and 1.851 ms.
+polish baseline was 1.419 ms; final package-build samples were 1.322 ms and 1.328 ms.
 These individual samples do not establish a statistically controlled improvement.
-An early interval contained one 19-byte style/cursor-only follow-up draw. After
-eight additional settling seconds, two idle seconds produced 0 bytes and 0 CPU
-ticks at 10 ms tick resolution. There is no continuous idle redraw loop.
+Both final package-build initial idle intervals and a settled two-second
+interval produced 0 bytes and 0 CPU ticks at 10 ms tick resolution. An earlier
+workspace-build sample had one 19-byte style/cursor-only startup follow-up draw.
+The final package and workspace builds have different Cargo feature unions;
+there is no continuous idle redraw loop.
 Current terminal queries are read by terminal_input.rs; older sections describing
 Crossterm as the input owner or environment-only protocol selection are historical.
 See [delivery-validation.md](delivery-validation.md) for quality gates and limits.
