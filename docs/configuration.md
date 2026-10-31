@@ -8,12 +8,21 @@ Cache uses `$XDG_CACHE_HOME/yute`; encrypted data uses `$XDG_DATA_HOME/yute`.
 [general]
 icons = "auto" # auto, nerd, unicode, ascii, none
 
+[ui]
+sidebar_at_launch = "remember" # show, hide, remember
+
 [grid]
 columns = 0 # Auto; or a fixed value from 1 through 8
 min_card_width = 30
+sidebar_expanded = false # remembered explicit state when sidebar_at_launch = "remember"
+
+[keys]
+quit = "" # normal q is intentionally unbound by default
 
 [playback]
 max_resolution = "1080p"
+network_engine = "auto" # auto, mpv, proxy
+stream_cache_seconds = 20
 ```
 
 Supported saved limits are 480p, 720p, 1080p, 1440p, 2160p and best. Automatic
@@ -21,6 +30,7 @@ bounded selectors exclude unknown heights and have no unrestricted fallback.
 The media overlay permits a manual format override without changing saved config.
 
 Playback preferences include `default_quality`, `max_resolution`,
+`network_engine = "auto|mpv|proxy"`, `stream_cache_seconds`,
 `preferred_codec = "auto|av1|vp9|h264"`, and
 `preferred_audio_codec = "auto|opus|aac"`. Automatic resolution respects the lower
 of the default and maximum quality, then the preferred codec with a compatible
@@ -28,6 +38,13 @@ fallback. `audio_language` and `subtitle_language` accept MPV language lists or
 `"auto"`. Changes to an already running MPV process require restarting playback.
 `:play-select` and `:audio` select actual streams for one playback; an explicit
 format selection does not permanently enable audio-only mode.
+
+`network_engine = "auto"` starts with direct MPV and switches once to Yute's
+loopback finite-range transport after a persistent network stall. `mpv` forces
+direct transport and `proxy` starts on finite ranges. The proxy binds only to
+loopback, resolves anonymously with yt-dlp, never receives Yute OAuth/cookies and
+terminates with the playback session. See [playback-network.md](playback-network.md)
+for the state machine, seek harness and measured results.
 
 ```toml
 [downloads]
@@ -88,10 +105,21 @@ graphics = "auto" # auto, kitty, iterm2, sixel, halfblocks, off
 [ui]
 action_bar = "auto" # auto or off; shown on terminals at least 30 rows tall
 sidebar_channels = false # subscribed names in the tall sidebar
+sidebar_at_launch = "remember" # show, hide, remember
 
 [text]
 emoji = "auto" # auto, keep, strip
+scripts = "auto" # auto, native, transliterate
 ```
+
+`sidebar_at_launch = "remember"` atomically persists explicit sidebar toggles in
+`grid.sidebar_expanded`. A terminal narrower than 72 columns temporarily suppresses
+the sidebar without overwriting that remembered preference. `show` and `hide` force
+the next launch state.
+
+`[text].scripts` controls the complex-script fallback selected by the terminal
+width probe. See [text-rendering.md](text-rendering.md) for CPR measurements,
+grapheme-safe rendering, transliteration limits and font coverage diagnostics.
 
 The terminal theme uses Reset, ANSI colours and modifiers. Custom themes reside
 in `~/.config/yute/themes/<name>.toml`; packaged examples are in

@@ -28,6 +28,21 @@ A doctor success does not establish account/feed correctness.
 - [ ] Sixel, Kitty and halfblocks; terminal cell dimensions and graphics hints.
 - [ ] Icon modes Nerd, Unicode, ASCII and none; menu/sidebar alignment.
 
+## Requested terminal UX matrix
+
+These checks are intentionally terminal-specific. A blank box stays unchecked unless that exact terminal was exercised; capability/environment hints are not counted as visual proof.
+
+| Terminal | Non-Latin/native toggle | Selection fill/no holes | Search Filters modal | Watch 80x24 / 120x40 / 200x60 / 320x90 | `doctor --seek-test` path |
+| --- | --- | --- | --- | --- | --- |
+| foot | [ ] | [x] | [x] | [ ] | [ ] |
+| kitty | [ ] | [ ] | [ ] | [ ] | [ ] |
+| Ghostty | [ ] | [ ] | [ ] | [ ] | [ ] |
+| WezTerm | [ ] | [ ] | [ ] | [ ] | [ ] |
+
+For non-Latin checks use at least Hindi plus Russian, Japanese, Korean, Chinese, Thai, Tamil/Bengali, Arabic/Hebrew and emoji. Verify `T` restores the original title where Auto chose transliteration. For selection fill, inspect the entire highlighted title rectangle for unpainted cells. In Search, open `f`, move across all five sections, toggle multiple Features, apply, then continue to another page and confirm order/token continuity. In Watch, inspect loading/content/error and with/without-comments states at each size. The seek harness is sanitized and can be run outside a graphical terminal; the table still records which terminal/session environment was used when the test was launched.
+
+Foot/Sixel evidence from this pass used Iosevka Nerd Font Mono in a native Sway/Wayland window. Valid captures confirmed: Auto fallback on the measured Hindi/Tamil/Bengali width failures; `T` restoring the selected Hindi title to native Devanagari; a fully painted selected-title rectangle with no black holes; the five-column Search Filters modal; and a byte-for-byte identical screenshot after pressing normal `q` inside that modal. The same live instance hid the sidebar at 56 columns and restored it at 115 columns without changing the remembered state. The full non-Latin cell remains unchecked because Korean/Chinese glyph coverage is missing on this machine and the attempted second-page Arabic/Hebrew/emoji capture was obscured by another window. Kitty is installed but was not visually exercised in this pass. Ghostty and WezTerm were not found on PATH. Watch's terminal-specific size matrix and terminal-specific seek-launch cells remain manual.
+
 ## Available formats (implemented; live QA pending)
 
 - [ ] Enter plays default video with the configured maximum.
@@ -39,7 +54,7 @@ A doctor success does not establish account/feed correctness.
 - [ ] Next normal playback returns to configured video defaults.
 - [ ] Reopen a video menu within five minutes: cached probe; another video
   invalidates the single current-video cache.
-- [ ] Esc/q during resolution cancels; late results cannot reopen a closed menu.
+- [ ] Esc during format resolution cancels; normal `q` remains unbound and late results cannot reopen a closed menu.
 - [ ] Unavailable requested automatic quality falls back below the ceiling.
 - [ ] Missing yt-dlp, network failure and malformed output produce an error.
 - [ ] Private/age-restricted media reports a useful error. Authenticated format
@@ -100,13 +115,19 @@ human QA; environment hints are not graphics-negotiation proof.
 - [ ] Like/dislike on a focused comment resolves the detail continuation first and toggles the correct server action.
 - [ ] Image attachments render through the selected graphics protocol; GIFs/WebP animate only while visible and stop driving redraws after leaving Comments.
 - [ ] With a freshly authorized TV OAuth account, `n` posts a top-level comment and `r` posts a thread reply; local state changes only after YouTube acknowledges the write. Older tokens should show the one-time `:account add` write-scope re-login message instead of fake success.
-- [ ] `q` navigates back; Home `q` shows yes/no quit confirmation; `yy`, `zz`, `v`, `Space e`, and Alt-e work.
+- [ ] Normal `q` is unbound; Esc/Shift-H navigate back; `:q` and Ctrl+C quit immediately when idle but confirm while playback/download is active; `yy`, `zz`, `v`, `Space e`, and Alt-e work.
 - [ ] Local works with networking disabled and recursively discovers media under `[downloads].directory`.
-- [ ] With `MPV seekbar` off, MPV keeps slim OSC transport controls without the draggable seekbar; repeated large seeks must not produce a seek storm. With the full seekbar explicitly enabled, verify the one-shot stream-reload fallback recovers a stalled DASH seek. Test AV1/VP9/H.264 and inspect `~/.cache/yute/mpv.log` on failure.
+- [ ] With `MPV seekbar` off, MPV keeps slim OSC transport controls without the draggable seekbar; repeated large seeks must not produce a seek storm. Run `yute doctor --seek-test <id>` with `--seek-engine mpv|proxy|auto --seek-cache 20` on AV1/VP9/H.264 samples. Direct failures must remain bounded, proxy must serve only loopback finite ranges, and Auto may switch at most once per persistent stall while preserving the requested target. Inspect sanitized diagnostics and `~/.cache/yute/mpv.log` on failure.
 
+
+## Playback network evidence, 2026-10-31
+
+On problem video `g1qNCcxFWRo` with MPV 0.41 and a 20-second cache, forced direct MPV reproduced a first-round 20% seek stall. Forced proxy completed all ten measured seeks; the first healthy sample was about 0.25–1.76 seconds in round one and about 0.25 seconds in round two. After fixing Auto target/phase bookkeeping, Auto completed all ten seeks: the first escalation seek resumed in about 18.1 seconds because it included fresh yt-dlp resolution and proxy startup, while subsequent first-progress times were about 0.25–2.8 seconds. The loopback fake-origin tests also cover range validation, 403 re-resolution, connection-reset retry and obsolete request cancellation. These measurements prove the tested path, not every CDN/codec/network combination.
 
 ## Continued delivery checks
 
+- [ ] `[ui].sidebar_at_launch = show|hide|remember` selects the expected startup state. In `remember`, explicit sidebar toggles survive restart; shrinking below 72 columns hides it temporarily and widening restores it without changing the saved preference.
+- [ ] `config.toml` writes from sidebar/settings changes replace atomically and do not leave `.config.toml.tmp-*` files.
 - [ ] `graphics = "off"` and `:graphics off` hide account/comment images as well as cards.
 - [ ] Switching Kitty to halfblocks/off removes previous placements.
 - [ ] Focus returns re-query background; exiting restores terminal notification modes.

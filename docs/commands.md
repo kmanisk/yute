@@ -14,7 +14,8 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Group | Syntax | Behavior |
 | --- | --- | --- |
 | Navigation | `home`, `subscriptions` (`subs`), `history`, `watch-later` (`wl`), `liked`, `playlists`, `queue`, `local`, `settings`, `account` (`accounts`, `acc`, `a`) | Open the corresponding route. |
-| Search | `search <query>` | YouTube search; preserves the previous route. Continuation pages require direct query evidence in title/creator metadata and are locally re-ranked, preventing drift into unrelated personalized recommendations. |
+| Search | `search <query>` | YouTube search; preserves the previous route, server ordering and continuation tokens. Active verified Search options are sent on initial and continuation requests. |
+| Search filters | `search-filters` (`sf`) | Open the server-side Search filter modal: type, duration, upload date, Live/4K/HDR and relevance/popularity. On the Search screen, `f` opens the same modal. |
 | Entities | `channel`, `playlist` | Open the selected item's channel ID or selected playlist. Missing identity is reported. |
 | Watch dashboard | `details` (`now`, `watch`, `video-info`), `comments`, `description` (`desc`), `suggestions` (`up-next`) | Open/focus the currently playing video dashboard without restarting MPV. |
 | Comments | `comment new`, `comment reply`, `comment delete`, `comment like`, `comment dislike` | Create/reply, confirmed own-comment deletion, or react to the selected comment. Writes are applied locally only after YouTube acknowledges them. |
@@ -29,7 +30,7 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Clipboard | `copy url`, `copy title`, `copy channel` | Native `wl-copy` on Wayland or `xclip` on X11, invoked only by the copy action. |
 | Refresh | `refresh`, `refresh hard` | Network refresh of the current route; hard is an alias, not a disk-cache purge. Normal `r` can retry continuation failures. |
 | View | `view [toggle|grid|list]`, `grid`, `list` | Switch the active feed layout immediately without opening Settings. |
-| Filtering | `filter all/videos/shorts/live/playlists/channels`, `filter <query>`, `filter` | Named types select a tab; other text filters loaded titles. Omit the query to clear the title filter. |
+| Filtering | `filter all/videos/shorts/live/playlists/channels`, `filter <query>`, `filter` | Named types select a content tab; on Search, supported types issue the corresponding server filter request. Other text filters only the already loaded titles. Omit the query to clear the local title filter. |
 | Shorts | `shorts on`, `shorts off`, `shorts toggle` | Re-filter and save the visibility preference. Settings also offers Hidden outside Shorts, which also hides saved Shorts; explicitly opening Shorts always works. |
 | Route names | `goto <route>` | Navigate to a canonical route; Tab lists available routes. |
 | Theme | `theme terminal|auto|<name>`, `theme reload`, `theme list`, `theme check` | Apply/reload semantic themes live; invalid reloads keep the previous theme. |
@@ -38,8 +39,8 @@ parsed commands in memory; it is not persisted. Commands never evaluate a shell.
 | Media formats | `play-select`, `audio` | Show actual available video/audio formats for one playback. |
 | Download | `download [playlist] [video|audio] [best|2160p|1440p|1080p|720p|480p|360p|opus|aac|mp3|flac|m4a]` | Start a safe yt-dlp download. Playlist video qualities are per-item ceilings; conversion choices require ffmpeg. |
 | Sidebar | `sidebar`, `sidebar show`, `sidebar hide`, `sidebar toggle` | Toggle or explicitly set visibility; hidden reclaims all width. |
-| Help | `help`, `help <command>`, `keys` | Concise command help; Esc, q or Enter closes it. |
-| Quit | `quit` (`q`), `quit!` (`q!`) | `:quit` confirms quit. Normal-mode `q` navigates back outside Home; on Home it opens a yes/no quit prompt. `:quit!` exits immediately. |
+| Help | `help`, `help <command>`, `keys` | Concise command help; Esc or Enter closes it. |
+| Quit | `quit` (`q`), `quit!` (`q!`) | `:quit` exits immediately when idle and asks for confirmation while playback or a download is active. Normal-mode `q` is unbound by default. `:quit!` exits immediately. |
 
 Prefix commands with `:` in the application. Empty, malformed, unknown and
 non-finite numeric arguments produce status errors rather than launching a process.
@@ -59,6 +60,12 @@ Subscription/rating commands use existing InnerTube endpoints; they are not loca
 simulated, and live authenticated mutations were not performed during development.
 
 Watch Later add/remove, like/dislike, subscription and supported history removal use authenticated backend mutations and update local state only after confirmation. Command history is bounded to the current Yute session and is intentionally not persisted across launches. Runtime theme and graphics preferences apply live where the active terminal supports them; terminal-protocol changes still depend on what that terminal actually confirms.
+
+## Search filters and continuation
+
+Search uses independently encoded YouTube filter params observed from the current TV protocol rather than localized renderer labels or client-side title matching. The filter modal supports Type (Videos/Channels/Playlists/Movies), Duration, Upload date, Live/4K/HDR feature flags, and Relevance/Popularity. Continuations preserve the server-provided order and token; Yute does not drop or re-rank later cards by query words.
+
+With `[search].music_bias = "auto"`, configured music-intent words can request the Videos type and apply a metadata-only 3–20 minute duration preference. `M` removes that automatic bias for the current query. Unknown-duration results stay visible.
 
 ## Browsing preferences
 
@@ -92,7 +99,7 @@ claim endless server-side radio continuation.
 
 ## Watch and settings update
 
-Normal `q` goes back. On Home it opens a yes/no quit prompt; Ctrl+q and `:quit!` remain force-exit paths. Esc or Shift+H goes back and Shift+L goes forward. `gq` still opens Queue. `Space e` or Alt+E shows and focuses the sidebar, or hides it when it already has focus. `yy` copies the selected/current video URL, `zz` centers the current row, and `v` toggles grid/list view live. These bindings are configurable through `[keys]`, Settings, `:set`, and `YUTE_KEY_*` launch overrides. The header has no permanent sidebar hint, and the footer is limited to two functional rows.
+Normal `q` is intentionally unbound by default. Esc or Shift+H goes back and Shift+L goes forward; `gq` still opens Queue. `:q`, `:quit`, or Ctrl+C request application quit and ask for confirmation only while playback or a download is active; `:q!` / `:quit!` exits immediately. `Space e` or Alt+E shows and focuses the sidebar, or hides it when it already has focus. `yy` copies the selected/current video URL, `zz` centers the current row, and `v` toggles grid/list view live. These bindings are configurable through `[keys]`, Settings, `:set`, and `YUTE_KEY_*` launch overrides. The header has no permanent sidebar hint, and the footer is limited to two functional rows.
 
 Watch: d/c/w focus Description/Comments/Suggestions. Tab or h/l move between sections; j/k scroll or select. Enter opens a selected suggestion or a comment reply thread. +/- rate the video or focused comment. Comment reactions first resolve the focused comment detail continuation and then use YouTube's active toggle endpoint. `n` creates a top-level comment, `r` replies to the selected thread, and `x` offers confirmed deletion only when Yute can identify the selected comment as yours. `:comment new|reply|delete|like|dislike` exposes the same actions. Create/reply/delete use the TVHTML5 write protocol and update local state only after YouTube acknowledges the mutation. Older saved OAuth tokens may need one `:account add` re-login for the current YouTube write scope. Text input consumes normal keys; Enter submits and Esc cancels.
 Description links are underlined; [/] selects a link and Shift+O opens it. Lowercase o opens the video in the browser.
@@ -102,14 +109,16 @@ aliases such as `:quality 720` and `:quality 4k` work. With active MPV this relo
 once at the current position, preserving pause. `yute --quality 720p` applies a
 session limit at startup. Quality completion offers actual supported presets.
 
-Settings uses compact selectors and Enter-driven choice/text editors; paths, language tags, and configurable key sequences can be typed directly. Large YouTube seeks use a bounded seekable demux cache, short network timeouts and bounded FFmpeg reconnects. A real MPV 0.41 audit reproduced the long stall specifically from the stock OSC sending a burst of seek requests while the seekbar is dragged: single 40% seeks recovered in about two seconds, while drag bursts remained stuck past 30 seconds. With `MPV seekbar` off (the safe default), Yute launches MPV's upstream `slimbottombar` OSC layout, which keeps transport controls but has no draggable seekbar. Turning the setting on restores the stock full seekbar. If a network seek still wedges, Yute performs one fresh stream reload at the selected position; it never loops reloads and never applies this recovery to Local files. Dedicated YouTube playback enforces a 20-second minimum readahead. Yute does not pre-download media before playback.
+Settings uses compact selectors and Enter-driven choice/text editors; paths, language tags, and configurable key sequences can be typed directly. Large YouTube seeks use a bounded seekable demux cache, short network timeouts and bounded FFmpeg reconnects. A real MPV 0.41 audit reproduced both the stock OSC seek-storm problem and a separate direct-network stall. `MPV seekbar` off keeps the upstream `slimbottombar` layout without the draggable seekbar. `[playback].network_engine = "auto"` starts direct and, after a persistent network stall, performs one fresh anonymous resolution while switching once to Yute's loopback finite-range transport at the requested seek target. `mpv` forces direct transport; `proxy` starts with finite ranges. Local files never use network recovery. See [playback-network.md](playback-network.md) for measured results and the `yute doctor --seek-test` harness.
 
+
+`[ui].sidebar_at_launch = "show|hide|remember"` controls startup visibility. `remember` is the default and atomically persists only explicit sidebar toggles. Terminals narrower than 72 columns hide the sidebar geometrically without changing the remembered state, so widening the terminal restores it.
 
 ## Item menu
 
 Shift+Enter opens typed actions for the current video, channel or playlist.
 Enter alone retains its original typed activation. o opens the entity in the
-browser; g, opens Settings. Within the menu, j/k/arrows select and Esc/q cancels. The popup sizes to its content on normal terminals and scrolls on short ones, grouping playback, library, share and account actions while keeping the selected row visible.
+browser; g, opens Settings. Within the menu, j/k/arrows select and Esc cancels. The popup sizes to its content on normal terminals and scrolls on short ones, grouping playback, library, share and account actions while keeping the selected row visible.
 
 Save requires authentication, loads real available destinations from
 playlist/get_add_to_playlist, then submits browse/edit_playlist only after a
@@ -139,14 +148,16 @@ and external MPV playback remain available.
 `:play-select` opens Play as (Video / Audio only / Best automatically) for the
 selected YouTube video. Video and audio lists contain actual yt-dlp JSON formats;
 `:audio` opens the audio list directly. Shift-Enter also exposes these actions.
-Use j/k or arrows, Enter to choose, Esc/q to cancel. `:quality <height>` continues
+Use j/k or arrows, Enter to choose, Esc to cancel. `:quality <height>` continues
 to set the saved automatic ceiling. Manual format choices override it for one
 playback only. There is no transcoding or download before playback.
 
 `yute doctor` is a shell command, not a colon command. It checks tools, network,
 InnerTube/session acceptance, encrypted storage, directories and terminal hints.
-Failures return a nonzero exit status; optional missing tools produce warnings.
-No credential values or account identifiers are displayed.
+`yute text-probe` measures terminal text-width behavior, and
+`yute doctor --seek-test <video-id-or-youtube-url>` runs the real Player/IPC seek
+harness with sanitized output. Failures return a nonzero exit status; optional
+missing tools produce warnings. No credential values or account identifiers are displayed.
 
 
 ## Session and library states

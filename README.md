@@ -161,7 +161,8 @@ Normal mode is the default.
 | `v` | Toggle grid/list view live |
 | `zz` | Center the selected row |
 | `?` | Contextual help |
-| `Esc` / `q` | Previous route; on Home `q` opens a yes/no quit confirmation |
+| `Esc` / `Shift-H` | Previous route / route history back |
+| `:q` / `:quit` / `Ctrl-c` | Quit; asks for confirmation while playback or a download is active |
 
 `Enter` is driven by the selected entity type:
 
@@ -177,7 +178,9 @@ playlist              ──▶ Playlist view
 
 Comment like/dislike follows YouTube's focused-comment detail continuation before using the active toggle action. `n` creates a top-level comment, `r` replies to the selected thread, and `x` offers confirmed deletion only for comments Yute can identify as yours. The same operations are available through `:comment new|reply|delete|like|dislike`. Create/reply/delete parameters are generated from the TVHTML5 write protocol and local state changes happen only after YouTube acknowledges the request. Older saved OAuth tokens may require one `:account add` re-login to receive the current YouTube write scope; reading and reactions continue to use the existing session.
 
-Search continuation pages receive an additional local relevance pass so long scrolling does not silently degrade into unrelated personalized recommendations. The first search page remains YouTube-ranked; later pages must still match the query in title/channel metadata.
+Search keeps YouTube's returned ordering and continuation tokens instead of locally dropping or re-ranking later pages. On the Search screen, `f` or `:search-filters` opens verified server-side filters for type, duration, upload date, Live/4K/HDR features and relevance/popularity; the encoded params are sent on both the first request and continuations. Music-like queries can apply the configured automatic Videos plus metadata-duration bias without changing server ranking; `M` disables that bias for the current query.
+
+Terminal text uses grapheme-safe width accounting plus a post-first-frame terminal probe for complex scripts. `yute text-probe` measures cursor advance without blocking startup; `[text].scripts = "auto"` keeps native text when the terminal agrees with Yute's width model and can fall back to approximate transliteration for measured failures. `T` toggles the selected title between original/transliterated forms where available. Font coverage remains a separate diagnostic, so missing Korean/CJK/emoji glyphs are reported instead of silently blamed on layout. See [`docs/text-rendering.md`](docs/text-rendering.md).
 
 ## Item actions
 
@@ -208,6 +211,7 @@ Press `:` from Normal mode.
 ```text
 :search linux racing
 :filter videos
+:search-filters
 :view toggle
 :details
 :comments
@@ -250,17 +254,18 @@ video formats; `:audio` opens original audio streams. Playback stays in external
 MPV, with no pre-download or conversion. Manual choices apply to one playback.
 
 For large seek/scrub jumps, Yute uses keyframe-oriented IPC seeks and watches MPV's
-`seeking`/cache state. A real MPV 0.41 DASH audit on the problematic seek case showed
-a single 40% seek recovering in about two seconds, while the stock OSC's rapid
-mouse-drag seek burst remained stuck past 30 seconds. With **MPV seekbar** off (the
-safe default), Yute uses MPV's upstream `slimbottombar` OSC layout: normal transport
-controls remain, but the draggable seekbar that produced the storm is absent. Turn
-**MPV seekbar** on if you explicitly want the stock draggable bar. If a network
-stream still stalls, Yute performs one bounded fresh-stream reload of the same
-URL/format at the selected position; the controlled audit recovered the wedged
-stream in about nine seconds. It never loops reloads and never applies this recovery
-to Local files. Run `yute doctor` from your shell for bounded diagnostics without
-token output.
+`seeking`/cache state. A real MPV 0.41 audit reproduced two distinct failures: the
+stock OSC can create a seek storm when its draggable seekbar is scrubbed, and direct
+MPV transport can still wedge on an isolated DASH seek even with the safe seekbar.
+With **MPV seekbar** off (the default), Yute uses MPV's upstream `slimbottombar`.
+The playback network engine defaults to `auto`: it starts direct, then after a
+persistent network stall performs one fresh anonymous resolution and switches once
+to Yute's loopback finite-range transport at the requested seek target. Forced
+`mpv` stays direct; forced `proxy` starts on the finite-range transport. On the
+problem video with a 20-second cache, direct MPV stalled at the 20% seek, while
+forced proxy and the final Auto policy completed all ten measured seeks. See
+[`docs/playback-network.md`](docs/playback-network.md) for the sanitized measurements,
+state machine and `yute doctor --seek-test` harness.
 
 ## Accounts
 
@@ -310,18 +315,19 @@ theme_light = "gruvbox-light"
 [ui]
 action_bar = "auto"      # auto | off
 sidebar_channels = false
+sidebar_at_launch = "remember" # show | hide | remember
 scrolloff = 3             # Vim-style context rows
-quit_on_home_only = true
 
 [keys]
 sidebar = "space e"
 sidebar_alt = "alt-e"
 copy_url = "yy"
 center = "zz"
-quit = "q"
+quit = ""                # normal q is intentionally unbound by default
 
 [text]
 emoji = "auto"           # auto | keep | strip
+scripts = "auto"         # auto | native | transliterate
 
 [content]
 shorts = "never"         # never | hide | show
@@ -334,7 +340,8 @@ sidebar_expanded = false
 [playback]
 max_resolution = "1080p" # 480p | 720p | 1080p | 1440p | 2160p | best
 hwdec = "auto-safe"
-stream_cache_seconds = 20    # dedicated YouTube playback uses at least 20s for seek stability
+network_engine = "auto"  # auto | mpv | proxy
+stream_cache_seconds = 20
 use_user_mpv_config = false
 osd_bar = false
 autoplay = true
@@ -357,7 +364,7 @@ Shorts modes:
 - `hide` — hide them in ordinary feeds but allow explicit Shorts/saved content
 - `show` — show normally
 
-See [configuration reference](docs/configuration.md) for semantic theme roles, live reload, codec/language options and downloads.
+See [configuration reference](docs/configuration.md) for semantic theme roles, live reload, codec/language options and downloads. `sidebar_at_launch = "remember"` persists only explicit sidebar toggles; a very narrow terminal hides it temporarily without overwriting that preference.
 
 Visible thumbnails take priority over prefetch work. The cache stores source images and encoded terminal payloads. `:theme` and `:graphics` apply supported visual changes live. Custom themes live in `~/.config/yute/themes/<name>.toml`; the packaged Gruvbox files are examples. `YUTE_GRAPHICS` can override graphics selection for one launch.
 
@@ -405,6 +412,8 @@ ContentItem ──▶ Action ──▶ Router / Player
 - [Commands](docs/commands.md)
 - [Credential storage](docs/credentials.md)
 - [MPV tuning](docs/mpv-tuning.md)
+- [Playback network and seek recovery](docs/playback-network.md)
+- [Text rendering and terminal probes](docs/text-rendering.md)
 - [Performance measurements](docs/performance.md)
 - [SmartTube protocol notes](docs/smarttube-parity.md)
 - [Current delivery validation](docs/delivery-validation.md)

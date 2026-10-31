@@ -15,7 +15,7 @@ yute/
 │   │       ├── config.rs       # Configuration parser and paths
 │   │       ├── local.rs        # Local video filesystem scanner
 │   │       ├── media/          # Thumbnail loader and disk cache
-│   │       └── player/         # MPV controller, IPC, watch tracking, queue
+│   │       └── player/         # MPV IPC, queue/tracking, seek diagnostics, network policy/proxy
 │   └── yute/                   # Ratatui TUI application
 │       ├── Cargo.toml
 │       └── src/
@@ -57,8 +57,11 @@ yute/
 
 4. **Player Controller:**
    - Launches external `mpv` processes communicating over dedicated Unix domain sockets.
-   - Observes MPV property changes (`time-pos`, `duration`, `pause`, `volume`, `speed`).
+   - Observes playback, seek and cache properties (`time-pos`, `duration`, `pause`, `seeking`, `paused-for-cache`, `cache-speed`, demux-cache state, codec and stream path).
    - Dispatches playback commands (`seek`, `cycle pause`, `set volume`, `stats toggle`).
+   - `player::network` owns the bounded direct/Auto/proxy recovery state machine.
+   - `player::proxy` owns a per-session loopback finite-range transport; it never receives OAuth/cookies and terminates with the playback session.
+   - `player::diagnostics` drives the real Player/IPC path for sanitized repeated-seek measurements. See [Playback network and seek recovery](playback-network.md).
 
 ## Terminal Frontend (`yute`)
 
@@ -153,6 +156,17 @@ cell pixel dimensions. Typed cards keep video/channel/playlist activation separa
 Semantic icons are centralized in `ui/icons.rs`; display width governs padding.
 Input editing and truncation use grapheme boundaries, including legacy cursor
 positions inside multibyte text.
+
+## Text width and terminal shaping
+
+Text layout is centralized in `ui/text.rs`. Width-sensitive rendering uses grapheme
+boundaries and a terminal capability probe rather than assuming one Unicode table
+exactly matches every terminal/font combination. After first paint, bounded CPR and
+DEC-mode probes can compare actual cursor advance with Yute's model. Risky complex
+script lines may use explicitly positioned output so Ratatui's cell diff cannot
+shift following text. `[text].scripts = "auto|native|transliterate"` controls the
+fallback; transliteration is approximate and is never presented as translation.
+See [Text rendering](text-rendering.md).
 
 ## Theme, terminal capability and live-config path
 
