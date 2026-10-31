@@ -34,6 +34,7 @@ pub enum Screen {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Focus {
     Sidebar,
+    SubscriptionsStrip,
     Chips,
     Content,
     SearchInput,
@@ -139,6 +140,7 @@ pub use yute_core::accounts::Account as AccountProfile;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WatchPane {
+    Video,
     Description,
     Comments,
     Suggestions,
@@ -194,6 +196,12 @@ pub struct App {
     pub download_request: u64,
     pub download_task: Option<tokio::task::AbortHandle>,
     pub watch_pane: WatchPane,
+    pub watch_right_queue: bool,
+    pub watch_queue_cards: Vec<Card>,
+    pub watch_control: usize,
+    pub watch_channel: Option<crate::backend::models::ChannelCard>,
+    pub watch_error: Option<String>,
+    pub description_expanded: bool,
     pub description_scroll: u16,
     pub watch_link_index: usize,
     pub comments_loading: bool,
@@ -215,7 +223,12 @@ pub struct App {
     pub focus: Focus,
     pub sidebar_expanded: bool,
     pub sidebar_index: usize,
+    pub subscriptions_strip_index: usize,
     pub settings_index: usize,
+    pub settings_group_focus: bool,
+    pub settings_filtering: bool,
+    pub settings_query: String,
+    pub settings_anchor: u8,
     pub setting_editor: Option<SettingEditor>,
     pub chips: Vec<Chip>,
     pub active_chip_index: usize,
@@ -369,7 +382,13 @@ impl App {
             trace_account_frame: None,
             trace_subscriptions_complete: None,
             home_pages: Default::default(),
-            watch_pane: WatchPane::Description,
+            watch_pane: WatchPane::Video,
+            watch_right_queue: false,
+            watch_queue_cards: Vec::new(),
+            watch_control: 0,
+            watch_channel: None,
+            watch_error: None,
+            description_expanded: false,
             description_scroll: 0,
             watch_link_index: 0,
             comments_loading: false,
@@ -392,7 +411,12 @@ impl App {
             detail_route: None,
             focus: Focus::Content,
             sidebar_index: 0,
+            subscriptions_strip_index: 0,
             settings_index: 0,
+            settings_group_focus: false,
+            settings_filtering: false,
+            settings_query: String::new(),
+            settings_anchor: 0,
             setting_editor: None,
             chips: Vec::new(),
             active_chip_index: 0,
@@ -857,6 +881,9 @@ r retry · :account",
     }
 
     pub fn watch_suggestions(&self) -> Vec<&Card> {
+        if self.watch_right_queue {
+            return self.watch_queue_cards.iter().collect();
+        }
         self.watch_data
             .as_ref()
             .map(|w| {
@@ -869,6 +896,9 @@ r retry · :account",
     }
 
     pub fn selected_card(&self) -> Option<&Card> {
+        if self.screen == Screen::Subscriptions && self.focus == Focus::SubscriptionsStrip {
+            return self.subscribed_channels.get(self.subscriptions_strip_index);
+        }
         if self.screen == Screen::Watch {
             return self.watch_suggestions().get(self.selected_index).copied();
         }

@@ -90,7 +90,7 @@ fn shell_geometry_and_rendering_matrix() {
             assert_eq!(shell.sidebar.y, 1, "{screen:?} {w}x{h}");
             assert_eq!(shell.tabs.y, shell.header.y);
             assert_eq!(shell.pane.y, 1);
-            assert_eq!(shell.content.x, shell.pane.x + 1);
+            assert_eq!(shell.content.x, shell.pane.x + 2);
             assert_eq!(shell.title.x, shell.content.x);
             if !shell.tabs.is_empty() {
                 assert!(shell.tabs.x >= shell.header.right());
@@ -526,7 +526,10 @@ fn focus_frames_and_single_row_header_stay_clear_with_hidden_sidebar() {
         terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         assert_eq!(
             terminal.backend().buffer()[(shell.pane.x, shell.pane.y)].fg,
-            app.theme.accent
+            app.theme
+                .style("border_focused")
+                .fg
+                .unwrap_or(ratatui::style::Color::Reset)
         );
         let g = GridGeometry::new(
             shell.content,
@@ -544,7 +547,10 @@ fn focus_frames_and_single_row_header_stay_clear_with_hidden_sidebar() {
         terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
         assert_eq!(
             terminal.backend().buffer()[(shell.sidebar.x, shell.sidebar.y)].fg,
-            app.theme.accent
+            app.theme
+                .style("border_focused")
+                .fg
+                .unwrap_or(ratatui::style::Color::Reset)
         );
         assert_eq!(
             terminal.backend().buffer()[(shell.pane.x, shell.pane.y)].fg,

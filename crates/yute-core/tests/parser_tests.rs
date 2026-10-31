@@ -801,3 +801,12 @@ fn channel_avatar_view_model_ignores_empty_sources() {
         Some("https://yt3.ggpht.com/valid=s88-c-k-no-rj")
     );
 }
+
+#[test]
+fn chapters_keep_renderer_timestamps_and_localized_titles() {
+    let v = serde_json::json!({"markers":[{"chapterRenderer":{"timeRangeStartMillis":"0","title":{"simpleText":"परिचय"}}},{"chapterRenderer":{"timeRangeStartMillis":20000,"title":{"simpleText":"Details"}}},{"macroMarkersListItemRenderer":{"title":{"simpleText":"Details"},"onTap":{"watchEndpoint":{"startTimeSeconds":20}}}}]});
+    assert_eq!(
+        yute_core::backend::parse::parse_chapters(&v),
+        vec![(0, "परिचय".into()), (20, "Details".into())]
+    );
+}

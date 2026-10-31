@@ -5,7 +5,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -62,16 +62,7 @@ pub fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
     let focused = app.focus == Focus::Sidebar;
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Navigation ")
-        .border_style(Style::default().fg(if focused {
-            app.theme.accent
-        } else {
-            app.theme.border
-        }));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = super::pane::Pane::new("Navigation", focused).render(f, area, &app.theme);
     let mut lines = Vec::new();
     let mut cursor_line = 0usize;
     for (i, (name, _, _hint)) in SIDEBAR_ITEMS.iter().enumerate() {

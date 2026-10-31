@@ -356,7 +356,7 @@ fn render_partial_card(f: &mut Frame, app: &mut App, card: &Card, area: Rect, th
     // Keep the same artwork/title order and dimensions as complete rows.
     let title_h = inner.height.saturating_sub(thumb_h).min(2);
     if title_h > 0 {
-        let title = crate::ui::text::title_for(card.title(), &app.config);
+        let title = crate::ui::text::title_for_card(card.title(), &app.config, card.id());
         let lines = wrap_and_truncate_title(&title, inner.width as usize, 2);
         f.render_widget(
             Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>())
@@ -474,10 +474,14 @@ fn render_grid_card(
         render_monogram(f, app, card, thumb_area);
     } else if !thumb_url.is_empty() && crate::terminal::images_enabled(&app.config.general.graphics)
     {
-        if let Some(proto) =
+        let protocol = if matches!(card, Card::Channel(_)) {
+            app.thumbs
+                .get_avatar_protocol(&thumb_url, thumb_area.as_size(), !is_selected)
+        } else {
             app.thumbs
                 .get_card_cover_protocol(&thumb_url, thumb_area.as_size(), !is_selected)
-        {
+        };
+        if let Some(proto) = protocol {
             f.render_widget(proto, thumb_area);
         } else if matches!(card, Card::Channel(_)) {
             render_monogram(f, app, card, thumb_area);
@@ -668,7 +672,7 @@ fn render_grid_card(
 
     // Render Title (max 2 lines, word-boundary wrapped with ellipsis)
     let raw_title = card.title();
-    let clean = crate::ui::text::title_for(raw_title, &app.config);
+    let clean = crate::ui::text::title_for_card(raw_title, &app.config, card.id());
     let title_lines = wrap_and_truncate_title(&clean, title_area.width as usize, title_h as usize);
 
     crate::ui::text::title(f, title_lines, title_area, title_style);

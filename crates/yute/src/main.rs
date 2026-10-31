@@ -295,9 +295,11 @@ async fn run() -> anyhow::Result<()> {
             maybe_continue_feed(&mut app, tx_event.clone());
             maybe_load_card_metadata(&mut app, tx_event.clone());
             maybe_load_channel_avatars(&mut app, tx_event.clone());
-            if app.config.ui.sidebar_channels
+            if ((app.config.ui.sidebar_channels
                 && app.sidebar_expanded
-                && app.terminal_height >= 30
+                && app.terminal_height >= 30)
+                || app.screen == Screen::Subscriptions)
+                && app.is_authenticated()
                 && !app.channels_loaded
                 && !app.channels_loading
             {
@@ -627,6 +629,35 @@ async fn handle_key_event(
     tx: Sender<AppEvent>,
 ) {
     let key = yute::keymap::normalize_key(key);
+    if app.screen == Screen::Settings && app.settings_filtering {
+        match key.code {
+            KeyCode::Esc => {
+                app.settings_filtering = false;
+                app.settings_query.clear();
+            }
+            KeyCode::Enter => app.settings_filtering = false,
+            KeyCode::Char(c) => app.settings_query.push(c),
+            KeyCode::Backspace => {
+                app.settings_query.pop();
+            }
+            _ => {}
+        }
+        let hits = ui::settings::indices(app);
+        if !hits.contains(&app.settings_index) {
+            if let Some(i) = hits.first() {
+                app.settings_index = *i;
+            }
+        }
+        return;
+    }
+    if app.screen == Screen::Settings
+        && app.focus == Focus::Content
+        && app.setting_editor.is_none()
+        && matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+    {
+        app.settings_group_focus = !app.settings_group_focus;
+        return;
+    }
     if let Some(modal) = &mut app.search_modal {
         use yute::ui::search_filters::rows;
         match key.code {
@@ -911,7 +942,7 @@ async fn handle_key_event(
     if key.code == KeyCode::Char('T') && app.focus == Focus::Content && app.screen != Screen::Watch
     {
         if let Some(card) = app.selected_card() {
-            yute::ui::text::toggle_selected(card.title());
+            yute::ui::text::toggle_selected(card.id());
         }
         app.status_text = "Selected title: original/transliterated toggle".into();
         return;
@@ -935,6 +966,24 @@ async fn handle_key_event(
         }
         ensure_screen_loaded(app, tx);
         return;
+    }
+    if app.focus == Focus::SubscriptionsStrip && app.screen == Screen::Subscriptions {
+        match action {
+            Action::Up | Action::Left => {
+                app.subscriptions_strip_index = app.subscriptions_strip_index.saturating_sub(1);
+                return;
+            }
+            Action::Down | Action::Right => {
+                app.subscriptions_strip_index = (app.subscriptions_strip_index + 1)
+                    .min(app.subscribed_channels.len().saturating_sub(1));
+                return;
+            }
+            Action::Back => {
+                app.focus = Focus::Content;
+                return;
+            }
+            _ => {}
+        }
     }
     if app.screen == Screen::Watch
         && app.focus != Focus::Sidebar
@@ -1002,6 +1051,19 @@ async fn handle_key_event(
         app.focus = Focus::SearchInput;
         app.search_input.clear();
         app.suggestion_index = None;
+        return;
+    }
+    if app.screen == Screen::Settings
+        && matches!(
+            action,
+            Action::CenterSelection | Action::AlignTop | Action::AlignBottom
+        )
+    {
+        app.settings_anchor = match action {
+            Action::CenterSelection => 1,
+            Action::AlignTop => 2,
+            _ => 3,
+        };
         return;
     }
     if action == Action::CenterSelection && app.focus == Focus::Content {
@@ -1162,13 +1224,14 @@ async fn handle_key_event(
     for _ in 0..count {
         if app.screen == Screen::Settings && app.focus != Focus::Sidebar {
             match action {
-                Action::Up => {
-                    app.settings_index = app.settings_index.saturating_sub(1);
+                Action::Up => ui::settings::move_selection(app, false),
+                Action::Down => ui::settings::move_selection(app, true),
+                Action::CycleFocusForward | Action::CycleFocusBackward => {
+                    app.settings_group_focus = !app.settings_group_focus
                 }
-                Action::Down => {
-                    app.settings_index = (app.settings_index + 1)
-                        .min(ui::settings::SETTINGS_ITEMS.len().saturating_sub(1));
-                }
+                Action::CenterSelection => app.settings_anchor = 1,
+                Action::AlignTop => app.settings_anchor = 2,
+                Action::AlignBottom => app.settings_anchor = 3,
                 Action::Left => {
                     ui::settings::cycle_setting(app, false);
                     apply_stream_cache(app);
@@ -1200,9 +1263,9 @@ async fn handle_key_event(
                     app.should_quit = true;
                 }
                 Action::FocusSearch => {
-                    app.search_input.clear();
-                    app.suggestion_index = None;
-                    app.focus = Focus::SearchInput;
+                    app.settings_filtering = true;
+                    app.settings_query.clear();
+                    app.settings_group_focus = false;
                 }
                 _ => {}
             }
@@ -1363,6 +1426,9 @@ async fn handle_key_event(
                 );
                 if show_filters {
                     panes.push(Focus::Chips);
+                }
+                if app.screen == Screen::Subscriptions && !app.subscribed_channels.is_empty() {
+                    panes.push(Focus::SubscriptionsStrip);
                 }
                 panes.push(Focus::Content);
                 let current = panes
@@ -1993,7 +2059,19 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
     use yute::app::WatchPane;
     match action {
         Action::CycleFocusForward | Action::CycleFocusBackward | Action::Left | Action::Right => {
+            if app.watch_pane == WatchPane::Suggestions
+                && !app.watch_right_queue
+                && matches!(action, Action::CycleFocusForward)
+            {
+                app.watch_right_queue = true;
+                app.selected_index = 0;
+                return true;
+            }
+            if app.watch_right_queue {
+                app.watch_right_queue = false;
+            }
             let panes = [
+                WatchPane::Video,
                 WatchPane::Description,
                 WatchPane::Comments,
                 WatchPane::Suggestions,
@@ -2003,12 +2081,17 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
                 .position(|pane| *pane == app.watch_pane)
                 .unwrap_or(0);
             let backward = matches!(action, Action::CycleFocusBackward | Action::Left);
-            app.watch_pane = panes[(current + if backward { 2 } else { 1 }) % 3];
+            app.watch_pane = panes[(current + if backward { 3 } else { 1 }) % 4];
             if app.watch_pane == WatchPane::Comments {
                 ensure_comments(app, tx);
             }
         }
-        Action::ToggleDescription => app.watch_pane = WatchPane::Description,
+        Action::ToggleDescription => {
+            if app.watch_pane == WatchPane::Description {
+                app.description_expanded = !app.description_expanded;
+            }
+            app.watch_pane = WatchPane::Description;
+        }
         Action::ToggleComments => {
             app.watch_pane = WatchPane::Comments;
             ensure_comments(app, tx);
@@ -2017,6 +2100,13 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
         Action::Up | Action::Down => {
             let down = action == Action::Down;
             match app.watch_pane {
+                WatchPane::Video => {
+                    app.watch_control = if down {
+                        (app.watch_control + 1).min(2)
+                    } else {
+                        app.watch_control.saturating_sub(1)
+                    };
+                }
                 WatchPane::Description => {
                     let step = count.min(1000) as u16;
                     app.description_scroll = if down {
@@ -2049,9 +2139,35 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
             }
         }
         Action::PlayDefault => match app.watch_pane {
+            WatchPane::Video => match app.watch_control {
+                0 => dispatch_command(
+                    app,
+                    yute::commands::Command::Subscribe(
+                        app.watch_data.as_ref().and_then(|w| w.is_subscribed) != Some(true),
+                    ),
+                    tx,
+                ),
+                1 => {
+                    handle_watch_action(app, Action::LikeVideo, 1, tx);
+                }
+                _ => {
+                    handle_watch_action(app, Action::DislikeVideo, 1, tx);
+                }
+            },
             WatchPane::Suggestions => play_selected_card(app, tx),
             WatchPane::Comments => open_comment_thread(app, tx),
-            WatchPane::Description => open_description_link(app, tx),
+            WatchPane::Description => {
+                if let Some((time, _)) = app
+                    .watch_data
+                    .as_ref()
+                    .and_then(|w| w.chapters.get(app.watch_link_index))
+                {
+                    app.player
+                        .send_command(IpcCommand::Seek(*time as f64, false));
+                } else {
+                    open_description_link(app, tx);
+                }
+            }
         },
         Action::Back if app.watch_pane == WatchPane::Comments && app.close_comment_thread() => {
             app.status_text = "Back to comments".into();
@@ -2071,7 +2187,13 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
         }
         Action::OpenDescriptionLink => open_description_link(app, tx),
         Action::PrevChip | Action::NextChip => {
-            let len = ui::watch::description_links(app).len();
+            if app.watch_pane == WatchPane::Suggestions {
+                app.watch_right_queue = !app.watch_right_queue;
+                app.selected_index = 0;
+                return true;
+            }
+            let len = ui::watch::description_links(app).len()
+                + app.watch_data.as_ref().map_or(0, |w| w.chapters.len());
             if len > 0 {
                 app.watch_link_index = if action == Action::NextChip {
                     (app.watch_link_index + 1) % len
@@ -2354,7 +2476,11 @@ fn open_comment_thread(app: &mut App, tx: Sender<AppEvent>) {
 
 fn open_description_link(app: &mut App, tx: Sender<AppEvent>) {
     let links = ui::watch::description_links(app);
-    let Some((_, url)) = links.get(app.watch_link_index % links.len().max(1)) else {
+    let Some((_, url)) = links.get(
+        app.watch_link_index
+            .saturating_sub(app.watch_data.as_ref().map_or(0, |w| w.chapters.len()))
+            % links.len().max(1),
+    ) else {
         app.status_text = "No description links available".into();
         return;
     };
@@ -2450,7 +2576,7 @@ fn navigate_to_screen(app: &mut App, screen: Screen, tx: Sender<AppEvent>) {
                 app.nav_back();
                 return;
             };
-            app.watch_pane = yute::app::WatchPane::Description;
+            app.watch_pane = yute::app::WatchPane::Video;
             if app
                 .watch_data
                 .as_ref()
@@ -2579,7 +2705,9 @@ fn start_playback(app: &mut App, video: VideoCard, tx: Sender<AppEvent>) {
         app.playback_history.push(previous);
     }
     app.watch_data = None;
-    app.watch_pane = yute::app::WatchPane::Description;
+    app.watch_error = None;
+    app.watch_channel = None;
+    app.watch_pane = yute::app::WatchPane::Video;
     app.description_scroll = 0;
     app.watch_link_index = 0;
     app.comments_cursor = 0;
@@ -3229,17 +3357,54 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 }
             }
         }
+        AppEvent::WatchChannelLoaded(id, channel) => {
+            if app.player.current_video_id() == Some(id.as_str()) {
+                app.watch_channel = channel;
+            }
+        }
         AppEvent::WatchDataLoaded(id, mut res) => {
             if app.player.current_video_id() != Some(id.as_str()) {
                 return;
             }
             if let Ok(ref mut data) = res {
                 data.up_next.retain(|card| card.id() != id);
+                app.watch_channel = None;
+                if let Some(channel_id) = data.video.channel_id.clone() {
+                    let backend = Arc::clone(&app.backend);
+                    let tx = tx.clone();
+                    let id = id.clone();
+                    let generation = app
+                        .auth_generation
+                        .load(std::sync::atomic::Ordering::SeqCst);
+                    tokio::spawn(async move {
+                        let channel = backend
+                            .channel_page(&channel_id, None)
+                            .await
+                            .ok()
+                            .map(|p| p.channel);
+                        let _ = tx
+                            .send(AppEvent::AccountResult(
+                                generation,
+                                Box::new(AppEvent::WatchChannelLoaded(id, channel)),
+                            ))
+                            .await;
+                    });
+                }
             }
-            if let Ok(wd) = res {
-                if app.player.current_video_id() == Some(wd.video.id.as_str()) {
-                    app.watch_data = Some(wd);
-                    ensure_comments(app, tx);
+            match res {
+                Ok(wd) => {
+                    app.watch_error = None;
+                    if app.player.current_video_id() == Some(wd.video.id.as_str()) {
+                        app.watch_data = Some(wd);
+                        ensure_comments(app, tx);
+                    } else {
+                        app.watch_error =
+                            Some("Watch metadata did not identify the current video".into());
+                    }
+                }
+                Err(e) => {
+                    app.watch_error = Some(feed_error_message(&e).to_string());
+                    app.status_text = app.watch_error.clone().unwrap_or_default();
                 }
             }
         }
@@ -4350,7 +4515,7 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 app.transition(Screen::Watch, true);
             }
             app.focus = Focus::Content;
-            app.watch_pane = yute::app::WatchPane::Description;
+            app.watch_pane = yute::app::WatchPane::Video;
             if app
                 .watch_data
                 .as_ref()
@@ -4787,7 +4952,13 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 app.status_text = "Login required for subscriptions — use :login".into();
                 return;
             }
-            let channel = if let Some(yute::app::DetailRoute::Channel(route)) = &app.detail_route {
+            let channel = if app.screen == Screen::Watch
+                && app.watch_pane != yute::app::WatchPane::Suggestions
+            {
+                app.watch_data
+                    .as_ref()
+                    .and_then(|w| yute::actions::channel_of(&Card::Video(w.video.clone())))
+            } else if let Some(yute::app::DetailRoute::Channel(route)) = &app.detail_route {
                 Some(route.channel.clone())
             } else {
                 app.selected_card().and_then(yute::actions::channel_of)
@@ -5567,6 +5738,30 @@ mod feed_ui_tests {
         }
         assert_eq!(app.items.len(), 120);
         assert!(!app.continuation_failed);
+    }
+
+    #[test]
+    fn watch_focus_cycle_includes_video_comments_upnext_and_queue() {
+        let (mut app, _) = app_and_cards();
+        app.screen = Screen::Watch;
+        app.watch_pane = yute::app::WatchPane::Video;
+        let (tx, _) = channel(8);
+        for expected in [
+            yute::app::WatchPane::Description,
+            yute::app::WatchPane::Comments,
+            yute::app::WatchPane::Suggestions,
+            yute::app::WatchPane::Suggestions,
+            yute::app::WatchPane::Video,
+        ] {
+            assert!(handle_watch_action(
+                &mut app,
+                Action::CycleFocusForward,
+                1,
+                tx.clone()
+            ));
+            assert_eq!(app.watch_pane, expected);
+        }
+        assert!(!app.watch_right_queue);
     }
 
     fn app_and_cards() -> (App, Vec<Card>) {

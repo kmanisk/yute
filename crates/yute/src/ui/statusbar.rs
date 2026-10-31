@@ -6,6 +6,13 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     if area.is_empty() {
         return;
     }
+    if app.screen == crate::app::Screen::Watch && app.focus == Focus::CommentInput {
+        f.render_widget(
+            Paragraph::new("Enter submit · Esc cancel").style(app.theme.style("action_hint")),
+            area,
+        );
+        return;
+    }
     if matches!(
         app.focus,
         Focus::CommandLine | Focus::SearchInput | Focus::CommentInput
@@ -19,7 +26,15 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     } else {
         (app.selected_index + 1).min(count)
     };
-    let left = format!(" {pos}/{count}");
+    let left = if matches!(
+        app.screen,
+        crate::app::Screen::Watch | crate::app::Screen::Settings | crate::app::Screen::Accounts
+    ) || count == 0
+    {
+        String::new()
+    } else {
+        format!(" {pos}/{count}")
+    };
     let state = if let Some(error) = &app.feed_error {
         error.as_str()
     } else if app.is_loading_more {

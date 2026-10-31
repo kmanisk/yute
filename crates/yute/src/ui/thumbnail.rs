@@ -73,3 +73,26 @@ mod tests {
         assert_eq!(buffer[(4, 3)].symbol(), "1");
     }
 }
+
+/// Avatars share the normal bounded source/encoded cache and visibility checks.
+pub fn avatar(f: &mut Frame, app: &mut crate::app::App, url: Option<&str>, name: &str, area: Rect) {
+    if area.is_empty() {
+        return;
+    }
+    if visible(app, area) {
+        if let Some(url) = url {
+            if let Some(p) = app.thumbs.get_avatar_protocol(url, area.as_size(), false) {
+                f.render_widget(p, area);
+                return;
+            }
+        }
+    }
+    let label = super::text::display(name, "auto");
+    let initial = super::text::graphemes(&label).next().unwrap_or("?");
+    f.render_widget(
+        Paragraph::new(initial)
+            .alignment(ratatui::layout::Alignment::Center)
+            .style(app.theme.style("badge")),
+        area,
+    );
+}

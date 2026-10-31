@@ -12,6 +12,28 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
         );
         return;
     }
+    if app.screen == crate::app::Screen::Watch {
+        let hints = match app.watch_pane {
+            crate::app::WatchPane::Video => {
+                "j/k control · Enter select · :play-select quality · :audio · Tab pane"
+            }
+            crate::app::WatchPane::Description => {
+                "j/k scroll · [/] link/chapter · Enter open/seek · d expand · Tab pane"
+            }
+            crate::app::WatchPane::Comments => {
+                "n comment · r reply · x delete own · +/− react · Tab pane"
+            }
+            crate::app::WatchPane::Suggestions => {
+                "Enter play · a queue · [/] Up next/Queue · Tab pane"
+            }
+        };
+        f.render_widget(
+            Paragraph::new(super::text::truncate_str(hints, area.width as usize))
+                .style(app.theme.style("action_hint")),
+            area,
+        );
+        return;
+    }
     let actions = match app.selected_card() {
         Some(Card::Video(_)) if app.is_authenticated() => vec![
             "Enter play",

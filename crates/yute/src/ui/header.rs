@@ -85,11 +85,7 @@ pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
                 avatar_w,
                 1,
             );
-            if super::thumbnail::visible(app, avatar_area) {
-                if let Some(proto) = app.thumbs.get_cover_protocol(&url, avatar_area.as_size()) {
-                    f.render_widget(proto, avatar_area);
-                }
-            }
+            super::thumbnail::avatar(f, app, Some(&url), &account, avatar_area);
             text_area.width = text_area.width.saturating_sub(avatar_w + 1);
         }
     }

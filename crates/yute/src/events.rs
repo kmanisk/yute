@@ -31,6 +31,7 @@ pub enum AppEvent {
         anyhow::Result<crate::backend::models::ChannelPage>,
     ),
     WatchDataLoaded(String, anyhow::Result<WatchData>),
+    WatchChannelLoaded(String, Option<crate::backend::models::ChannelCard>),
     SuggestionsLoaded(anyhow::Result<Vec<String>>),
     AccountProfiles(u64, anyhow::Result<Vec<yute_core::accounts::Account>>),
     AccountLoaded(u64, anyhow::Result<(String, String)>),

@@ -1075,7 +1075,7 @@ pub fn parse_watch_data(val: &Value) -> anyhow::Result<WatchData> {
 
     let mut video = None;
     let mut description = String::new();
-    let chapters = Vec::new();
+    let chapters = parse_chapters(val);
     let mut chat_token = None;
 
     // Look for current video info in videoDetails or primary info
@@ -1983,4 +1983,48 @@ pub fn parse_playlist_destinations(value: &Value) -> FeedPage {
         chips: vec![],
         continuation: None,
     }
+}
+
+/// Chapter timestamps from player/next renderer metadata; no title inference.
+pub fn parse_chapters(value: &Value) -> Vec<(u32, String)> {
+    fn walk(v: &Value, out: &mut Vec<(u32, String)>) {
+        if let Some(c) = v.get("chapterRenderer") {
+            let t = c
+                .get("timeRangeStartMillis")
+                .and_then(|v| v.as_u64().or_else(|| v.as_str()?.parse().ok()))
+                .map(|t| t / 1000);
+            let title = extract_text(&c["title"]);
+            if let Some(t) = t.filter(|t| *t <= u32::MAX as u64) {
+                if !title.is_empty() {
+                    out.push((t as u32, title));
+                }
+            }
+        }
+        if let Some(c) = v.get("macroMarkersListItemRenderer") {
+            let t = c
+                .pointer("/onTap/watchEndpoint/startTimeSeconds")
+                .and_then(Value::as_u64);
+            let title = extract_text(&c["title"]);
+            if let Some(t) = t.filter(|t| *t <= u32::MAX as u64) {
+                if !title.is_empty() {
+                    out.push((t as u32, title));
+                }
+            }
+        }
+        if let Some(o) = v.as_object() {
+            for x in o.values() {
+                walk(x, out);
+            }
+        }
+        if let Some(a) = v.as_array() {
+            for x in a {
+                walk(x, out);
+            }
+        }
+    }
+    let mut out = vec![];
+    walk(value, &mut out);
+    out.sort_by_key(|(t, _)| *t);
+    out.dedup_by_key(|(t, _)| *t);
+    out
 }

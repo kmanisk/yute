@@ -83,16 +83,10 @@ pub fn script(c: char) -> &'static str {
     }
 }
 pub fn display(text: &str, policy: &str) -> String {
-    let toggle = TOGGLED
-        .get_or_init(Default::default)
-        .read()
-        .unwrap()
-        .as_deref()
-        == Some(text);
     let failed = FAILED.get_or_init(Default::default).read().unwrap();
     let transliterate = policy == "transliterate"
         || (policy == "auto" && text.chars().any(|c| failed.iter().any(|s| s == script(c))));
-    if transliterate ^ toggle {
+    if transliterate {
         return deunicode::deunicode(text);
     }
     let bidi = unicode_bidi::BidiInfo::new(text, None);
@@ -260,12 +254,36 @@ pub fn complex_width(text: &str, width: usize) -> usize {
     }
 }
 pub fn title_for(title: &str, config: &crate::config::Config) -> String {
+    title_with_policy(title, config, &config.text.scripts)
+}
+pub fn title_for_card(title: &str, config: &crate::config::Config, id: &str) -> String {
+    let toggle = TOGGLED
+        .get_or_init(Default::default)
+        .read()
+        .unwrap()
+        .as_deref()
+        == Some(id);
+    if !toggle {
+        return title_for(title, config);
+    }
+    let failed = FAILED.get_or_init(Default::default).read().unwrap();
+    let automatic = config.text.scripts == "transliterate"
+        || (config.text.scripts == "auto"
+            && title.chars().any(|c| failed.iter().any(|s| s == script(c))));
+    drop(failed);
+    title_with_policy(
+        title,
+        config,
+        if automatic { "native" } else { "transliterate" },
+    )
+}
+fn title_with_policy(title: &str, config: &crate::config::Config, scripts: &str) -> String {
     let policy = if config.strip_emoji() && config.text.emoji == "auto" {
         "strip"
     } else {
         config.text.emoji.as_str()
     };
-    let title = display(title, &config.text.scripts);
+    let title = display(title, scripts);
     let mut safe = String::new();
     for g in title.graphemes(true) {
         let emoji =

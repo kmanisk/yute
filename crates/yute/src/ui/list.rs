@@ -296,7 +296,7 @@ fn render_list_row(
 
     // Render details right
     let raw_title = card.title();
-    let clean = crate::ui::text::title_for(raw_title, &app.config);
+    let clean = crate::ui::text::title_for_card(raw_title, &app.config, card.id());
     let title_lines = wrap_and_truncate_title(&clean, details_w as usize, 2);
 
     let mut details_lines = Vec::new();

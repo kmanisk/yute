@@ -15,6 +15,7 @@ struct CoverKey {
     size: Size,
     generation: u64,
     dimmed: bool,
+    rounded: bool,
 }
 use yute_core::media::cache::DiskCache;
 use yute_core::media::thumbs::ThumbnailLoader;
@@ -131,7 +132,7 @@ impl ThumbnailManager {
     fn encoded_path(&self, key: &CoverKey) -> std::path::PathBuf {
         let font = self.picker.font_size();
         let descriptor = format!(
-            "encoded-v3:{:?}:{}:{}:{}:{}:{}:{}:{}",
+            "encoded-v4:{:?}:{}:{}:{}:{}:{}:{}:{}:{}",
             self.picker.protocol_type(),
             font.width,
             font.height,
@@ -139,6 +140,7 @@ impl ThumbnailManager {
             key.size.height,
             self.picker.tmux_detected(),
             key.dimmed,
+            key.rounded,
             key.url
         );
         self.loader.cache().encoded_dir().join(format!(
@@ -228,7 +230,7 @@ impl ThumbnailManager {
     /// Decode cache is shared with other views. Exact-size cover preparation and
     /// graphics encoding run only on a cache miss, away from the UI thread.
     pub fn get_cover_protocol(&mut self, url: &str, size: Size) -> Option<&EncodedCover> {
-        self.get_toned_cover_protocol(url, size, false)
+        self.get_toned_cover_protocol(url, size, false, false)
     }
     pub fn get_card_cover_protocol(
         &mut self,
@@ -236,13 +238,35 @@ impl ThumbnailManager {
         size: Size,
         dimmed: bool,
     ) -> Option<&EncodedCover> {
+        self.get_shaped_cover(url, size, dimmed, false)
+    }
+    pub fn get_avatar_protocol(
+        &mut self,
+        url: &str,
+        size: Size,
+        dimmed: bool,
+    ) -> Option<&EncodedCover> {
+        let rounded = matches!(
+            self.picker.protocol_type(),
+            ratatui_image::picker::ProtocolType::Kitty
+        );
+        self.get_shaped_cover(url, size, dimmed, rounded)
+    }
+    fn get_shaped_cover(
+        &mut self,
+        url: &str,
+        size: Size,
+        dimmed: bool,
+        rounded: bool,
+    ) -> Option<&EncodedCover> {
         // Keep the already displayed image while the alternate tone is encoded.
-        let _ = self.get_toned_cover_protocol(url, size, dimmed);
+        let _ = self.get_toned_cover_protocol(url, size, dimmed, rounded);
         let key = CoverKey {
             url: url.into(),
             size,
             generation: self.generation,
             dimmed,
+            rounded,
         };
         self.covers.get(&key).or_else(|| {
             self.covers.get(&CoverKey {
@@ -256,6 +280,7 @@ impl ThumbnailManager {
         url: &str,
         size: Size,
         dimmed: bool,
+        rounded: bool,
     ) -> Option<&EncodedCover> {
         if size.width == 0 || size.height == 0 {
             return None;
@@ -266,6 +291,7 @@ impl ThumbnailManager {
             size,
             generation: self.generation,
             dimmed,
+            rounded,
         };
         let font = self.picker.font_size();
         let encoded_path = self.encoded_path(&key);
@@ -343,6 +369,11 @@ impl ThumbnailManager {
                 u32::from(size.height) * u32::from(font.height.max(1)),
             );
             let image = card_tone(image, key.dimmed);
+            let image = if key.rounded {
+                round_avatar(image)
+            } else {
+                image
+            };
             let protocol = picker
                 .new_protocol(image, size, ratatui_image::Resize::Crop(None))
                 .ok()
@@ -368,6 +399,7 @@ impl ThumbnailManager {
             size,
             generation: self.generation,
             dimmed: false,
+            rounded: false,
         };
         self.animated_wanted.insert(key.clone());
         if let Some(animation) = self.animated.get_mut(&key) {
@@ -586,6 +618,19 @@ fn decode_animation(
 
 pub use yute_core::media::thumbs::cache_key_for_url;
 
+fn round_avatar(image: image::DynamicImage) -> image::DynamicImage {
+    let mut rgba = image.into_rgba8();
+    let (w, h) = rgba.dimensions();
+    let radius = f64::from(w.min(h)) / 2.;
+    let (cx, cy) = (f64::from(w) / 2., f64::from(h) / 2.);
+    for (x, y, p) in rgba.enumerate_pixels_mut() {
+        let d = (f64::from(x) + 0.5 - cx).hypot(f64::from(y) + 0.5 - cy);
+        let alpha = (radius - d + 0.5).clamp(0., 1.);
+        p.0[3] = (f64::from(p.0[3]) * alpha).round() as u8;
+    }
+    image::DynamicImage::ImageRgba8(rgba)
+}
+
 fn card_tone(image: image::DynamicImage, dimmed: bool) -> image::DynamicImage {
     if !dimmed {
         return image;
@@ -612,6 +657,18 @@ fn cover_image(image: &image::DynamicImage, width: u32, height: u32) -> image::D
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn kitty_avatar_mask_keeps_center_and_clears_corners() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            12,
+            12,
+            image::Rgba([0, 0, 0, 255]),
+        ));
+        let masked = round_avatar(image).to_rgba8();
+        assert_eq!(masked.dimensions(), (12, 12));
+        assert_eq!(masked.get_pixel(0, 0).0[3], 0);
+        assert_eq!(masked.get_pixel(6, 6).0[3], 255);
+    }
     #[test]
     fn inactive_card_tone_dims_rgb_without_changing_alpha_or_dimensions() {
         let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(

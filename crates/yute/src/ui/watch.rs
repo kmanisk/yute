@@ -10,177 +10,374 @@ use ratatui::{
 };
 
 fn section(f: &mut Frame, app: &App, area: Rect, title: &str, active: bool) -> Rect {
-    if area.is_empty() {
-        return area;
-    }
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .title(format!(" {title} "))
-        .border_style(if active {
-            app.theme.style("border_focused")
-        } else {
-            app.theme.style("border")
-        })
-        .title_style(if active {
-            app.theme.style("accent").add_modifier(Modifier::BOLD)
-        } else {
-            app.theme.style("text_dim").add_modifier(Modifier::BOLD)
-        });
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    inner
+    super::pane::Pane::new(title, active).render(f, area, &app.theme)
 }
-
+#[derive(Clone, Copy, Debug)]
+pub struct WatchLayout {
+    pub header: Rect,
+    pub video: Rect,
+    pub playback: Rect,
+    pub description: Rect,
+    pub comments: Rect,
+    pub compose: Rect,
+    pub right: Rect,
+}
+impl WatchLayout {
+    pub fn new(area: Rect, wide: bool, expanded: bool) -> Self {
+        let header = Rect::new(area.x, area.y, area.width, 1.min(area.height));
+        let body = Rect::new(
+            area.x,
+            header.bottom(),
+            area.width,
+            area.height.saturating_sub(1),
+        );
+        let rw = if wide {
+            body.width.saturating_sub(1) * 38 / 100
+        } else {
+            0
+        };
+        let left = Rect::new(
+            body.x,
+            body.y,
+            body.width.saturating_sub(rw + u16::from(wide)),
+            body.height,
+        );
+        let right = Rect::new(body.right().saturating_sub(rw), body.y, rw, body.height);
+        let compose_h = if left.height >= 12 { 3 } else { 0 };
+        let compose = Rect::new(
+            left.x,
+            left.bottom().saturating_sub(compose_h),
+            left.width,
+            compose_h,
+        );
+        let video_h = 7.min(left.height.saturating_sub(compose_h));
+        let video = Rect::new(left.x, left.y, left.width, video_h);
+        let play_y = (video.bottom() + 1).min(compose.y);
+        let playback = Rect::new(
+            left.x,
+            play_y,
+            left.width,
+            4.min(compose.y.saturating_sub(play_y)),
+        );
+        let remaining_y = (playback.bottom() + 1).min(compose.y);
+        let remaining = compose.y.saturating_sub(remaining_y);
+        let desc_h = if expanded {
+            remaining
+        } else {
+            (remaining / 3).max(4).min(remaining)
+        };
+        let description = Rect::new(left.x, remaining_y, left.width, desc_h);
+        let comment_y = (description.bottom() + u16::from(desc_h > 0)).min(compose.y);
+        let comments = Rect::new(
+            left.x,
+            comment_y,
+            left.width,
+            compose
+                .y
+                .saturating_sub(comment_y + u16::from(compose_h > 0)),
+        );
+        Self {
+            header,
+            video,
+            playback,
+            description,
+            comments,
+            compose,
+            right,
+        }
+    }
+}
 pub fn render_watch(f: &mut Frame, app: &mut App, area: Rect) {
     if area.width < 10 || area.height < 5 {
         return;
     }
-    let right_w = if area.width >= 86 {
-        (area.width / 3).clamp(30, 44)
+    let wide = area.width >= 116;
+    let layout = WatchLayout::new(area, wide, app.description_expanded);
+    let state = &app.player.status;
+    let mode = if state.playback_error.is_some() {
+        "Playback error"
+    } else if state.paused_for_cache || state.seeking {
+        "Buffering"
+    } else if state.paused {
+        "Paused"
+    } else if app.player.is_alive() {
+        "Playing"
     } else {
-        0
+        "Stopped"
     };
-    if right_w == 0 && app.watch_pane == WatchPane::Suggestions {
-        render_suggestions(f, app, area);
-        return;
-    }
-    let gap = u16::from(right_w > 0);
-    let left = Rect::new(
-        area.x,
-        area.y,
-        area.width.saturating_sub(right_w + gap),
-        area.height,
+    let info = format!(
+        "{mode} · {:.1}× · cache {:.0} s · engine mpv",
+        if state.speed > 0. { state.speed } else { 1. },
+        state.cache_duration
     );
-    let heading_h = left.height.min(6);
-    render_heading(f, app, Rect::new(left.x, left.y, left.width, heading_h));
-    let body = Rect::new(
-        left.x,
-        left.y + heading_h,
-        left.width,
-        left.height.saturating_sub(heading_h),
+    f.render_widget(
+        Paragraph::new(super::text::truncate_str(
+            &info,
+            layout.header.width as usize,
+        ))
+        .style(app.theme.style("status")),
+        layout.header,
     );
-    match app.watch_pane {
-        WatchPane::Comments => render_comments(f, app, body),
-        WatchPane::Description | WatchPane::Suggestions => render_description(f, app, body),
-    }
-    if right_w > 0 {
-        render_suggestions(
-            f,
-            app,
-            Rect::new(area.right() - right_w, area.y, right_w, area.height),
+    if wide {
+        render_heading(f, app, layout.video);
+        render_playback(f, app, layout.playback);
+        render_description(f, app, layout.description);
+        if !app.description_expanded {
+            render_comments(f, app, layout.comments);
+        }
+        render_compose(f, app, layout.compose);
+        render_suggestions(f, app, layout.right);
+    } else {
+        let tabs = Rect::new(area.x, layout.header.bottom(), area.width, 1);
+        let names = [
+            ("Video", WatchPane::Video),
+            ("Description", WatchPane::Description),
+            ("Comments", WatchPane::Comments),
+            ("Up next", WatchPane::Suggestions),
+        ];
+        let line = Line::from(
+            names
+                .into_iter()
+                .map(|(s, p)| {
+                    Span::styled(
+                        format!(" {s} "),
+                        if p == app.watch_pane {
+                            app.theme.style("chip_active")
+                        } else {
+                            app.theme.style("chip_idle")
+                        },
+                    )
+                })
+                .collect::<Vec<_>>(),
         );
+        f.render_widget(Paragraph::new(line), tabs);
+        let body = Rect::new(
+            area.x,
+            tabs.bottom(),
+            area.width,
+            area.bottom().saturating_sub(tabs.bottom()),
+        );
+        match app.watch_pane {
+            WatchPane::Video => {
+                let h = 7.min(body.height);
+                render_heading(f, app, Rect::new(body.x, body.y, body.width, h));
+                let y = (body.y + h + 1).min(body.bottom());
+                render_playback(f, app, Rect::new(body.x, y, body.width, body.bottom() - y));
+            }
+            WatchPane::Description => render_description(f, app, body),
+            WatchPane::Comments => {
+                let h = 3.min(body.height);
+                render_comments(
+                    f,
+                    app,
+                    Rect::new(body.x, body.y, body.width, body.height - h),
+                );
+                render_compose(f, app, Rect::new(body.x, body.bottom() - h, body.width, h));
+            }
+            WatchPane::Suggestions => render_suggestions(f, app, body),
+        }
     }
 }
-
-fn render_heading(f: &mut Frame, app: &App, area: Rect) {
+fn render_heading(f: &mut Frame, app: &mut App, area: Rect) {
+    if area.is_empty() {
+        return;
+    }
+    let inner = section(f, app, area, "Video", app.watch_pane == WatchPane::Video);
     let video = app
         .player
         .current_video
         .as_ref()
-        .or_else(|| app.watch_data.as_ref().map(|w| &w.video));
-    let title = video.map_or("Video", |v| v.title.as_str());
-    f.render_widget(
-        Paragraph::new(title)
-            .wrap(Wrap { trim: true })
-            .style(app.theme.style("text").add_modifier(Modifier::BOLD)),
-        Rect::new(area.x, area.y, area.width, 2.min(area.height)),
+        .or_else(|| app.watch_data.as_ref().map(|w| &w.video))
+        .cloned();
+    let title = video.as_ref().map_or(
+        app.watch_error
+            .as_deref()
+            .unwrap_or("Loading video details…"),
+        |v| v.title.as_str(),
     );
-    let meta = video
-        .map(|v| {
-            [
-                Some(v.channel.clone()),
-                v.views.as_deref().map(super::text::compact_views),
-                v.published.clone(),
-            ]
-            .into_iter()
-            .flatten()
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ")
-        })
-        .unwrap_or_default();
-    if area.height > 2 {
+    super::text::title(
+        f,
+        super::text::wrap_and_truncate_title(
+            &super::text::display(title, "native"),
+            inner.width as usize,
+            2,
+        ),
+        Rect::new(inner.x, inner.y, inner.width, inner.height.min(2)),
+        app.theme.style("text").add_modifier(Modifier::BOLD),
+    );
+    if inner.height > 2 {
+        let channel = app.watch_channel.clone();
+        let name = video.as_ref().map_or("Channel", |v| v.channel.as_str());
+        let a = Rect::new(
+            inner.x,
+            inner.y + 2,
+            4.min(inner.width),
+            2.min(inner.height - 2),
+        );
+        super::thumbnail::avatar(
+            f,
+            app,
+            channel.as_ref().and_then(|c| c.avatar_url.as_deref()),
+            name,
+            a,
+        );
+        let x = (a.right() + 1).min(inner.right());
+        let w = inner.right() - x;
+        let subscribed = app.watch_data.as_ref().and_then(|w| w.is_subscribed) == Some(true);
+        let channel_line = format!(
+            "{name}{} · {} · {}",
+            if video.as_ref().is_some_and(|v| v.verified) {
+                " [v]"
+            } else {
+                ""
+            },
+            channel
+                .as_ref()
+                .and_then(|c| c.subscribers.as_deref())
+                .unwrap_or(""),
+            if subscribed {
+                "Subscribed"
+            } else {
+                "Subscribe"
+            }
+        );
         f.render_widget(
-            Paragraph::new(meta).style(app.theme.style("text_dim")),
-            Rect::new(area.x, area.y + 2, area.width, 1),
-        );
-    }
-    if area.height > 3 {
-        let status = &app.player.status;
-        let time = format!(
-            " {} / {}",
-            format_time(status.time_pos),
-            format_time(status.duration)
-        );
-        let width = area.width.saturating_sub(time.width() as u16).max(1);
-        let fraction = if status.duration > 0.0 {
-            (status.time_pos / status.duration).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        let filled = (fraction * f64::from(width.saturating_sub(1))).round() as usize;
-        let line = Line::from(vec![
-            Span::styled("━".repeat(filled), app.theme.style("accent")),
-            Span::styled("●", app.theme.style("accent")),
-            Span::styled(
-                "─".repeat(width.saturating_sub(filled as u16 + 1) as usize),
-                app.theme.style("border"),
-            ),
-            Span::styled(time, app.theme.style("text_dim")),
-        ]);
-        f.render_widget(
-            Paragraph::new(line),
-            Rect::new(area.x, area.y + 3, area.width, 1),
-        );
-    }
-    if area.height > 4 {
-        let watch = app.watch_data.as_ref();
-        let liked = watch.and_then(|w| w.is_liked) == Some(true);
-        let disliked = watch.and_then(|w| w.is_disliked) == Some(true);
-        let likes = watch
-            .and_then(|w| w.likes.as_deref())
-            .filter(|value| !value.is_empty())
-            .unwrap_or("");
-        let mut spans = Vec::new();
-        spans.push(Span::styled(
-            super::icons::Icon::Like.label(
-                app.config.icons(),
-                if likes.is_empty() {
-                    if liked {
-                        "Liked"
-                    } else {
-                        "Like"
-                    }
+            Paragraph::new(super::text::truncate_str(&channel_line, w as usize)).style(
+                if app.watch_control == 0 && app.watch_pane == WatchPane::Video {
+                    app.theme.style("selection")
                 } else {
-                    likes
+                    app.theme.style("text")
                 },
             ),
-            if liked {
-                app.theme.style("accent").add_modifier(Modifier::BOLD)
-            } else {
-                app.theme.style("text_dim")
-            },
-        ));
-        spans.push(Span::raw("   "));
-        spans.push(Span::styled(
-            super::icons::Icon::Dislike.label(
-                app.config.icons(),
-                if disliked { "Disliked" } else { "Dislike" },
-            ),
-            if disliked {
-                app.theme.style("accent").add_modifier(Modifier::BOLD)
-            } else {
-                app.theme.style("text_dim")
-            },
-        ));
-        spans.push(Span::styled(
-            "    d description · c comments · w suggestions",
-            app.theme.style("text_dim").add_modifier(Modifier::DIM),
-        ));
-        f.render_widget(
-            Paragraph::new(Line::from(spans)),
-            Rect::new(area.x, area.y + 4, area.width, 1),
+            Rect::new(x, a.y, w, 1),
         );
+        if inner.height > 3 {
+            let watch = app.watch_data.as_ref();
+            let like = watch.and_then(|w| w.is_liked) == Some(true);
+            let dislike = watch.and_then(|w| w.is_disliked) == Some(true);
+            let controls = [
+                format!(
+                    "{} {}",
+                    super::icons::Icon::Like.glyph(app.config.icons()),
+                    if like { "Unlike" } else { "Like" }
+                ),
+                format!(
+                    "{} {}",
+                    super::icons::Icon::Dislike.glyph(app.config.icons()),
+                    if dislike { "Remove dislike" } else { "Dislike" }
+                ),
+            ];
+            let mut spans = vec![];
+            for (i, c) in controls.into_iter().enumerate() {
+                spans.push(Span::styled(
+                    format!(" {c} "),
+                    if app.watch_pane == WatchPane::Video && app.watch_control == i + 1 {
+                        app.theme.style("selection")
+                    } else {
+                        app.theme.style("text")
+                    },
+                ));
+            }
+            if let Some(v) = video.as_ref() {
+                spans.push(Span::styled(
+                    format!(
+                        " · {} · {}",
+                        v.views.as_deref().unwrap_or(""),
+                        v.published.as_deref().unwrap_or("")
+                    ),
+                    app.theme.style("text_dim"),
+                ));
+            }
+            f.render_widget(
+                Paragraph::new(Line::from(spans)),
+                Rect::new(x, a.y + 1, w, 1),
+            );
+        }
+    }
+}
+fn render_playback(f: &mut Frame, app: &App, area: Rect) {
+    if area.height < 3 {
+        return;
+    }
+    let inner = section(f, app, area, "Playback", false);
+    if inner.is_empty() {
+        return;
+    }
+    let s = &app.player.status;
+    let width = inner.width as usize;
+    let mut bar = vec!['─'; width];
+    if s.duration > 0. {
+        let played = (s.time_pos / s.duration * width as f64).clamp(0., width as f64) as usize;
+        let buffered = ((s.time_pos + s.cache_duration) / s.duration * width as f64)
+            .clamp(0., width as f64) as usize;
+        for c in bar.iter_mut().take(buffered) {
+            *c = '┄';
+        }
+        for c in bar.iter_mut().take(played) {
+            *c = '━';
+        }
+        if let Some(w) = &app.watch_data {
+            for (t, _) in &w.chapters {
+                let i = (*t as f64 / s.duration * width as f64) as usize;
+                if let Some(c) = bar.get_mut(i) {
+                    *c = '│';
+                }
+            }
+        }
+    }
+    f.render_widget(
+        Paragraph::new(bar.into_iter().collect::<String>()).style(app.theme.style("progress")),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+    if inner.height > 1 {
+        let status = format!(
+            "{} / {} · {:.1}× · volume {:.0}%",
+            format_time(s.time_pos),
+            format_time(s.duration),
+            if s.speed > 0. { s.speed } else { 1. },
+            s.volume
+        );
+        f.render_widget(
+            Paragraph::new(super::text::truncate_str(&status, width))
+                .style(app.theme.style("text_dim")),
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+    }
+}
+fn render_compose(f: &mut Frame, app: &App, area: Rect) {
+    if area.height < 3 {
+        return;
+    }
+    let count = app.comment_input.chars().count();
+    let label = if app.comment_draft.as_ref().is_some_and(|d| d.reply) {
+        "Reply"
+    } else {
+        "Add a comment"
+    };
+    let inner = section(
+        f,
+        app,
+        area,
+        &format!("{label} · {count}/10000"),
+        app.focus == crate::app::Focus::CommentInput,
+    );
+    let value = if app.focus == crate::app::Focus::CommentInput {
+        app.comment_input.as_str()
+    } else {
+        "n new comment · r reply"
+    };
+    f.render_widget(
+        Paragraph::new(super::text::truncate_str(value, inner.width as usize))
+            .style(app.theme.style("text")),
+        inner,
+    );
+    if app.focus == crate::app::Focus::CommentInput && !inner.is_empty() {
+        f.set_cursor_position((
+            inner.x
+                + (super::text::DisplayWidth::width(value)
+                    .min(inner.width.saturating_sub(1) as usize) as u16),
+            inner.y,
+        ));
     }
 }
 
@@ -212,7 +409,12 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
     );
     let Some(watch) = &app.watch_data else {
         f.render_widget(
-            Paragraph::new("Loading video details…").style(app.theme.style("text_dim")),
+            Paragraph::new(
+                app.watch_error
+                    .as_deref()
+                    .unwrap_or("Loading video details…"),
+            )
+            .style(app.theme.style("text_dim")),
             inner,
         );
         return;
@@ -246,9 +448,17 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
             "Chapters",
             app.theme.style("text").add_modifier(Modifier::BOLD),
         )));
-        for (time, title) in &watch.chapters {
+        for (index, (time, title)) in watch.chapters.iter().enumerate() {
             lines.push(Line::from(Span::styled(
-                format!("{}  {title}", format_time(f64::from(*time))),
+                format!(
+                    "{} {}  {title}",
+                    if index == app.watch_link_index {
+                        ">"
+                    } else {
+                        " "
+                    },
+                    format_time(f64::from(*time))
+                ),
                 app.theme.style("accent"),
             )));
         }
@@ -257,7 +467,7 @@ fn render_description(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(Span::styled(
             format!(
                 "{} {}",
-                if i == app.watch_link_index {
+                if i + watch.chapters.len() == app.watch_link_index {
                     "▎"
                 } else {
                     " "
@@ -324,19 +534,19 @@ fn render_comments(f: &mut Frame, app: &mut App, area: Rect) {
         }
         let row_x = inner.x + 2;
         let row_w = inner.width.saturating_sub(2);
-        let avatar_w = 5.min(row_w.saturating_sub(8));
-        let avatar_h = 2u16;
+        let avatar_w = 2.min(row_w.saturating_sub(8));
+        let avatar_h = 1u16;
         let text_x = row_x + avatar_w + 1;
         let text_w = row_w.saturating_sub(avatar_w + 1);
         if avatar_w > 0 {
             let avatar_area = Rect::new(row_x, y, avatar_w, avatar_h);
-            if let Some(url) = &comment.author_thumb {
-                if super::thumbnail::visible(app, avatar_area) {
-                    if let Some(proto) = app.thumbs.get_cover_protocol(url, avatar_area.as_size()) {
-                        f.render_widget(proto, avatar_area);
-                    }
-                }
-            }
+            super::thumbnail::avatar(
+                f,
+                app,
+                comment.author_thumb.as_deref(),
+                &comment.author,
+                avatar_area,
+            );
         }
         let author = if comment.author.starts_with('@') {
             comment.author.clone()
@@ -472,10 +682,14 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
         f,
         app,
         area,
-        "Suggestions",
+        if app.watch_right_queue {
+            "Queue · [ ] Up next"
+        } else {
+            "Up next · [ ] Queue"
+        },
         app.watch_pane == WatchPane::Suggestions,
     );
-    let thumb_w = 14.min(inner.width / 2);
+    let thumb_w = (inner.width / 3).clamp(14, 24).min(inner.width / 2);
     let thumb_h = (f32::from(thumb_w) * app.cell_w_px * 9.0 / (16.0 * app.cell_h_px.max(1.0)))
         .round()
         .max(1.0) as u16;

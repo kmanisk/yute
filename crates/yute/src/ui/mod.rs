@@ -15,6 +15,7 @@ pub mod settings;
 pub mod sidebar;
 pub mod signin;
 pub mod statusbar;
+pub mod subscription_strip;
 pub mod text;
 pub mod thumbnail;
 pub mod watch;
@@ -22,7 +23,6 @@ pub mod watch;
 use crate::app::{App, Focus, Screen, ViewMode};
 use crate::ui::text::DisplayWidth;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::Frame;
 
 pub mod miniplayer;
@@ -80,8 +80,9 @@ impl ShellLayout {
         );
         let sb = sidebar::width_for(app).min(area.width.saturating_sub(20));
         let sidebar = Rect::new(body.x, body.y, sb, body.height);
-        let content_x = body.x + sb;
-        let width = body.width.saturating_sub(sb);
+        let gutter = u16::from(sb > 0);
+        let content_x = body.x + sb + gutter;
+        let width = body.width.saturating_sub(sb + gutter);
         let has_tabs = !matches!(
             app.screen,
             Screen::Watch
@@ -102,7 +103,7 @@ impl ShellLayout {
         let pane = Rect::new(content_x, body.y, width, body.height);
         // Keep card borders inside the content frame; the grid reserves its own
         // scrollbar column so neither can overwrite a card edge.
-        let content = pane.inner(ratatui::layout::Margin::new(1, 1));
+        let content = pane::Pane::new("", false).inner(pane);
         let title = Rect::new(content.x, content.y, content.width, 0);
         Self {
             filterbar,
@@ -137,6 +138,9 @@ pub fn prepare_viewport(app: &mut App, size: Rect) {
         return;
     }
     let mut area = ShellLayout::new(size, app).content;
+    let strip = subscription_strip::height(app, area);
+    area.y += strip;
+    area.height = area.height.saturating_sub(strip);
     let header = match app.screen {
         Screen::PlaylistView => 1,
         Screen::ChannelView => match &app.detail_route {
@@ -166,6 +170,16 @@ pub fn prepare_viewport(app: &mut App, size: Rect) {
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     text::begin_frame();
+    if app.screen == Screen::Watch && app.watch_right_queue {
+        app.watch_queue_cards = app
+            .player
+            .queue
+            .items()
+            .iter()
+            .cloned()
+            .map(crate::backend::models::Card::Video)
+            .collect();
+    }
     let size = f.area();
     f.render_widget(
         ratatui::widgets::Block::default().style(app.theme.style("text")),
@@ -183,24 +197,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     header::render_header(f, app, shell.header);
     sidebar::render_sidebar(f, app, shell.sidebar);
     let focused = app.focus == Focus::Content && app.action_menu.is_none();
-    let frame = ratatui::widgets::Block::default()
-        .borders(ratatui::widgets::Borders::ALL)
-        .border_style(Style::default().fg(if focused {
-            app.theme.accent
-        } else {
-            app.theme.border
-        }))
-        .title(if matches!(app.screen, Screen::Watch) {
-            " Video details "
+    pane::Pane::new(
+        if app.screen == Screen::Watch {
+            "Watch"
         } else {
             ""
-        })
-        .title_style(Style::default().fg(if focused {
-            app.theme.accent
-        } else {
-            app.theme.text_secondary
-        }));
-    f.render_widget(frame, shell.pane);
+        },
+        focused,
+    )
+    .render(f, shell.pane, &app.theme);
     if !shell.tabs.is_empty() {
         chips::render_chips(f, app, shell.tabs);
     }
@@ -217,6 +222,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let content_area = shell.content;
     let status_area = shell.footer;
     let mut inner_content = content_area;
+    let strip = subscription_strip::height(app, inner_content);
+    if strip > 0 {
+        subscription_strip::render(
+            f,
+            app,
+            Rect::new(inner_content.x, inner_content.y, inner_content.width, strip),
+        );
+        inner_content.y += strip;
+        inner_content.height = inner_content.height.saturating_sub(strip);
+    }
     if app.screen == Screen::PlaylistView {
         if let Some(crate::app::DetailRoute::Playlist(p)) = &app.detail_route {
             let text = format!(

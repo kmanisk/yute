@@ -1,9 +1,9 @@
 use crate::app::App;
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Clear, Paragraph},
     Frame,
 };
 
@@ -20,25 +20,22 @@ pub fn picker_area(app: &App, area: Rect) -> Option<Rect> {
         height,
     ))
 }
-pub fn render_picker(f: &mut Frame, app: &App) {
+pub fn render_picker(f: &mut Frame, app: &mut App) {
     let Some(area) = picker_area(app, f.area()) else {
         return;
     };
     f.render_widget(Clear, area);
-    let block = Block::default()
-        .title(" Switch account ")
-        .borders(Borders::ALL)
-        .border_style(app.theme.style("accent"))
-        .style(Style::default().bg(app.theme.bg));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = super::pane::Pane::new("Switch account", true).render(f, area, &app.theme);
     render_accounts(f, app, inner);
 }
-pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
+pub fn render_accounts(f: &mut Frame, app: &mut App, area: Rect) {
     let rows = area.height.saturating_sub(3).max(1) as usize;
     let start = app.accounts_cursor.saturating_sub(rows - 1);
     let mut lines = Vec::new();
-    for (index, account) in app.accounts.iter().enumerate().skip(start).take(rows) {
+    let accounts = app.accounts.clone();
+    for (index, account) in accounts.iter().enumerate().skip(start).take(rows) {
+        let avatar = Rect::new(area.x, area.y + lines.len() as u16, 2.min(area.width), 1);
+        super::thumbnail::avatar(f, app, account.avatar_url.as_deref(), &account.name, avatar);
         let selected = index == app.accounts_cursor;
         let style = if selected {
             app.theme.style("accent").add_modifier(Modifier::BOLD)
@@ -77,5 +74,13 @@ pub fn render_accounts(f: &mut Frame, app: &App, area: Rect) {
         "Esc close · :account whoami",
         app.theme.style("text_dim"),
     )));
-    f.render_widget(Paragraph::new(lines), area);
+    f.render_widget(
+        Paragraph::new(lines),
+        Rect::new(
+            area.x + 3.min(area.width),
+            area.y,
+            area.width.saturating_sub(3),
+            area.height,
+        ),
+    );
 }

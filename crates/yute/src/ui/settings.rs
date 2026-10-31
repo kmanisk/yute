@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::config::ShortsVisibility;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -44,7 +44,10 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Sidebar alt key", "Modified sidebar alias, e.g. 'alt-e'."),
     ("Copy URL key", "Sequence for copying the selected/current video URL, e.g. 'yy'."),
     ("Center key", "Sequence for centering the current row, e.g. 'zz'."),
-    ("Quit key", "Home-only quit key by default; elsewhere it navigates back."),
+    ("Quit key", "Deliberate normal-mode quit binding; empty leaves q unbound."),
+    ("Scripts", "auto uses native text for passing probes; T toggles the selected title. Transliteration is approximate."),
+    ("Mixes in search", "Hide Mix/radio results in normal Search; Playlists still shows them."),
+    ("Music search bias", "auto requests videos of medium duration for music words; M removes this for the query."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -126,6 +129,14 @@ fn value(app: &App, index: usize) -> String {
         35 => app.config.keys.copy_url.clone(),
         36 => app.config.keys.center.clone(),
         37 => app.config.keys.quit.clone(),
+        38 => app.config.text.scripts.clone(),
+        39 => if app.config.search.mixes {
+            "show"
+        } else {
+            "hide"
+        }
+        .into(),
+        40 => app.config.search.music_bias.clone(),
         _ => String::new(),
     }
 }
@@ -133,81 +144,164 @@ fn toggle(on: bool) -> String {
     if on { "[on]  off" } else { " on  [off]" }.into()
 }
 
-pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
-    if area.is_empty() {
-        return;
-    }
-    let margin = (area.width / 12).min(8);
-    let inner = Rect::new(
-        area.x + margin,
-        area.y,
-        area.width.saturating_sub(margin * 2),
-        area.height,
-    );
-    let selected = app.settings_index.min(SETTINGS_ITEMS.len() - 1);
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "Preferences",
-            app.theme.style("accent").add_modifier(Modifier::BOLD),
-        )),
-        Line::default(),
-    ];
-    for (i, (label, _)) in SETTINGS_ITEMS.iter().enumerate() {
-        if i == 3 || i == 7 {
-            lines.push(Line::default());
-        }
-        let active = i == selected;
-        let style = Style::default().fg(if active {
-            app.theme.accent
-        } else {
-            app.theme.text
-        });
-        lines.push(Line::from(vec![
-            Span::styled(if active { "▎ " } else { "  " }, style),
-            Span::styled(
-                format!("{label:<20}"),
-                if active {
-                    style.add_modifier(Modifier::BOLD)
-                } else {
-                    style
-                },
-            ),
-            Span::styled(value(app, i), style),
-        ]));
-    }
-    let available = inner.height.saturating_sub(4) as usize;
-    // Keep the selected row visible on short terminals without stretching rows.
-    let row = 2 + selected + usize::from(selected >= 3) + usize::from(selected >= 7);
-    let offset = (row + 1).saturating_sub(available);
-    f.render_widget(
-        Paragraph::new(lines).scroll((offset as u16, 0)),
-        Rect::new(
-            inner.x,
-            inner.y,
-            inner.width,
-            inner.height.saturating_sub(4),
-        ),
-    );
-    if inner.height >= 5 {
-        let desc = Rect::new(inner.x, inner.bottom() - 4, inner.width, 3);
-        f.render_widget(
-            Paragraph::new(SETTINGS_ITEMS[selected].1)
-                .style(app.theme.style("text_dim"))
-                .wrap(ratatui::widgets::Wrap { trim: true })
-                .block(
-                    Block::default()
-                        .borders(Borders::TOP)
-                        .border_style(app.theme.style("border")),
-                ),
-            desc,
-        );
-        f.render_widget(
-            Paragraph::new("j/k choose   h/l adjust   Enter edit/choose   Esc back")
-                .style(app.theme.style("text_dim")),
-            Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
-        );
+pub const GROUPS: [&str; 8] = [
+    "Playback",
+    "Network",
+    "Appearance",
+    "Content",
+    "Search",
+    "Downloads",
+    "Keys",
+    "Account",
+];
+pub fn group(index: usize) -> usize {
+    match index {
+        3 => 1,
+        1 | 9..=17 | 32 | 38 => 2,
+        7 => 3,
+        39 | 40 => 4,
+        18..=24 | 31 => 5,
+        33..=37 => 6,
+        8 => 7,
+        _ => 0,
     }
 }
+pub fn indices(app: &App) -> Vec<usize> {
+    let g = group(app.settings_index);
+    let q = app.settings_query.to_lowercase();
+    SETTINGS_ITEMS
+        .iter()
+        .enumerate()
+        .filter(|(i, (name, help))| {
+            if q.is_empty() {
+                group(*i) == g
+            } else {
+                format!("{name} {help}").to_lowercase().contains(&q)
+            }
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+pub fn move_selection(app: &mut App, down: bool) {
+    if app.settings_group_focus {
+        let g = group(app.settings_index);
+        let g = if down { (g + 1) % 8 } else { (g + 7) % 8 };
+        if let Some(i) = (0..SETTINGS_ITEMS.len()).find(|i| group(*i) == g) {
+            app.settings_index = i;
+        }
+        return;
+    }
+    let indices = indices(app);
+    let at = indices
+        .iter()
+        .position(|i| *i == app.settings_index)
+        .unwrap_or(0);
+    if let Some(i) = indices.get(if down {
+        (at + 1).min(indices.len().saturating_sub(1))
+    } else {
+        at.saturating_sub(1)
+    }) {
+        app.settings_index = *i;
+    }
+}
+pub fn render_settings(f: &mut Frame, app: &App, area: Rect) {
+    use super::{
+        pane::Pane,
+        text::{truncate_str, DisplayWidth},
+    };
+    if area.width < 8 || area.height < 5 {
+        return;
+    }
+    let help_h = 4.min(area.height);
+    let body = Rect::new(
+        area.x,
+        area.y,
+        area.width,
+        area.height.saturating_sub(help_h + 1),
+    );
+    let selected = app.settings_index.min(SETTINGS_ITEMS.len() - 1);
+    let compact = area.width < 70;
+    let group_w = if compact { 0 } else { 18.min(body.width / 3) };
+    if !compact || app.settings_group_focus {
+        let a = if compact {
+            body
+        } else {
+            Rect::new(body.x, body.y, group_w, body.height)
+        };
+        let inner = Pane::new("Settings", app.settings_group_focus).render(f, a, &app.theme);
+        let g = group(selected);
+        let offset = g.saturating_add(1).saturating_sub(inner.height as usize);
+        for (row, (i, label)) in GROUPS
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(inner.height as usize)
+            .enumerate()
+        {
+            f.render_widget(
+                Paragraph::new(truncate_str(label, inner.width as usize)).style(if i == g {
+                    app.theme.style("selection")
+                } else {
+                    app.theme.style("text_dim")
+                }),
+                Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
+            );
+        }
+    }
+    if !compact || !app.settings_group_focus {
+        let x = body.x + group_w + u16::from(!compact);
+        let right = Rect::new(x, body.y, body.right().saturating_sub(x), body.height);
+        let title = if app.settings_filtering {
+            format!("Find: {}", app.settings_query)
+        } else if app.settings_query.is_empty() {
+            format!("Preferences · {}", GROUPS[group(selected)])
+        } else {
+            format!("Matches: {}", app.settings_query)
+        };
+        let inner = Pane::new(&title, !app.settings_group_focus).render(f, right, &app.theme);
+        let indices = indices(app);
+        let at = indices.iter().position(|i| *i == selected).unwrap_or(0);
+        let rows = inner.height as usize;
+        let offset = match app.settings_anchor {
+            1 => at.saturating_sub(rows / 2),
+            2 => at,
+            3 => at.saturating_add(1).saturating_sub(rows),
+            _ => at.saturating_add(1).saturating_sub(rows),
+        }
+        .min(indices.len().saturating_sub(rows));
+        if indices.is_empty() {
+            f.render_widget(
+                Paragraph::new("No matching settings").style(app.theme.style("text_dim")),
+                inner,
+            );
+        }
+        for (row, i) in indices.into_iter().skip(offset).take(rows).enumerate() {
+            let val = truncate_str(&value(app, i), inner.width as usize / 2);
+            let label_w = (inner.width as usize).saturating_sub(val.width() + 2);
+            let label = truncate_str(SETTINGS_ITEMS[i].0, label_w);
+            let pad = (inner.width as usize).saturating_sub(label.width() + val.width());
+            let line = format!("{label}{}{val}", " ".repeat(pad));
+            f.render_widget(
+                Paragraph::new(line).style(if i == selected {
+                    app.theme.style("selection")
+                } else {
+                    app.theme.style("text")
+                }),
+                Rect::new(inner.x, inner.y + row as u16, inner.width, 1),
+            );
+        }
+    }
+    let help = Rect::new(area.x, area.bottom() - help_h, area.width, help_h);
+    let inner =
+        Pane::new("Help · / filter · Tab groups · zz/zt/zb", false).render(f, help, &app.theme);
+    f.render_widget(
+        Paragraph::new(SETTINGS_ITEMS[selected].1)
+            .style(app.theme.style("text_dim"))
+            .wrap(ratatui::widgets::Wrap { trim: true }),
+        inner,
+    );
+}
+
 fn step<T: PartialEq + Clone>(choices: &[T], current: &T, forward: bool) -> T {
     let i = choices.iter().position(|v| v == current).unwrap_or(0);
     choices[if forward {
@@ -404,6 +498,23 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
         33..=37 => {
             app.status_text = "Press Enter to edit this key binding".into();
             return;
+        }
+        38 => {
+            app.config.text.scripts = step(
+                &["auto", "native", "transliterate"],
+                &app.config.text.scripts.as_str(),
+                forward,
+            )
+            .into()
+        }
+        39 => app.config.search.mixes = !app.config.search.mixes,
+        40 => {
+            app.config.search.music_bias = if app.config.search.music_bias == "auto" {
+                "off"
+            } else {
+                "auto"
+            }
+            .into()
         }
         _ => return,
     }

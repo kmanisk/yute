@@ -24,14 +24,14 @@ impl<'a> Pane<'a> {
         } else {
             theme.style("border").add_modifier(Modifier::DIM)
         };
-        f.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" {title} "))
-                .border_style(style)
-                .style(theme.style("popup")),
-            area,
-        );
+        let mut block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(style)
+            .style(theme.style("popup"));
+        if !title.is_empty() {
+            block = block.title(format!(" {title} "));
+        }
+        f.render_widget(block, area);
         self.inner(area)
     }
 }

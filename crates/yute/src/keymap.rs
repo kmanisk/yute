@@ -46,6 +46,8 @@ pub enum Action {
     Help,
     Redraw,
     CenterSelection,
+    AlignTop,
+    AlignBottom,
 
     // Cards / lists
     PlayDefault,
@@ -311,6 +313,8 @@ impl KeymapState {
                     (&keys.sidebar_alt, Action::FocusSidebar),
                     (&keys.copy_url, Action::YankUrl),
                     (&keys.center, Action::CenterSelection),
+                    (&"zt".to_string(), Action::AlignTop),
+                    (&"zb".to_string(), Action::AlignBottom),
                     (&keys.quit, Action::Quit),
                 ] {
                     if two(binding).is_some_and(|pair| pair == (prefix, c)) {
@@ -347,6 +351,8 @@ impl KeymapState {
                 for (binding, action) in [
                     (&keys.copy_url, Action::YankUrl),
                     (&keys.center, Action::CenterSelection),
+                    (&"zt".to_string(), Action::AlignTop),
+                    (&"zb".to_string(), Action::AlignBottom),
                     (&keys.quit, Action::Quit),
                     (&keys.sidebar, Action::FocusSidebar),
                 ] {
