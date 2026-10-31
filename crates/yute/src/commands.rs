@@ -175,6 +175,10 @@ fn set_command(args: &str) -> Result<Command, String> {
             Ok(pages) if pages <= 4 => {}
             _ => return Err("prefetch-pages must be 0..4".into()),
         },
+        "network-engine" => match value {
+            "auto" | "mpv" | "proxy" => {}
+            _ => return Err("network-engine must be auto, mpv or proxy".into()),
+        },
         "codec" => match value {
             "auto" | "av1" | "vp9" | "h264" => {}
             _ => return Err("codec must be auto|av1|vp9|h264".into()),
@@ -345,6 +349,7 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
                 "user-mpv-config",
                 "cache-seconds",
                 "codec",
+                "network-engine",
                 "audio-codec",
                 "hwdec",
                 "audio-language",
@@ -384,6 +389,7 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
             &["auto-safe", "auto", "no", "nvdec", "vaapi", "vulkan"],
         ),
         ("set cache-seconds", &["5", "10", "20", "40", "60"]),
+        ("set network-engine", &["auto", "mpv", "proxy"]),
         ("set emoji", &["auto", "keep", "strip"]),
         ("set sidebar-channels", &["on", "off"]),
         ("set start-anonymous", &["on", "off"]),

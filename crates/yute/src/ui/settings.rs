@@ -47,7 +47,8 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Quit key", "Deliberate normal-mode quit binding; empty leaves q unbound."),
     ("Scripts", "auto uses native text for passing probes; T toggles the selected title. Transliteration is approximate."),
     ("Mixes in search", "Hide Mix/radio results in normal Search; Playlists still shows them."),
-    ("Music search bias", "auto requests videos of medium duration for music words; M removes this for the query."),
+    ("Music search bias", "auto requests Videos and a metadata-based 3–20 minute range; M removes this for the query."),
+    ("Network engine", "auto: direct, one refresh then finite-range transport after a persistent stall. mpv: direct only. proxy: finite ranges for timed streams."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -137,6 +138,7 @@ fn value(app: &App, index: usize) -> String {
         }
         .into(),
         40 => app.config.search.music_bias.clone(),
+        41 => app.config.playback.network_engine.clone(),
         _ => String::new(),
     }
 }
@@ -156,7 +158,7 @@ pub const GROUPS: [&str; 8] = [
 ];
 pub fn group(index: usize) -> usize {
     match index {
-        3 => 1,
+        3 | 41 => 1,
         1 | 9..=17 | 32 | 38 => 2,
         7 => 3,
         39 | 40 => 4,
@@ -516,6 +518,14 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
             }
             .into()
         }
+        41 => {
+            app.config.playback.network_engine = step(
+                &["auto", "mpv", "proxy"],
+                &app.config.playback.network_engine.as_str(),
+                forward,
+            )
+            .into()
+        }
         _ => return,
     }
     if app.settings_index == 9 {
@@ -614,6 +624,12 @@ pub fn open_editor(app: &mut App) -> bool {
                 .collect(),
         ),
         32 => Some((0..=6).map(|n| n.to_string()).collect()),
+        41 => Some(
+            ["auto", "mpv", "proxy"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        ),
         _ => None,
     };
     if let Some(options) = choices {
@@ -701,6 +717,10 @@ fn apply_value(app: &mut App, setting: usize, value: &str) -> anyhow::Result<()>
         35 => app.config.keys.copy_url = value.trim().into(),
         36 => app.config.keys.center = value.trim().into(),
         37 => app.config.keys.quit = value.trim().into(),
+        41 => {
+            yute_core::player::network::Engine::parse(value)?;
+            app.config.playback.network_engine = value.into();
+        }
         _ => anyhow::bail!("This setting uses the toggle control"),
     }
     Ok(())

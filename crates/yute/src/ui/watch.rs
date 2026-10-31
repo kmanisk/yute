@@ -105,10 +105,24 @@ pub fn render_watch(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         "Stopped"
     };
+    let mode = match state.recovery {
+        yute_core::player::network::Phase::Refreshing => "Refreshing media",
+        yute_core::player::network::Phase::Proxy if !state.file_loaded => {
+            "Switching to range transport"
+        }
+        yute_core::player::network::Phase::Failed => "Network stall · retry playback",
+        _ => mode,
+    };
+    let format = match (state.video_height, state.video_codec.as_deref()) {
+        (Some(h), Some(c)) => format!(" · {h}p {c}"),
+        (_, Some(c)) => format!(" · {c}"),
+        _ => String::new(),
+    };
     let info = format!(
-        "{mode} · {:.1}× · cache {:.0} s · engine mpv",
+        "{mode}{format} · {:.1}× · cache {:.0} s · engine {}",
         if state.speed > 0. { state.speed } else { 1. },
-        state.cache_duration
+        state.cache_duration,
+        if state.proxy_active { "proxy" } else { "mpv" }
     );
     f.render_widget(
         Paragraph::new(super::text::truncate_str(

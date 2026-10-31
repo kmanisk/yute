@@ -222,6 +222,8 @@ impl Default for GridConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlaybackConfig {
+    #[serde(default = "auto_mode")]
+    pub network_engine: String,
     pub default_quality: String,
     pub preferred_codec: String,
     pub preferred_audio_codec: String,
@@ -260,6 +262,7 @@ fn default_osd_bar() -> bool {
 impl Default for PlaybackConfig {
     fn default() -> Self {
         Self {
+            network_engine: auto_mode(),
             default_quality: "best".into(),
             preferred_codec: "auto".into(),
             preferred_audio_codec: "auto".into(),

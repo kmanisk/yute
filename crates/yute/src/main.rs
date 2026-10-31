@@ -52,7 +52,20 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Diagnose connectivity, session, tools and terminal without displaying secrets.
-    Doctor,
+    Doctor {
+        #[arg(long)]
+        seek_test: Option<String>,
+        #[arg(long,default_value_t=2,value_parser=clap::value_parser!(u8).range(1..=5))]
+        seek_rounds: u8,
+        #[arg(long,value_parser=["auto","mpv","proxy"])]
+        seek_engine: Option<String>,
+        #[arg(long)]
+        seek_cache: Option<u16>,
+        #[arg(long,value_parser=["auto","av1","vp9","h264"])]
+        seek_codec: Option<String>,
+        #[arg(long, default_value_t = 20)]
+        seek_threshold: u16,
+    },
     /// Measure terminal text widths and font coverage without exposing input.
     TextProbe,
     /// Interactive YouTube device-code login (enter code at google.com/device or youtube.com/activate)
@@ -83,7 +96,51 @@ async fn run() -> anyhow::Result<()> {
     init_performance_trace()?;
     let cli = Cli::parse();
 
-    if let Some(Commands::Doctor) = cli.command {
+    if let Some(Commands::Doctor {
+        seek_test,
+        seek_rounds,
+        seek_engine,
+        seek_cache,
+        seek_codec,
+        seek_threshold,
+    }) = cli.command
+    {
+        if let Some(input) = seek_test {
+            let mut cfg = Config::load_checked()?;
+            if let Some(e) = seek_engine {
+                cfg.playback.network_engine = e;
+            }
+            if let Some(c) = seek_cache {
+                cfg.playback.stream_cache_seconds = c.clamp(5, 60);
+            }
+            if let Some(c) = seek_codec {
+                cfg.playback.preferred_codec = c;
+            }
+            let report = tokio::select! {report=yute_core::player::diagnostics::seek_test(&input,&cfg,seek_rounds,Duration::from_secs(u64::from(seek_threshold.clamp(4,120))))=>report?,_=tokio::signal::ctrl_c()=>{anyhow::bail!("Seek diagnostic cancelled; owned MPV session terminated");}};
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            eprintln!("round  target   first ms   +2s ms   result");
+            for row in &report.seeks {
+                eprintln!(
+                    "{:>5}  {:>6}  {:>9}  {:>7}   {}",
+                    row.round,
+                    row.target,
+                    row.resume_ms
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "--".into()),
+                    row.confirmed_ms
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "--".into()),
+                    if row.success { "ok" } else { "STALL" }
+                );
+            }
+            if report.error.is_some()
+                || report.seeks.is_empty()
+                || report.seeks.iter().any(|s| !s.success)
+            {
+                anyhow::bail!("Seek diagnostics failed; see the sanitized JSON report");
+            }
+            return Ok(());
+        }
         return run_doctor().await;
     }
 
@@ -4680,6 +4737,13 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 "sidebar-alt-key" => app.config.keys.sidebar_alt = value,
                 "copy-key" => app.config.keys.copy_url = value,
                 "center-key" => app.config.keys.center = value,
+                "network-engine" => match yute_core::player::network::Engine::parse(&value) {
+                    Ok(_) => app.config.playback.network_engine = value,
+                    Err(e) => {
+                        app.status_text = e.to_string();
+                        return;
+                    }
+                },
                 "quit-key" => app.config.keys.quit = value,
                 _ => {
                     app.status_text = "Unknown setting key — :help set".into();

@@ -136,6 +136,19 @@ pub async fn run(config: &Config) -> Vec<Check> {
         tool_version("ffprobe", "-version", false),
     );
     let mut checks = vec![network, youtube, ytdlp, mpv, ffmpeg, ffprobe];
+    checks.push(tool_version("node", "--version", false).await);
+    checks.push(Check::new(
+        "network engine",
+        if crate::player::network::Engine::parse(&config.playback.network_engine).is_ok() {
+            Status::Ok
+        } else {
+            Status::Failure
+        },
+        format!(
+            "{}; auto starts direct MPV, re-resolves once after a stall, then can switch once to the loopback finite-range proxy",
+            display_text(&config.playback.network_engine)
+        ),
+    ));
     let path = crate::credentials::path();
     let storage = tokio::time::timeout(
         Duration::from_secs(5),

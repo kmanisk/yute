@@ -1,5 +1,8 @@
+pub mod diagnostics;
 pub mod ipc;
 pub mod mpvconf;
+pub mod network;
+pub mod proxy;
 pub mod queue;
 pub mod tracking;
 pub mod traits;
@@ -27,6 +30,8 @@ pub struct Player {
     ipc: Option<MpvIpc>,
     tx_status: Sender<PlaybackStatus>,
     rx_status: Receiver<PlaybackStatus>,
+    diagnostic: bool,
+    network_engine: network::Engine,
 }
 
 impl Player {
@@ -45,7 +50,15 @@ impl Player {
             ipc: None,
             tx_status,
             rx_status,
+            diagnostic: false,
+            network_engine: network::Engine::Auto,
         }
+    }
+
+    pub fn diagnostic(cfg: &Config) -> Self {
+        let mut player = Self::new(cfg);
+        player.diagnostic = true;
+        player
     }
 
     pub fn has_session(&self) -> bool {
@@ -63,6 +76,11 @@ impl Player {
     }
 
     pub fn play_video(&mut self, video: VideoCard, cfg: &Config) -> Result<()> {
+        let engine = network::Engine::parse(&cfg.playback.network_engine)?;
+        if self.network_engine != engine {
+            self.stop();
+            self.network_engine = engine;
+        }
         self.poll_updates();
         let target_url = if video.id.starts_with('/') || video.id.starts_with('.') {
             video.id.clone()
@@ -120,14 +138,6 @@ impl Player {
             let _ = std::fs::remove_file(&sock_path);
         }
 
-        let cache_dir = if let Some(home) = std::env::var_os("HOME") {
-            PathBuf::from(home).join(".cache/yute")
-        } else {
-            PathBuf::from("/tmp/yute")
-        };
-        let _ = std::fs::create_dir_all(&cache_dir);
-        let mpv_log_file = cache_dir.join("mpv.log");
-
         let hwdec = if cfg.playback.hwdec.is_empty() {
             "auto-safe".to_string()
         } else {
@@ -141,7 +151,6 @@ impl Player {
             .arg("--force-window=yes")
             .arg("--idle=yes")
             .arg("--keep-open=yes")
-            .arg(format!("--log-file={}", mpv_log_file.display()))
             .arg(format!(
                 "--ytdl-format={}",
                 cfg.playback.resolved_ytdl_format()
@@ -199,6 +208,23 @@ impl Player {
             }
         }
 
+        if std::env::var_os("PATH")
+            .is_some_and(|path| std::env::split_paths(&path).any(|p| p.join("node").is_file()))
+        {
+            cmd.arg("--ytdl-raw-options-append=js-runtimes=node");
+        }
+        if self.diagnostic {
+            cmd.args([
+                "--force-window=no",
+                "--vo=null",
+                "--ao=null",
+                "--mute=yes",
+                "--osc=no",
+                "--osd-level=0",
+                "--save-position-on-quit=no",
+                "--msg-level=all=no",
+            ]);
+        }
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -212,10 +238,16 @@ impl Player {
             .stderr(Stdio::null());
 
         let child = cmd.spawn().context("Failed to spawn mpv window")?;
-        self.attach_window_process(child, sock_path, url)
+        self.attach_window_process(child, sock_path, url, &cfg.playback.resolved_ytdl_format())
     }
 
-    fn attach_window_process(&mut self, child: Child, sock_path: PathBuf, url: &str) -> Result<()> {
+    fn attach_window_process(
+        &mut self,
+        child: Child,
+        sock_path: PathBuf,
+        url: &str,
+        selector: &str,
+    ) -> Result<()> {
         self.child_process = Some(child);
         self.current_sock_path = Some(sock_path.clone());
         // Each launch owns its status channel and running flag. A terminating
@@ -229,11 +261,16 @@ impl Player {
             ..Default::default()
         };
 
-        let ipc = MpvIpc::start(
+        let ipc = MpvIpc::start_with_engine(
             sock_path,
             self.tx_status.clone(),
             Arc::clone(&self.is_playing),
+            self.network_engine,
         )?;
+        ipc.send(IpcCommand::SetProperty(
+            "ytdl-format",
+            serde_json::json!(selector),
+        ))?;
         let start = self
             .current_video
             .as_ref()
