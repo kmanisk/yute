@@ -10,7 +10,7 @@ use ratatui::Frame;
 pub fn prepare_viewport(app: &mut App, area: Rect) {
     let thumb_h = (24.0 * app.cell_w_px / app.cell_h_px.max(1.0) * 9.0 / 16.0).round() as u16;
     let rows = ((area.height + 1) / (thumb_h.clamp(3, 6) + 3)).max(1) as usize;
-    let count = app.filtered_items().len();
+    let count = app.filtered_count();
     let selected = app.selected_index.min(count.saturating_sub(1));
     app.rendered_columns = 1;
     app.rendered_rows = rows;
@@ -28,7 +28,7 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let total_items = app.filtered_items().len();
+    let total_items = app.filtered_count();
     if total_items == 0 {
         let msg = app.empty_feed_message();
         let p = Paragraph::new(msg).style(app.theme.style("text_dim"));
@@ -54,8 +54,7 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
 
     let start_idx = app.scroll_row;
     let cards_to_render: Vec<Card> = app
-        .filtered_items()
-        .into_iter()
+        .filtered_cards()
         .skip(start_idx)
         .take(visible_rows)
         .cloned()

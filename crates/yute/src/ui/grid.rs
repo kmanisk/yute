@@ -132,7 +132,7 @@ pub fn selection_scroll(
 
 pub fn prepare_viewport(app: &mut App, area: Rect) -> GridGeometry {
     let geometry = GridGeometry::new(area, &app.config.grid, app.cell_w_px, app.cell_h_px);
-    let total_items = app.filtered_items().len();
+    let total_items = app.filtered_count();
     let num_cols = geometry.columns;
     let visible_rows = geometry.visible_rows;
     let total_rows = total_items.div_ceil(num_cols);
@@ -155,7 +155,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let total_items = app.filtered_items().len();
+    let total_items = app.filtered_count();
     if total_items == 0 {
         let msg = app.empty_feed_message();
         let p = Paragraph::new(msg)
@@ -209,8 +209,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let visible_count = geometry.visible_rows * num_cols;
 
     let cards_to_render: Vec<Card> = app
-        .filtered_items()
-        .into_iter()
+        .filtered_cards()
         .skip(start_idx)
         .take(visible_count)
         .cloned()

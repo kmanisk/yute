@@ -814,8 +814,7 @@ fn render_suggestions(f: &mut Frame, app: &mut App, area: Rect) {
     let visible = (inner.height / stride).max(1) as usize;
     let first = app.selected_index.saturating_sub(visible.saturating_sub(1));
     let items = app
-        .watch_suggestions()
-        .into_iter()
+        .watch_suggestion_cards()
         .enumerate()
         .skip(first)
         .take(visible)

@@ -20,7 +20,7 @@ pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
         super::cmdline::render_input(f, app, area);
         return;
     }
-    let count = app.filtered_items().len();
+    let count = app.filtered_count();
     let pos = if count == 0 {
         0
     } else {

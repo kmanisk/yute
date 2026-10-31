@@ -809,7 +809,12 @@ r retry · :account",
         }
     }
 
-    pub fn filtered_items(&self) -> Vec<&Card> {
+    /// Lazily yields cards visible under the current screen/filter policy.
+    ///
+    /// Rendering asks for counts, positions, visible windows and prefetch windows
+    /// several times per frame. Keep those paths allocation-free instead of
+    /// rebuilding a temporary `Vec<&Card>` for each query.
+    pub fn filtered_cards(&self) -> impl Iterator<Item = &Card> {
         let music = self.screen == Screen::Search
             && self
                 .search_options
@@ -836,30 +841,41 @@ r retry · :account",
                 crate::config::ShortsVisibility::Hide => saved,
                 crate::config::ShortsVisibility::Never => false,
             };
+        let filter_kind = self.filter_kind;
+        let on_search = self.screen == Screen::Search;
+        let allow_mixes = self.config.search.mixes;
+        let filter_query = if self.filter_text.is_empty() {
+            None
+        } else {
+            Some(self.filter_text.to_lowercase())
+        };
+
         self.items
             .iter()
             .chain(
                 self.channel_items
                     .iter()
-                    .filter(|_| self.filter_kind == FilterKind::Channels),
+                    .filter(move |_| filter_kind == FilterKind::Channels),
             )
-            .filter(|c| {
-                if music && matches!(c,Card::Video(v) if !yute_core::search::music_duration_matches(v.duration.as_deref())){return false;}
-                if self.screen == Screen::Search
-                    && self.filter_kind != FilterKind::Playlists
-                    && !self.config.search.mixes
+            .filter(move |c| {
+                if music
+                    && matches!(c,Card::Video(v) if !yute_core::search::music_duration_matches(v.duration.as_deref()))
+                {
+                    return false;
+                }
+                if on_search
+                    && filter_kind != FilterKind::Playlists
+                    && !allow_mixes
                     && matches!(c,Card::Playlist(p) if p.is_mix)
                 {
                     return false;
                 }
-                if !allow_shorts {
-                    if let Card::Video(v) = c {
-                        if v.badges.iter().any(|b| b == "SHORTS") {
-                            return false;
-                        }
-                    }
+                if !allow_shorts
+                    && matches!(c, Card::Video(v) if v.badges.iter().any(|b| b == "SHORTS"))
+                {
+                    return false;
                 }
-                match self.filter_kind {
+                let kind_matches = match filter_kind {
                     FilterKind::All => true,
                     FilterKind::Videos => match c {
                         Card::Video(v) => {
@@ -878,32 +894,50 @@ r retry · :account",
                     },
                     FilterKind::Playlists => matches!(c, Card::Playlist(_)),
                     FilterKind::Channels => matches!(c, Card::Channel(_)),
-                }
+                };
+                kind_matches
+                    && match filter_query.as_deref() {
+                        None => true,
+                        Some(query) => c.title().to_lowercase().contains(query),
+                    }
             })
-            .filter(|c| {
-                if self.filter_text.is_empty() {
-                    true
-                } else {
-                    let q = self.filter_text.to_lowercase();
-                    c.title().to_lowercase().contains(&q)
-                }
-            })
-            .collect()
+    }
+
+    pub fn filtered_count(&self) -> usize {
+        self.filtered_cards().count()
+    }
+
+    pub fn filtered_items(&self) -> Vec<&Card> {
+        self.filtered_cards().collect()
+    }
+
+    pub fn watch_suggestion_cards(&self) -> impl Iterator<Item = &Card> {
+        let queue = self.watch_right_queue;
+        let hide_shorts = matches!(
+            self.config.content.shorts,
+            crate::config::ShortsVisibility::Never
+        );
+        self.watch_queue_cards
+            .iter()
+            .filter(move |_| queue)
+            .chain(
+                self.watch_data
+                    .iter()
+                    .flat_map(|watch| watch.up_next.iter())
+                    .filter(move |card| {
+                        !queue
+                            && !(hide_shorts
+                                && matches!(card, Card::Video(v) if v.badges.iter().any(|b| b == "SHORTS")))
+                    }),
+            )
+    }
+
+    pub fn watch_suggestion_count(&self) -> usize {
+        self.watch_suggestion_cards().count()
     }
 
     pub fn watch_suggestions(&self) -> Vec<&Card> {
-        if self.watch_right_queue {
-            return self.watch_queue_cards.iter().collect();
-        }
-        self.watch_data
-            .as_ref()
-            .map(|w| {
-                w.up_next.iter().filter(|card| {
-            !(matches!(self.config.content.shorts, crate::config::ShortsVisibility::Never)
-                && matches!(card, Card::Video(v) if v.badges.iter().any(|b| b == "SHORTS")))
-        }).collect()
-            })
-            .unwrap_or_default()
+        self.watch_suggestion_cards().collect()
     }
 
     pub fn selected_card(&self) -> Option<&Card> {
@@ -911,10 +945,9 @@ r retry · :account",
             return self.subscribed_channels.get(self.subscriptions_strip_index);
         }
         if self.screen == Screen::Watch {
-            return self.watch_suggestions().get(self.selected_index).copied();
+            return self.watch_suggestion_cards().nth(self.selected_index);
         }
-        let list = self.filtered_items();
-        list.get(self.selected_index).copied()
+        self.filtered_cards().nth(self.selected_index)
     }
 
     pub fn set_screen(&mut self, screen: Screen) {

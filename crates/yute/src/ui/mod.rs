@@ -313,8 +313,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let rows = app.rendered_rows.max(1);
     let start = (app.scroll_row + rows) * columns;
     let preloads = if crate::terminal::images_enabled(&app.config.general.graphics) {
-        app.filtered_items()
-            .into_iter()
+        app.filtered_cards()
             .skip(start)
             .take(rows * columns * prefetch)
             .map(|c| yute_core::media::thumbs::card_thumbnail_url(c).into_owned())

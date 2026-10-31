@@ -1385,7 +1385,7 @@ async fn handle_key_event(
                     app.sidebar_index =
                         (app.sidebar_index + 1).min(ui::sidebar::row_count(app).saturating_sub(1));
                 } else {
-                    let total = app.filtered_items().len();
+                    let total = app.filtered_count();
                     if total > 0 {
                         app.selected_index = (app.selected_index + grid_cols).min(total - 1);
                     }
@@ -1397,7 +1397,7 @@ async fn handle_key_event(
                 }
             }
             Action::Right => {
-                let total = app.filtered_items().len();
+                let total = app.filtered_count();
                 if app.focus == Focus::Content
                     && app.selected_index % grid_cols + 1 < grid_cols
                     && app.selected_index + 1 < total
@@ -1420,7 +1420,7 @@ async fn handle_key_event(
                     app.selected_index = app
                         .selected_index
                         .saturating_add(step)
-                        .min(app.filtered_items().len().saturating_sub(1));
+                        .min(app.filtered_count().saturating_sub(1));
                 }
             }
             Action::First => {
@@ -1434,7 +1434,7 @@ async fn handle_key_event(
                 if app.focus == Focus::Sidebar {
                     app.sidebar_index = ui::sidebar::row_count(app).saturating_sub(1);
                 } else {
-                    let total = app.filtered_items().len();
+                    let total = app.filtered_count();
                     if total > 0 {
                         app.selected_index = total - 1;
                     }
@@ -2149,7 +2149,7 @@ fn handle_watch_action(app: &mut App, action: Action, count: usize, tx: Sender<A
                     ensure_comments(app, tx);
                 }
                 WatchPane::Suggestions => {
-                    let len = app.watch_suggestions().len();
+                    let len = app.watch_suggestion_count();
                     app.selected_index = if down {
                         app.selected_index
                             .saturating_add(count)
@@ -2981,7 +2981,8 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 app.config = config;
                 app.theme = theme;
                 if let Some(id) = selected {
-                    if let Some(i) = app.filtered_items().iter().position(|c| c.id() == id) {
+                    let index = app.filtered_cards().position(|c| c.id() == id);
+                    if let Some(i) = index {
                         app.selected_index = i;
                     }
                 }
@@ -3179,7 +3180,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             }
             app.selected_index = app
                 .selected_index
-                .min(app.filtered_items().len().saturating_sub(1));
+                .min(app.filtered_count().saturating_sub(1));
         }
         AppEvent::ChannelLoaded(generation, id, result) => {
             if generation != app.feed_generation {
@@ -3321,25 +3322,24 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                     let selected_id = app.selected_card().map(|c| c.id().to_string());
                     app.items = page.items.clone();
                     if let Some(id) = selected_id {
-                        if let Some(index) = app.filtered_items().iter().position(|c| c.id() == id)
-                        {
+                        let index = app.filtered_cards().position(|c| c.id() == id);
+                        if let Some(index) = index {
                             app.selected_index = index;
                         }
                     }
                     app.selected_index = app
                         .selected_index
-                        .min(app.filtered_items().len().saturating_sub(1));
+                        .min(app.filtered_count().saturating_sub(1));
                     app.continuation_token = page.continuation.clone();
                     app.continuation_failed = false;
                     if app.screen == Screen::Search
                         && app.selected_index == 0
                         && matches!(app.selected_card(),Some(Card::Playlist(p)) if p.is_mix)
                     {
-                        if let Some(i) = app
-                            .filtered_items()
-                            .iter()
-                            .position(|c| matches!(c, Card::Video(_)))
-                        {
+                        let first_video = app
+                            .filtered_cards()
+                            .position(|c| matches!(c, Card::Video(_)));
+                        if let Some(i) = first_video {
                             app.selected_index = i;
                         }
                     }
@@ -4240,8 +4240,7 @@ fn maybe_load_card_metadata(app: &mut App, tx: Sender<AppEvent>) {
     }
     let start = app.scroll_row.saturating_mul(app.rendered_columns);
     let ids = app
-        .filtered_items()
-        .into_iter()
+        .filtered_cards()
         .skip(start)
         .take(app.rendered_columns.saturating_mul(app.rendered_rows))
         .filter_map(|card| match card {
@@ -4353,8 +4352,7 @@ fn maybe_load_channel_avatars(app: &mut App, tx: Sender<AppEvent>) {
     app.refresh_channel_items();
     let slots = 2usize.saturating_sub(app.metadata_pending.len());
     let ids = app
-        .filtered_items()
-        .into_iter()
+        .filtered_cards()
         .skip(app.scroll_row * app.rendered_columns)
         .take(app.rendered_columns * app.rendered_rows)
         .filter_map(|card| match card {
@@ -4419,7 +4417,7 @@ fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
     {
         return;
     }
-    let count = app.filtered_items().len();
+    let count = app.filtered_count();
     if app.screen != Screen::Subscriptions && app.selected_index + app.rendered_columns * 2 < count
     {
         return;
@@ -5153,7 +5151,7 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 yute::config::ShortsVisibility::Hide
             };
             app.selected_index = id
-                .and_then(|id| app.filtered_items().iter().position(|c| c.id() == id))
+                .and_then(|id| app.filtered_cards().position(|c| c.id() == id))
                 .unwrap_or(0);
             let _ = app.config.save();
             app.status_text = "Shorts visibility saved".into();
@@ -6438,7 +6436,7 @@ mod feed_ui_tests {
         set_content_filter(&mut app, FilterKind::All, tx.clone());
         assert_eq!(app.selected_index, 3);
         set_content_filter(&mut app, FilterKind::Channels, tx);
-        assert_eq!(app.filtered_items().len(), 1);
+        assert_eq!(app.filtered_count(), 1);
         assert!(matches!(app.selected_card(),Some(Card::Channel(c)) if c.id=="UCfixture-owner"));
     }
     #[tokio::test]
@@ -6484,7 +6482,7 @@ mod feed_ui_tests {
         ));
         set_content_filter(&mut app, FilterKind::All, tx);
         assert_eq!(app.items.len(), 6);
-        assert_eq!(app.filtered_items().len(), 5);
+        assert_eq!(app.filtered_count(), 5);
         assert!(!app
             .filtered_items()
             .iter()
