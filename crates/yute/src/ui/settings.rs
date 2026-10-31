@@ -48,7 +48,8 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Scripts", "auto uses native text for passing probes; T toggles the selected title. Transliteration is approximate."),
     ("Mixes in search", "Hide Mix/radio results in normal Search; Playlists still shows them."),
     ("Music search bias", "auto requests Videos and a metadata-based 3–20 minute range; M removes this for the query."),
-    ("Network engine", "auto: direct, one refresh then finite-range transport after a persistent stall. mpv: direct only. proxy: finite ranges for timed streams."),
+    ("Network engine", "auto: direct, then one finite-range transport switch after a persistent stall. mpv: direct only. proxy: finite ranges for timed streams."),
+    ("Sidebar at launch", "show always opens it; hide keeps it closed; remember restores the last explicit runtime state."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
@@ -139,6 +140,7 @@ fn value(app: &App, index: usize) -> String {
         .into(),
         40 => app.config.search.music_bias.clone(),
         41 => app.config.playback.network_engine.clone(),
+        42 => app.config.ui.sidebar_at_launch.clone(),
         _ => String::new(),
     }
 }
@@ -159,7 +161,7 @@ pub const GROUPS: [&str; 8] = [
 pub fn group(index: usize) -> usize {
     match index {
         3 | 41 => 1,
-        1 | 9..=17 | 32 | 38 => 2,
+        1 | 9..=17 | 32 | 38 | 42 => 2,
         7 => 3,
         39 | 40 => 4,
         18..=24 | 31 => 5,
@@ -526,6 +528,14 @@ pub fn cycle_setting(app: &mut App, forward: bool) {
             )
             .into()
         }
+        42 => {
+            app.config.ui.sidebar_at_launch = step(
+                &["show", "hide", "remember"],
+                &app.config.ui.sidebar_at_launch.as_str(),
+                forward,
+            )
+            .into()
+        }
         _ => return,
     }
     if app.settings_index == 9 {
@@ -630,6 +640,12 @@ pub fn open_editor(app: &mut App) -> bool {
                 .map(str::to_string)
                 .collect(),
         ),
+        42 => Some(
+            ["show", "hide", "remember"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        ),
         _ => None,
     };
     if let Some(options) = choices {
@@ -721,6 +737,10 @@ fn apply_value(app: &mut App, setting: usize, value: &str) -> anyhow::Result<()>
             yute_core::player::network::Engine::parse(value)?;
             app.config.playback.network_engine = value.into();
         }
+        42 => match value {
+            "show" | "hide" | "remember" => app.config.ui.sidebar_at_launch = value.into(),
+            _ => anyhow::bail!("Sidebar at launch must be show, hide or remember"),
+        },
         _ => anyhow::bail!("This setting uses the toggle control"),
     }
     Ok(())

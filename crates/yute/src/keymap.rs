@@ -280,9 +280,7 @@ impl KeymapState {
         };
 
         // Quit now
-        if (mods == KeyModifiers::CONTROL && code == KeyCode::Char('c'))
-            || (mods == KeyModifiers::CONTROL && code == KeyCode::Char('q'))
-        {
+        if mods == KeyModifiers::CONTROL && code == KeyCode::Char('c') {
             return Some((Action::ForceQuit, 1));
         }
 

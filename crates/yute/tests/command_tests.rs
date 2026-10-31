@@ -84,6 +84,15 @@ fn set_command_exposes_validated_ui_and_playback_settings() {
         assert!(commands::parse(input).is_err(), "{input}");
     }
     assert_eq!(commands::completions("set col"), vec!["set columns"]);
+    assert_eq!(
+        commands::completions("set sidebar-at-launch r"),
+        vec!["set sidebar-at-launch remember"]
+    );
+    assert!(matches!(
+        commands::parse(":set sidebar-at-launch remember"),
+        Ok(Command::Set(key, value)) if key == "sidebar-at-launch" && value == "remember"
+    ));
+    assert!(commands::parse(":set sidebar-at-launch maybe").is_err());
     assert!(commands::completions("set codec ").contains(&"set codec av1".to_string()));
 }
 

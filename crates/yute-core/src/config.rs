@@ -59,8 +59,9 @@ pub struct UiConfig {
     /// Vim-style context kept above/below the selected row when possible.
     #[serde(default = "default_scrolloff")]
     pub scrolloff: u16,
-    #[serde(default = "default_true")]
-    pub quit_on_home_only: bool,
+    /// Initial sidebar policy: show, hide, or restore the last explicit user state.
+    #[serde(default = "default_sidebar_at_launch")]
+    pub sidebar_at_launch: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -81,7 +82,7 @@ impl Default for KeyConfig {
             sidebar_alt: "alt-e".into(),
             copy_url: "yy".into(),
             center: "zz".into(),
-            quit: "q".into(),
+            quit: String::new(),
         }
     }
 }
@@ -517,9 +518,40 @@ impl Config {
         fs::create_dir_all(&dir)?;
         let path = dir.join("config.toml");
         let toml_str = toml::to_string_pretty(self)?;
-        fs::write(path, toml_str)?;
+        atomic_write(&path, toml_str.as_bytes())?;
         Ok(())
     }
+}
+
+fn atomic_write(path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+    fs::create_dir_all(parent)?;
+    let tmp = parent.join(format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("config"),
+        std::process::id()
+    ));
+    let result = (|| {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        fs::rename(&tmp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// Copy legacy settings without overwriting any Yute files. Encryption stays compatible.
@@ -585,9 +617,10 @@ fn copy_legacy_profile(old: &std::path::Path, new: &std::path::Path) -> std::io:
 
 #[cfg(test)]
 mod migration_tests {
+    use super::*;
+
     #[test]
     fn copies_private_legacy_files_without_overwriting_new_settings() {
-        use super::*;
         let root = std::env::temp_dir().join(format!("yute-migration-{}", std::process::id()));
         let old = root.join("legacy");
         let new = root.join("current");
@@ -608,13 +641,27 @@ mod migration_tests {
         assert!(old.join("auth.json").exists());
         fs::remove_dir_all(root).unwrap();
     }
+
+    #[test]
+    fn config_atomic_write_replaces_without_leaving_temp_file() {
+        let root = std::env::temp_dir().join(format!("yute-atomic-config-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.toml");
+        fs::write(&path, b"old").unwrap();
+        atomic_write(&path, b"new").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert!(!root
+            .join(format!(".config.toml.tmp-{}", std::process::id()))
+            .exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn default_scrolloff() -> u16 {
     2
 }
-fn default_true() -> bool {
-    true
+fn default_sidebar_at_launch() -> String {
+    "remember".into()
 }
 fn auto_mode() -> String {
     "auto".into()
@@ -675,7 +722,7 @@ impl Default for UiConfig {
             action_bar: auto_mode(),
             sidebar_channels: false,
             scrolloff: default_scrolloff(),
-            quit_on_home_only: true,
+            sidebar_at_launch: default_sidebar_at_launch(),
         }
     }
 }

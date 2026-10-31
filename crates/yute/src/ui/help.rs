@@ -7,7 +7,10 @@ use ratatui::Frame;
 
 const ENTRIES: &[(&str, &str)] = &[
     ("Navigation", ""),
-    ("Alt-e", "Show and focus sidebar; press again to hide"),
+    (
+        "Space e / Alt-e / b",
+        "Toggle sidebar; very narrow terminals hide it temporarily",
+    ),
     ("Enter", "Open/play selected entity"),
     ("Shift-Enter", "Item actions: play, copy, save, download"),
     ("arrows", "Move between cards"),
@@ -31,8 +34,11 @@ const ENTRIES: &[(&str, &str)] = &[
         ":help <command>",
         "Command syntax, description and examples",
     ),
-    ("q / Esc", "Quit / previous route"),
-    ("Ctrl-c / Ctrl-q", "Quit immediately"),
+    ("Esc / Shift-H", "Previous route / close"),
+    (
+        ":q / :quit / Ctrl-c",
+        "Quit; active playback/download asks for confirmation",
+    ),
     ("Help: j/k, gg/G", "Scroll help; ? or Esc closes"),
 ];
 pub const HELP_LINES: usize = ENTRIES.len()

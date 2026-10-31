@@ -326,6 +326,12 @@ impl App {
         )
     }
 
+    pub fn remember_sidebar_state(&mut self) {
+        if self.config.ui.sidebar_at_launch == "remember" {
+            self.config.grid.sidebar_expanded = self.sidebar_expanded;
+        }
+    }
+
     pub fn new(config: Config, picker: Picker) -> Self {
         let theme = Theme::load(&config.general.theme);
         let font_size = picker.font_size();
@@ -355,6 +361,11 @@ impl App {
         let authenticated = {
             let auth = auth.lock().unwrap();
             auth.has_oauth() && !auth.needs_login
+        };
+        let sidebar_expanded = match config.ui.sidebar_at_launch.as_str() {
+            "show" => true,
+            "hide" => false,
+            _ => config.grid.sidebar_expanded,
         };
         Self {
             cell_w_px,
@@ -404,7 +415,7 @@ impl App {
             watch_tracker: None,
             auth: std::sync::Arc::clone(&auth),
             auth_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            sidebar_expanded: config.grid.sidebar_expanded,
+            sidebar_expanded,
             config,
             theme,
             screen: Screen::Home,

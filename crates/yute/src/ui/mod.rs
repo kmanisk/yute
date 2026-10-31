@@ -78,7 +78,14 @@ impl ShellLayout {
             area.height
                 .saturating_sub(2 + player_h + action_h + filter_h),
         );
-        let sb = sidebar::width_for(app).min(area.width.saturating_sub(20));
+        // Very narrow terminals force-hide the sidebar geometrically. Do not mutate
+        // app.sidebar_expanded here: `remember` must retain the user's explicit
+        // preference and restore it automatically when width becomes available.
+        let sb = if area.width < 72 {
+            0
+        } else {
+            sidebar::width_for(app).min(area.width.saturating_sub(20))
+        };
         let sidebar = Rect::new(body.x, body.y, sb, body.height);
         let gutter = u16::from(sb > 0);
         let content_x = body.x + sb + gutter;

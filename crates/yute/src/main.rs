@@ -546,7 +546,7 @@ fn activate_account(app: &mut App, index: usize, tx: Sender<AppEvent>) {
 }
 fn handle_account_picker(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
     match key.code {
-        KeyCode::Esc | KeyCode::Char('q') => {
+        KeyCode::Esc => {
             app.account_picker = false;
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -827,11 +827,7 @@ async fn handle_key_event(
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                 confirm_delete_comment(app, tx);
             }
-            KeyCode::Char('n')
-            | KeyCode::Char('N')
-            | KeyCode::Char('q')
-            | KeyCode::Char('Q')
-            | KeyCode::Esc => {
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 app.pending_comment_delete = None;
                 app.status_text = "Comment deletion cancelled".into();
             }
@@ -892,14 +888,13 @@ async fn handle_key_event(
     if key
         .modifiers
         .contains(crossterm::event::KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
+        && key.code == KeyCode::Char('c')
     {
-        app.player.stop();
-        app.should_quit = true;
+        request_quit(app);
         return;
     }
     if app.command_help.is_some() {
-        if matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter) {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
             app.command_help = None;
         } else if key.code == KeyCode::Char(':') {
             app.command_help = None;
@@ -915,11 +910,7 @@ async fn handle_key_event(
                 app.player.stop();
                 app.should_quit = true;
             }
-            KeyCode::Char('n')
-            | KeyCode::Char('N')
-            | KeyCode::Char('q')
-            | KeyCode::Char('Q')
-            | KeyCode::Esc => {
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 app.confirming_quit = false;
             }
             _ => {}
@@ -1005,14 +996,7 @@ async fn handle_key_event(
         return;
     }
     if action == Action::Quit {
-        if app.screen == Screen::Watch && app.close_comment_thread() {
-            app.status_text = "Back to comments".into();
-        } else if app.screen == Screen::Home || !app.config.ui.quit_on_home_only {
-            app.confirming_quit = true;
-        } else {
-            app.nav_back();
-            ensure_screen_loaded(app, tx);
-        }
+        request_quit(app);
         return;
     }
     if matches!(action, Action::NavBackHistory | Action::NavForwardHistory) {
@@ -1069,10 +1053,7 @@ async fn handle_key_event(
             Action::First => app.help_scroll = 0,
             Action::Last => app.help_scroll = ui::help::HELP_LINES.saturating_sub(1) as u16,
             Action::Back | Action::Help => app.nav_back(),
-            Action::ForceQuit => {
-                app.player.stop();
-                app.should_quit = true;
-            }
+            Action::ForceQuit => request_quit(app),
             _ => {}
         }
         return;
@@ -1243,6 +1224,7 @@ async fn handle_key_event(
         } else {
             Focus::Content
         };
+        persist_sidebar_state(app);
         return;
     }
     if action == Action::Help {
@@ -1316,9 +1298,7 @@ async fn handle_key_event(
                     app.nav_back();
                     ensure_screen_loaded(app, tx.clone());
                 }
-                Action::ForceQuit => {
-                    app.should_quit = true;
-                }
+                Action::ForceQuit => request_quit(app),
                 Action::FocusSearch => {
                     app.settings_filtering = true;
                     app.settings_query.clear();
@@ -1345,9 +1325,7 @@ async fn handle_key_event(
                     app.nav_back();
                     ensure_screen_loaded(app, tx.clone());
                 }
-                Action::ForceQuit => {
-                    app.should_quit = true;
-                }
+                Action::ForceQuit => request_quit(app),
                 Action::FocusSearch => {
                     app.search_input.clear();
                     app.suggestion_index = None;
@@ -1361,14 +1339,7 @@ async fn handle_key_event(
         let grid_cols = app.rendered_columns;
 
         match action {
-            Action::Quit => {
-                if app.screen == Screen::Home || !app.config.ui.quit_on_home_only {
-                    app.confirming_quit = true;
-                } else {
-                    app.nav_back();
-                    ensure_screen_loaded(app, tx.clone());
-                }
-            }
+            Action::Quit => request_quit(app),
             Action::Back => {
                 if app.screen == Screen::Watch {
                     app.nav_back();
@@ -1380,10 +1351,7 @@ async fn handle_key_event(
                     ensure_screen_loaded(app, tx.clone());
                 }
             }
-            Action::ForceQuit => {
-                app.player.stop();
-                app.should_quit = true;
-            }
+            Action::ForceQuit => request_quit(app),
             Action::Up => {
                 if app.screen == Screen::Watch {
                     if app.watch_right_mode == yute::app::WatchRightMode::Comments {
@@ -1782,14 +1750,11 @@ fn resolve_menu_formats(app: &mut App, audio: bool, tx: Sender<AppEvent>) {
 fn handle_item_menu(app: &mut App, key: crossterm::event::KeyEvent, tx: Sender<AppEvent>) {
     use crossterm::event::KeyModifiers;
     use yute::actions::{ItemAction, MenuStage};
-    if key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
-    {
-        app.player.stop();
-        app.should_quit = true;
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        request_quit(app);
         return;
     }
-    if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
+    if key.code == KeyCode::Esc {
         app.action_menu = None;
         return;
     }
@@ -2571,6 +2536,24 @@ fn mutation_error_message(error: &anyhow::Error) -> String {
     }
 }
 
+fn request_quit(app: &mut App) {
+    if app.player.is_alive() || app.download_active {
+        app.confirming_quit = true;
+    } else {
+        app.should_quit = true;
+    }
+}
+
+fn persist_sidebar_state(app: &mut App) {
+    app.remember_sidebar_state();
+    if app.config.ui.sidebar_at_launch == "remember" {
+        #[cfg(not(test))]
+        if app.config.save().is_err() {
+            app.status_text = "Could not persist sidebar state".into();
+        }
+    }
+}
+
 fn focus_sidebar(app: &mut App) {
     if app.sidebar_expanded && app.focus == Focus::Sidebar {
         app.sidebar_expanded = false;
@@ -2579,6 +2562,7 @@ fn focus_sidebar(app: &mut App) {
         app.sidebar_expanded = true;
         app.focus = Focus::Sidebar;
     }
+    persist_sidebar_state(app);
 }
 
 fn activate_sidebar_item(app: &mut App, tx: Sender<AppEvent>) {
@@ -3525,7 +3509,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                             root_cursor,
                         });
                         app.comments_cursor = 0;
-                        app.status_text = "Reply thread · Esc/q returns to comments".into();
+                        app.status_text = "Reply thread · Esc returns to comments".into();
                     }
                 }
                 Err(_) => app.status_text = "Replies could not load — press Enter to retry".into(),
@@ -4685,12 +4669,17 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 "scrolloff" => app.config.ui.scrolloff = value.parse().unwrap_or(3),
                 "action-bar" => app.config.ui.action_bar = value,
                 "sidebar-channels" => app.config.ui.sidebar_channels = bool_value(&value),
+                "sidebar-at-launch" => {
+                    app.config.ui.sidebar_at_launch = value;
+                    if app.config.ui.sidebar_at_launch == "remember" {
+                        app.remember_sidebar_state();
+                    }
+                }
                 "start-anonymous" => app.config.general.start_anonymous = bool_value(&value),
                 "autoplay" => app.config.playback.autoplay = bool_value(&value),
                 "history-sync" => app.config.playback.mark_watched = bool_value(&value),
                 "osd-bar" => app.config.playback.osd_bar = bool_value(&value),
                 "user-mpv-config" => app.config.playback.use_user_mpv_config = bool_value(&value),
-                "quit-home-only" => app.config.ui.quit_on_home_only = bool_value(&value),
                 "cache-seconds" => {
                     app.config.playback.stream_cache_seconds = value.parse().unwrap_or(20);
                     if app.player.is_alive() {
@@ -5168,6 +5157,7 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
             } else {
                 Focus::Content
             };
+            persist_sidebar_state(app);
         }
         Command::Help(topic) => match yute::commands::help(topic.as_deref()) {
             Ok(text) => app.command_help = Some(text),
@@ -5178,7 +5168,7 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
                 app.player.stop();
                 app.should_quit = true;
             } else {
-                app.confirming_quit = true;
+                request_quit(app);
             }
         }
     }
@@ -5871,6 +5861,7 @@ mod feed_ui_tests {
         );
         handle_key_event(&mut app, &mut keymap, key, tx.clone()).await;
         assert!(app.sidebar_expanded);
+        assert!(app.config.grid.sidebar_expanded);
         assert_eq!(app.focus, Focus::Sidebar);
         let next = crossterm::event::KeyEvent::new(
             KeyCode::Char('j'),
@@ -5881,6 +5872,7 @@ mod feed_ui_tests {
         assert_eq!(app.settings_index, 0);
         handle_key_event(&mut app, &mut keymap, key, tx).await;
         assert!(!app.sidebar_expanded);
+        assert!(!app.config.grid.sidebar_expanded);
         assert_eq!(app.focus, Focus::Content);
     }
 
@@ -6320,7 +6312,7 @@ mod feed_ui_tests {
         .await;
         assert!(!app.should_quit);
         assert!(!app.confirming_quit);
-        assert_eq!(app.screen, Screen::Search);
+        assert_eq!(app.screen, Screen::Settings);
         app.transition(Screen::Home, false);
         handle_key_event(
             &mut app,
@@ -6329,6 +6321,30 @@ mod feed_ui_tests {
             tx,
         )
         .await;
+        assert!(!app.should_quit);
+        assert!(!app.confirming_quit);
+    }
+
+    #[tokio::test]
+    async fn explicit_quit_binding_and_colon_quit_use_activity_confirmation() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let (mut app, _) = app_and_cards();
+        app.config.keys.quit = "z".into();
+        let mut keys = KeymapState::new();
+        let (tx, _) = channel(4);
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+            tx.clone(),
+        )
+        .await;
+        assert!(app.should_quit);
+        assert!(!app.confirming_quit);
+
+        let (mut app, _) = app_and_cards();
+        app.download_active = true;
+        dispatch_command(&mut app, yute::commands::Command::Quit(false), tx);
         assert!(!app.should_quit);
         assert!(app.confirming_quit);
     }
@@ -6457,6 +6473,14 @@ mod feed_ui_tests {
         )
         .await;
         assert!(!app.should_quit);
+        assert!(app.action_menu.is_some());
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            tx.clone(),
+        )
+        .await;
         assert!(app.action_menu.is_none());
         app.focus = Focus::CommandLine;
         app.cmd_input = "help".into();

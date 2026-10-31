@@ -200,9 +200,13 @@ fn set_command(args: &str) -> Result<Command, String> {
             _ => return Err("emoji must be auto|keep|strip".into()),
         },
         "sidebar-channels" | "start-anonymous" | "autoplay" | "history-sync" | "osd-bar"
-        | "user-mpv-config" | "quit-home-only" => match value {
+        | "user-mpv-config" => match value {
             "on" | "off" | "true" | "false" | "yes" | "no" => {}
             _ => return Err(format!("{key} must be on|off")),
+        },
+        "sidebar-at-launch" => match value {
+            "show" | "hide" | "remember" => {}
+            _ => return Err("sidebar-at-launch must be show|hide|remember".into()),
         },
         "language" | "region" | "audio-language" | "subtitle-language" => {
             if value.len() > 32 || value.contains(char::is_whitespace) {
@@ -285,7 +289,7 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"set", aliases:&[], usage:"set <key> <value>", description:"Change persistent UI/content/playback settings directly. Tab completes supported keys and common values.", parse:set_command },
     Spec { name:"sidebar", aliases:&[], usage:"sidebar [show|hide]", description:"Toggle or set sidebar visibility.", parse:|a| match a {""|"toggle"=>Ok(Command::Sidebar(None)),"show"=>Ok(Command::Sidebar(Some(true))),"hide"=>Ok(Command::Sidebar(Some(false))),_=>Err("Usage: :sidebar [show|hide]".into())} },
     Spec { name:"help", aliases:&[], usage:"help [command]", description:"Show command help; ? shows keyboard shortcuts.", parse:|a| if a.split_whitespace().count()>1{Err("Usage: :help [command]".into())}else{Ok(Command::Help((!a.is_empty()).then(||a.into())))} },
-    Spec { name:"quit", aliases:&["q"], usage:"quit", description:"Confirm application quit. Normal-mode q goes back.", parse:|a| no_args(a,Command::Quit(false)) },
+    Spec { name:"quit", aliases:&["q"], usage:"quit", description:"Quit Yute, confirming while playback or a download is active.", parse:|a| no_args(a,Command::Quit(false)) },
     Spec { name:"quit!", aliases:&["q!"], usage:"quit!", description:"Quit immediately.", parse:|a| no_args(a,Command::Quit(true)) },
 ];
 
@@ -342,6 +346,7 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
                 "scrolloff",
                 "action-bar",
                 "sidebar-channels",
+                "sidebar-at-launch",
                 "start-anonymous",
                 "autoplay",
                 "history-sync",
@@ -359,7 +364,6 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
                 "emoji",
                 "thumbnail-cache",
                 "prefetch-pages",
-                "quit-home-only",
                 "download-dir",
                 "sidebar-key",
                 "sidebar-alt-key",
@@ -392,12 +396,12 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
         ("set network-engine", &["auto", "mpv", "proxy"]),
         ("set emoji", &["auto", "keep", "strip"]),
         ("set sidebar-channels", &["on", "off"]),
+        ("set sidebar-at-launch", &["show", "hide", "remember"]),
         ("set start-anonymous", &["on", "off"]),
         ("set autoplay", &["on", "off"]),
         ("set history-sync", &["on", "off"]),
         ("set osd-bar", &["on", "off"]),
         ("set user-mpv-config", &["on", "off"]),
-        ("set quit-home-only", &["on", "off"]),
         ("copy", &["url", "title", "channel"]),
         ("open", &["video", "channel"]),
     ];

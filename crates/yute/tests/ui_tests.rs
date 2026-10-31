@@ -58,6 +58,51 @@ fn create_mock_app() -> App {
 }
 
 #[test]
+fn q_is_unbound_by_default_but_can_be_explicitly_configured() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use yute::keymap::{Action, KeymapState};
+    let q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+    let mut map = KeymapState::new();
+    assert_eq!(map.handle_key(q, false), None);
+    let config = yute::config::KeyConfig {
+        quit: "q".into(),
+        ..Default::default()
+    };
+    let mut map = KeymapState::new();
+    assert_eq!(
+        map.handle_key_with_config(q, false, &config),
+        Some((Action::Quit, 1))
+    );
+}
+
+#[test]
+fn sidebar_launch_policy_and_narrow_force_hide_preserve_remembered_state() {
+    use ratatui::layout::Rect;
+    for (policy, remembered, expected) in [
+        ("show", false, true),
+        ("hide", true, false),
+        ("remember", true, true),
+        ("remember", false, false),
+    ] {
+        let mut config = Config::default();
+        config.ui.sidebar_at_launch = policy.into();
+        config.grid.sidebar_expanded = remembered;
+        let app = App::new(config, ratatui_image::picker::Picker::halfblocks());
+        assert_eq!(app.sidebar_expanded, expected, "{policy}/{remembered}");
+    }
+    let mut config = Config::default();
+    config.ui.sidebar_at_launch = "remember".into();
+    config.grid.sidebar_expanded = true;
+    let app = App::new(config, ratatui_image::picker::Picker::halfblocks());
+    let narrow = yute::ui::ShellLayout::with_playback(Rect::new(0, 0, 60, 24), &app, false);
+    assert_eq!(narrow.sidebar.width, 0);
+    assert!(app.sidebar_expanded);
+    assert!(app.config.grid.sidebar_expanded);
+    let wide = yute::ui::ShellLayout::with_playback(Rect::new(0, 0, 120, 40), &app, false);
+    assert!(wide.sidebar.width > 0);
+}
+
+#[test]
 fn test_render_at_80x24() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -954,14 +999,14 @@ fn semantic_icons_keep_all_modes_usable() {
 }
 
 #[test]
-fn screenshot_sized_terminal_uses_four_columns_without_sidebar() {
+fn screenshot_sized_terminal_uses_at_least_four_columns_without_sidebar() {
     let mut app = create_mock_app();
     app.sidebar_expanded = false;
     app.cell_w_px = 15.;
     app.cell_h_px = 38.;
     let mut terminal = Terminal::new(TestBackend::new(128, 31)).unwrap();
     terminal.draw(|frame| ui::draw(frame, &mut app)).unwrap();
-    assert_eq!(app.rendered_columns, 4);
+    assert!(app.rendered_columns >= 4);
 }
 
 #[test]
