@@ -421,7 +421,11 @@ cargo build --release
 ```
 
 Automatic grid mode fills the content width with 1–8 columns and two-cell gaps.
-Settings offers Auto and fixed 1–8 columns. Resize preserves selected content.
+Auto adds columns where needed to fit two complete rows, including with the
+sidebar shown, while preserving physical 16:9 artwork. Settings offers Auto and
+fixed 1–8 columns. Resize preserves selected content. The focused card has a
+double border, highlighted title and full-brightness artwork; other cards are
+dimmed. Watched progress is a thin mark along the bottom card border.
 Nerd glyphs use verified semantic mappings; auto conservatively uses Unicode
 unless `YUTE_NERD_FONT=1` is set. Use `nerd` explicitly with a supported font.
 See [configuration](docs/configuration.md), [icon verification](docs/icons.md),

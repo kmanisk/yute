@@ -128,3 +128,26 @@ Observed TV owned-playlist limitation: the next-page response repeated the same
 41 identities with a different token. Verify that this leaves the 41 cards and
 selection intact, stops automatic pagination, and shows an explicit retry error.
 Do not count replayed cards as new results or a proven additional page.
+
+
+## Screenshot and scrolling follow-up
+
+Inspected the supplied 1920x1200 recording (14.421 seconds) without audio playback.
+It showed a blank intermediate scrolling frame and image/text placement remnants.
+An isolated anonymous fixture was then tested in a real Foot terminal on Wayland,
+using forced Sixel and Iosevka Nerd Font Mono, without live account writes or MPV.
+At 115x31 cells with the sidebar shown, two complete card rows fit. Rapid j/k/h/l
+navigation and opening/closing the action menu restored images without text
+overprinting in the captured frames. The selected card, thin border progress,
+account padding and removal of the generic Content label were also checked.
+This is fixture evidence for Foot/Sixel only, not validation of every protocol.
+
+- [ ] Repeat scrolling with real personalized feeds in the user's normal terminal.
+- [ ] Check two complete rows at floating-window and fullscreen sizes, with sidebar
+  shown/hidden. Fixed-column settings can intentionally limit density.
+- [ ] Check the focused card stays aligned with the position counter after resize.
+- [ ] Check partially/fully watched cards have a thin bottom-border progress mark,
+  with duration badges intact and no full-cell progress block over the image.
+- [ ] Repeat action/help/command overlays with Kitty, iTerm2 and halfblocks; verify
+  closing them restores images and leaves no text or border remnants.
+- [ ] Confirm the account avatar/name has space before the terminal's right edge.

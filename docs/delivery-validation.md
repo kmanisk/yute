@@ -138,3 +138,61 @@ The delivery workflow commits on main and pushes directly to origin/main;
 no PR, tag or force push is part of this workflow. The pre-existing untracked
 root AGENTS.md is intentionally left outside commits. Final SHAs and push outcome
 are reported in the delivery response.
+
+
+## Screenshot follow-up, 2026-10-31
+
+Implementation commit: `99fe67bbe4e16c128c6f9087e7e14182e1d449f3` on main.
+This follow-up preserves the backend, OAuth and GTK architecture.
+
+- Automatic layout can use narrower cards to fit two complete rows with the
+  sidebar shown at the reported window sizes. Cards stay inside the pane, with
+  a dedicated scrollbar column. The generic Content title is removed.
+- The focused card uses a double border, highlighted title and normal image
+  brightness. Other cards have dimmed titles and asynchronously cached dimmed
+  artwork. Watched progress is a thin bottom-border mark rather than a full
+  row covering the thumbnail. Account text/avatar have right-edge padding.
+- Scrolling is calculated before image invalidation. Raster anchors restore
+  cursor/rendition state, and structural repaint clears and draws together in
+  one synchronized terminal update instead of flushing a blank frame first.
+- Inspected the supplied recording; a native Foot/Sixel anonymous fixture on
+  Wayland then showed two rows at 115x31 with sidebar, clean rapid navigation,
+  and clean action-menu open/close restoration. Other protocols and real
+  personalized feeds still require manual visual QA; see [qa.md](qa.md).
+
+| Final check | Result |
+| --- | --- |
+| cargo fmt --check | Passed |
+| cargo clippy --workspace --all-targets --all-features | Passed; same 28 pre-existing warning diagnostics |
+| cargo test --workspace | 206 passed, 0 failed, 6 opt-in ignored |
+| cargo check --workspace | Passed |
+| cargo build --release | Passed |
+| cargo build --release -p yute | Passed; final installed artifact |
+| cargo check -p yute-gui | Passed |
+| Installed yute --help / doctor | Both exited 0 |
+
+Doctor confirmed encrypted-store readability and server acceptance of the OAuth
+JSON request. This does not prove personalized-feed contents. Its non-TTY run
+reported terminal/cell dimensions unavailable, as expected.
+
+YUTE_TRACE before/after package-release samples in the same isolated 200x40 PTY
+(10x20-pixel cells): 1.480 ms / 1.399 ms to first frame. Settled two-second idle
+intervals produced 0 bytes and 0 CPU ticks in both runs (10 ms tick resolution).
+These are individual samples, not a statistical speedup claim. An additional
+baseline sample taken during Cargo linking recorded 768.163 ms; the otherwise
+idle baseline was measured again after that build finished.
+
+No dependencies were added. The package release is 12,267,408 bytes, 5,144 bytes
+larger than the previously installed executable. It was installed atomically to
+`/home/onyx/.local/bin/yute`, after backing up the old binary under
+`~/.local/state/yute/binary-backups/`. Installed/build SHA256:
+
+```text
+e986c42b839fc3140d24f5429f36cec235b3fbf4d6de8acea58045eb38d25b75
+```
+
+The active config already selects auto columns, Nerd icons and terminal theme;
+no local configuration was changed. The legacy ytui config is retained. Existing
+Yute processes need restarting to use the installed build. No GUI packaging or
+installation method was changed. Cargo gates ran sequentially with the configured
+six-job limit; no Cargo/global system settings were modified.

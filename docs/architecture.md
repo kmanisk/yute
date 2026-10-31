@@ -158,7 +158,7 @@ positions inside multibyte text.
 
 The TUI centralizes semantic styles in `theme.rs`. The default `terminal` theme uses terminal defaults and ANSI colours rather than hardcoded RGB. Custom TOML themes are resolved after the first frame, and `live_config.rs` watches config/theme paths using filesystem events; a failed parse keeps the previous state.
 
-Background and graphics reports share the single `/dev/tty` reader in `terminal_input.rs`, so capability replies cannot race normal key input. Graphics auto mode begins with halfblocks. Post-first-frame queries can confirm Kitty, Sixel, iTerm2 cell reports, cell pixel dimensions and background/light state. Structural overlay changes invalidate image placements and clear/redraw the affected screen to prevent persistent graphics ghosts. Multiplexed sessions conservatively use halfblocks when passthrough has not been established.
+Background and graphics reports share the single `/dev/tty` reader in `terminal_input.rs`, so capability replies cannot race normal key input. Graphics auto mode begins with halfblocks. Post-first-frame queries can confirm Kitty, Sixel, iTerm2 cell reports, cell pixel dimensions and background/light state. Viewport scrolling is resolved before deciding which placements to invalidate. Structural overlay and viewport changes invalidate image placements and clear/repaint in one synchronized terminal update, without submitting an intermediate blank frame. Cached raster anchors save and restore cursor/rendition state before advancing the one cell expected by the terminal backend; this prevents image output from shifting subsequent text. Focused and dimmed card encodings share the source-image cache, with tone conversion on background workers. Multiplexed sessions conservatively use halfblocks when passthrough has not been established.
 
 ## Downloads and subscribed channels
 
@@ -176,7 +176,8 @@ The query/parser contract follows primary terminal specifications:
   lowercase placement deletion. Switching away from Kitty also deletes previous
   Kitty placements before repainting.
 - [XTerm control sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html):
-  OSC 11 background queries, device attributes, and character-cell pixel reports.
+  OSC 11 background queries, device attributes, character-cell pixel reports,
+  and DECSC/DECRC cursor/rendition save and restore around raster anchors.
 - [Contour light/dark notifications](https://contour-terminal.org/vt-extensions/color-palette-update-notifications/):
   query CSI ? 996 n; response CSI ? 997 ; 1/2 n; notification mode 2031.
   Focus reporting is enabled while Yute runs; notification/focus modes are
