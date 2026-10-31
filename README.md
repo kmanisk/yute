@@ -258,15 +258,19 @@ For large seek/scrub jumps, Yute uses keyframe-oriented IPC seeks and watches MP
 stock OSC can create a seek storm when its draggable seekbar is scrubbed, and direct
 MPV transport can still wedge on an isolated DASH seek even with the safe seekbar.
 With **MPV seekbar** off (the default), Yute uses MPV's upstream `slimbottombar`.
-The playback network engine defaults to `auto`: normal finite YouTube VODs start
-on Yute's loopback finite-range transport immediately, while live/upcoming and
-Local media stay on direct MPV. This follows the same useful separation seen in
-SmartTube between buffer policy and network data source instead of trying to fix
-a slow source with more RAM. Forced `mpv` stays direct and forced `proxy` stays on
-finite ranges. On `g1qNCcxFWRo` with a 60-second target, direct MPV again stalled
-at 20%; its median reported cache speed was about 0.12 MB/s versus about 2.3 MB/s
-through the finite-range path. See [`docs/playback-network.md`](docs/playback-network.md)
-for the sanitized measurements, state machine and `yute doctor --seek-test` harness.
+The playback network engine defaults to `auto`: normal YouTube VODs start on
+Yute's loopback finite-range transport immediately, while live/upcoming and Local
+media stay on direct MPV. If yt-dlp prefers a manifest-only VOD representation,
+Yute selects a finite HTTP representation at the same requested resolution (and
+prefers the same codec) before proxying it. If the range transport still cannot
+load a VOD, Auto retries that media once through direct MPV rather than leaving a
+0:00 failed player. This follows the same useful separation seen in SmartTube
+between buffer policy and network data source instead of trying to fix a slow
+source with more RAM. On `g1qNCcxFWRo` with a 60-second target, direct MPV again
+stalled at 20%; its median reported cache speed was about 0.12 MB/s versus about
+2.3 MB/s through the finite-range path. See
+[`docs/playback-network.md`](docs/playback-network.md) for the sanitized
+measurements, state machine and `yute doctor --seek-test` harness.
 
 ## Accounts
 

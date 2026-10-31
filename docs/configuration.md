@@ -39,11 +39,14 @@ fallback. `audio_language` and `subtitle_language` accept MPV language lists or
 `:play-select` and `:audio` select actual streams for one playback; an explicit
 format selection does not permanently enable audio-only mode.
 
-`network_engine = "auto"` starts ordinary finite YouTube VODs on Yute's
-loopback finite-range transport immediately. Live/upcoming and Local media stay
-on direct MPV. `mpv` forces direct transport and `proxy` forces finite ranges.
-The proxy binds only to loopback, resolves anonymously with yt-dlp, never receives
-Yute OAuth/cookies and terminates with the playback session. See
+`network_engine = "auto"` starts ordinary YouTube VODs on Yute's loopback
+finite-range transport immediately. Live/upcoming and Local media stay on direct
+MPV. When yt-dlp's preferred VOD representation is manifest-only, Yute selects a
+finite HTTP representation at the same resolution and prefers the same codec. If
+that range path still fails to load, Auto retries that media once through direct
+MPV. `mpv` forces direct transport and `proxy` forces finite ranges. The proxy
+binds only to loopback, resolves anonymously with yt-dlp, never receives Yute
+OAuth/cookies and terminates with the playback session. See
 [playback-network.md](playback-network.md) for the seek harness and measurements.
 
 ```toml

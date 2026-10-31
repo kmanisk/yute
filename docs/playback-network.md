@@ -46,13 +46,13 @@ Yute starts an in-process loopback-only HTTP server for the current playback ses
 - terminates with the playback session;
 - rejects unknown session paths.
 
-Separate video/audio streams are exposed to MPV through a local EDL manifest. Live/manifest-only media falls back rather than pretending the finite-range transport is valid.
+Separate video/audio streams are exposed to MPV through a local EDL manifest. Live media stays direct. For VODs where yt-dlp selects a manifest-only video representation but also reports finite direct HTTP formats, Yute picks the highest finite format at the same requested resolution, preferring the selected codec family, and keeps a finite audio stream. If no usable finite representation can be loaded, Auto retries the original media once through direct MPV; forced `proxy` reports the range error instead of silently changing engines.
 
 The proxy uses the project's existing Tokio, reqwest/rustls, futures, getrandom, hex and async-trait stack. No HTTP/3 dependency was added.
 
 ### `auto`
 
-Auto prefers the finite-range transport immediately for ordinary YouTube VODs. Live/upcoming videos and local files stay on direct MPV because the proxy requires finite byte ranges. Direct MPV remains available with `network_engine = "mpv"`; forced `proxy` remains available for debugging. The existing recovery guard is still bounded and does not loop between engines.
+Auto prefers the finite-range transport immediately for ordinary YouTube VODs. Live/upcoming videos and local files stay on direct MPV because the proxy requires finite byte ranges. Manifest-only preferred VOD representations are translated to finite HTTP representations when yt-dlp exposes them. If the proxy load itself fails, Auto bypasses it for that media and retries direct MPV once; the recovery watchdog then treats that session as direct so it cannot loop back into the same failing proxy. Direct MPV remains available with `network_engine = "mpv"`; forced `proxy` remains available for debugging.
 
 This mirrors SmartTube's idea of selectable/fallback player network stacks, not its implementation. The inspected SmartTube reference exposes Default, Cronet and OkHttp sources and can rotate sources after network failures. Yute independently implements only the behavior needed for its MPV architecture.
 
@@ -100,6 +100,8 @@ A later 60-second-cache comparison reproduced the same direct failure: the 20% s
 Auto now starts ordinary finite VODs on that proxy immediately instead of spending four seconds on the known-slower direct path first. In the final one-round Auto test at a 60-second target, all five positions completed; first healthy progress was roughly 0.5–0.75 seconds after seeks and confirmation of +2 seconds of playback was roughly 2.5–2.8 seconds. Live/upcoming and Local media remain direct.
 
 An experimental 2 MiB range size and wider prefetch window did not improve measured throughput and slightly worsened first-progress latency, so Yute keeps the simpler 1 MiB finite-range implementation.
+
+A second compatibility case used `BCZGUDZgT1I`. yt-dlp preferred `616+251`: 1080p VP9 video `616` was `m3u8_native` without a finite content length, while Opus audio `251` was finite HTTPS. Yute now maps that video side to finite 1080p VP9 format `248` and retains finite Opus audio. With a 60-second target, both forced `proxy` and `auto` completed start/60%/20%/90%/10%; first healthy progress was about 0.5–0.75 seconds after seeks and +2-second confirmation about 2.5–2.8 seconds. The sampled proxy tail reported roughly 3.7 MB/s cache speed.
 
 ## Local test server
 

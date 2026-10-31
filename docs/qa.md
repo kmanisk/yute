@@ -172,3 +172,5 @@ This is fixture evidence for Foot/Sixel only, not validation of every protocol.
 - [ ] Repeat action/help/command overlays with Kitty, iTerm2 and halfblocks; verify
   closing them restores images and leaves no text or border remnants.
 - [ ] Confirm the account avatar/name has space before the terminal's right edge.
+
+Compatibility regression `BCZGUDZgT1I`: yt-dlp selected manifest-only 1080p VP9 `616` plus finite Opus `251`. The proxy finite-format fallback selected direct 1080p VP9 `248` for video. At a 60-second target, forced Proxy and Auto both completed start/60%/20%/90%/10%; first healthy playback after seeks was about 0.5–0.75 seconds.
