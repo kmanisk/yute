@@ -57,19 +57,111 @@ impl Youtube {
         }
     }
 }
+fn stream_length(value: &serde_json::Value) -> Option<u64> {
+    let url = value["url"].as_str()?;
+    let parsed = reqwest::Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    value["filesize"].as_u64().or_else(|| {
+        parsed
+            .query_pairs()
+            .find(|(k, _)| k == "clen")
+            .and_then(|(_, v)| v.parse().ok())
+    })
+}
+
+fn codec_family(codec: &str) -> &str {
+    if codec.starts_with("vp09") || codec.starts_with("vp9") {
+        "vp9"
+    } else if codec.starts_with("av01") || codec.starts_with("av1") {
+        "av1"
+    } else if codec.starts_with("avc1") || codec.starts_with("avc") || codec.starts_with("h264") {
+        "h264"
+    } else if codec.starts_with("opus") {
+        "opus"
+    } else if codec.starts_with("mp4a") || codec.starts_with("aac") {
+        "aac"
+    } else {
+        codec
+    }
+}
+
+fn finite_fallback<'a>(
+    selected: &serde_json::Value,
+    root: &'a serde_json::Value,
+    video: bool,
+) -> Option<&'a serde_json::Value> {
+    let formats = root.get("formats")?.as_array()?;
+    let target_codec = if video {
+        selected["vcodec"].as_str().unwrap_or("")
+    } else {
+        selected["acodec"].as_str().unwrap_or("")
+    };
+    let target_family = codec_family(target_codec);
+    let max_height = video
+        .then(|| selected["height"].as_u64())
+        .flatten()
+        .unwrap_or(u64::MAX);
+
+    formats
+        .iter()
+        .filter(|candidate| {
+            let vcodec = candidate["vcodec"].as_str().unwrap_or("none");
+            let acodec = candidate["acodec"].as_str().unwrap_or("none");
+            let right_kind = if video {
+                vcodec != "none"
+            } else {
+                vcodec == "none" && acodec != "none"
+            };
+            right_kind
+                && stream_length(candidate).is_some()
+                && (!video || candidate["height"].as_u64().unwrap_or(0) <= max_height)
+        })
+        .max_by_key(|candidate| {
+            let codec = if video {
+                candidate["vcodec"].as_str().unwrap_or("")
+            } else {
+                candidate["acodec"].as_str().unwrap_or("")
+            };
+            let same_codec =
+                u8::from(!target_family.is_empty() && codec_family(codec) == target_family);
+            if video {
+                (
+                    candidate["height"].as_u64().unwrap_or(0),
+                    u64::from(same_codec),
+                    candidate["fps"].as_f64().unwrap_or(0.0) as u64,
+                    candidate["tbr"].as_f64().unwrap_or(0.0) as u64,
+                )
+            } else {
+                (
+                    u64::from(same_codec),
+                    candidate["abr"].as_f64().unwrap_or(0.0) as u64,
+                    candidate["tbr"].as_f64().unwrap_or(0.0) as u64,
+                    stream_length(candidate).unwrap_or(0),
+                )
+            }
+        })
+}
+
+fn finite_stream<'a>(
+    selected: &'a serde_json::Value,
+    root: &'a serde_json::Value,
+    video: bool,
+) -> Result<(&'a serde_json::Value, Stream)> {
+    if stream_length(selected).is_some() {
+        return Ok((selected, stream(selected, root)?));
+    }
+    let fallback = finite_fallback(selected, root, video)
+        .ok_or_else(|| anyhow!("No finite HTTP fallback stream is available"))?;
+    Ok((fallback, stream(fallback, root)?))
+}
+
 fn stream(value: &serde_json::Value, root: &serde_json::Value) -> Result<Stream> {
     let url = value["url"]
         .as_str()
         .ok_or_else(|| anyhow!("Resolver did not return an HTTP stream"))?;
-    let parsed = reqwest::Url::parse(url).map_err(|_| anyhow!("Invalid resolver stream URL"))?;
-    let length = value["filesize"]
-        .as_u64()
-        .or_else(|| {
-            parsed
-                .query_pairs()
-                .find(|(k, _)| k == "clen")
-                .and_then(|(_, v)| v.parse().ok())
-        })
+    let length = stream_length(value)
         .ok_or_else(|| anyhow!("Proxy does not support live/manifest-only streams; use mpv"))?;
     let mime = match value["ext"].as_str() {
         Some("webm") => {
@@ -148,24 +240,38 @@ impl Source for Youtube {
                 .find(|f| f["vcodec"] != "none")
                 .or_else(|| f.first())
                 .ok_or_else(|| anyhow!("No playable formats"))?;
-            let second = f.iter().find(|f| {
+            let selected_audio = f.iter().find(|f| {
                 !std::ptr::eq(*f, first) && f["vcodec"] == "none" && f["acodec"] != "none"
             });
-            let mut ids = vec![first["format_id"].as_str().unwrap_or_default()];
-            if let Some(a) = second {
-                ids.push(a["format_id"].as_str().unwrap_or_default());
+            let (video_value, video) = finite_stream(first, &v, true)?;
+            let audio_pair = if let Some(selected_audio) = selected_audio {
+                Some(finite_stream(selected_audio, &v, false)?)
+            } else if video_value["acodec"].as_str().unwrap_or("none") == "none" {
+                finite_fallback(&serde_json::json!({"acodec":""}), &v, false)
+                    .map(|value| stream(value, &v).map(|stream| (value, stream)))
+                    .transpose()?
+            } else {
+                None
+            };
+            let mut ids = vec![video_value["format_id"].as_str().unwrap_or_default()];
+            if let Some((audio_value, _)) = &audio_pair {
+                ids.push(audio_value["format_id"].as_str().unwrap_or_default());
             }
-            (
-                stream(first, &v)?,
-                second.map(|a| stream(a, &v)).transpose()?,
-                ids.join("+"),
-            )
+            (video, audio_pair.map(|(_, stream)| stream), ids.join("+"))
         } else {
-            (
-                stream(&v, &v)?,
-                None,
-                v["format_id"].as_str().unwrap_or_default().to_string(),
-            )
+            let (video_value, video) = finite_stream(&v, &v, true)?;
+            let audio_pair = if video_value["acodec"].as_str().unwrap_or("none") == "none" {
+                finite_fallback(&serde_json::json!({"acodec":""}), &v, false)
+                    .map(|value| stream(value, &v).map(|stream| (value, stream)))
+                    .transpose()?
+            } else {
+                None
+            };
+            let mut ids = vec![video_value["format_id"].as_str().unwrap_or_default()];
+            if let Some((audio_value, _)) = &audio_pair {
+                ids.push(audio_value["format_id"].as_str().unwrap_or_default());
+            }
+            (video, audio_pair.map(|(_, stream)| stream), ids.join("+"))
         };
         if !ids.is_empty()
             && ids
@@ -744,6 +850,76 @@ mod tests {
         }
         assert_eq!(o.active.load(Ordering::SeqCst), 0);
     }
+    #[test]
+    fn manifest_only_selection_falls_back_to_same_quality_finite_http_format() {
+        let root = serde_json::json!({
+            "requested_formats": [
+                {
+                    "format_id": "616",
+                    "height": 1080,
+                    "fps": 24,
+                    "vcodec": "vp09.00.40.08",
+                    "acodec": "none",
+                    "ext": "mp4",
+                    "protocol": "m3u8_native",
+                    "url": "https://manifest.example/video.m3u8"
+                },
+                {
+                    "format_id": "251",
+                    "vcodec": "none",
+                    "acodec": "opus",
+                    "ext": "webm",
+                    "protocol": "https",
+                    "filesize": 2000,
+                    "url": "https://media.example/audio?clen=2000"
+                }
+            ],
+            "formats": [
+                {
+                    "format_id": "399",
+                    "height": 1080,
+                    "fps": 24,
+                    "tbr": 900,
+                    "vcodec": "av01.0.08M.08",
+                    "acodec": "none",
+                    "ext": "mp4",
+                    "protocol": "https",
+                    "filesize": 3000,
+                    "url": "https://media.example/av1?clen=3000"
+                },
+                {
+                    "format_id": "248",
+                    "height": 1080,
+                    "fps": 24,
+                    "tbr": 850,
+                    "vcodec": "vp9",
+                    "acodec": "none",
+                    "ext": "webm",
+                    "protocol": "https",
+                    "filesize": 4000,
+                    "url": "https://media.example/vp9?clen=4000"
+                },
+                {
+                    "format_id": "247",
+                    "height": 720,
+                    "fps": 24,
+                    "tbr": 700,
+                    "vcodec": "vp9",
+                    "acodec": "none",
+                    "ext": "webm",
+                    "protocol": "https",
+                    "filesize": 2500,
+                    "url": "https://media.example/vp9-720?clen=2500"
+                }
+            ]
+        });
+        let selected = &root["requested_formats"][0];
+        let fallback = finite_fallback(selected, &root, true).unwrap();
+        assert_eq!(fallback["format_id"], "248");
+        let (_, stream) = finite_stream(selected, &root, true).unwrap();
+        assert_eq!(stream.length, 4000);
+    }
+
     #[test]
     fn range_validation() {
         assert_eq!(requested_range(Some("bytes=10-"), 20).unwrap(), (10, 19));

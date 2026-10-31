@@ -233,6 +233,7 @@ impl MpvIpc {
             let mut selector = String::from("bestvideo+bestaudio/best");
             let mut recovery = super::network::Recovery::default();
             let mut requested_seek_target: Option<f64> = None;
+            let mut proxy_bypassed = false;
             let recovery_clock = std::time::Instant::now();
 
             loop {
@@ -244,10 +245,11 @@ impl MpvIpc {
                                 requested_seek_target=None;
                             }
                         }
-                        let recovery_engine = engine.recovery_mode(
-                            prefer_proxy_initial,
-                            active_proxy.is_some(),
-                        );
+                        let recovery_engine = if proxy_bypassed {
+                            super::network::Engine::Mpv
+                        } else {
+                            engine.recovery_mode(prefer_proxy_initial, active_proxy.is_some())
+                        };
                         if recovery.observe(recovery_clock.elapsed(),&status,network,recovery_engine) {
                           if let Some((url,format))=&current_media {
                             if let Ok(id)=super::diagnostics::video_id(url) {
@@ -344,7 +346,7 @@ impl MpvIpc {
                             IpcCommand::Stop => json!({ "command": ["stop"] }),
                         };
                         if is_load {
-                          active_proxy=None;status.proxy_active=false;
+                          active_proxy=None;status.proxy_active=false;proxy_bypassed=false;
                           if engine==super::network::Engine::Proxy
                             || (engine==super::network::Engine::Auto && prefer_proxy_initial) {
                             if let Some((url,format))=&current_media {
@@ -357,7 +359,17 @@ impl MpvIpc {
                                     status.proxy_active=true;
                                     status.recovery=super::network::Phase::Proxy;
                                   },
-                                  Err(_)=>{status.playback_error=Some("Cannot start playback range transport".into());let _=tx_status.send(status.clone()).await;continue;}
+                                  Err(_)=>{
+                                    if engine==super::network::Engine::Proxy {
+                                      status.playback_error=Some("Cannot start playback range transport".into());
+                                      let _=tx_status.send(status.clone()).await;
+                                      continue;
+                                    }
+                                    proxy_bypassed=true;
+                                    recovery=super::network::Recovery::default();
+                                    status.recovery=super::network::Phase::Direct;
+                                    log_ipc_event("Range transport unavailable; Auto kept direct MPV for this media");
+                                  }
                                 }
                               }
                             }
@@ -424,7 +436,32 @@ impl MpvIpc {
                                                 }
                                             }
                                             "end-file" => {
-                                                if val.get("reason").and_then(Value::as_str) == Some("error") {
+                                                let failed = val.get("reason").and_then(Value::as_str) == Some("error");
+                                                if failed && active_proxy.is_some() && engine == super::network::Engine::Auto {
+                                                    if let Some((url, format)) = &current_media {
+                                                        let target = requested_seek_target.unwrap_or(status.time_pos).max(0.0);
+                                                        let command = direct_load(
+                                                            url,
+                                                            format.as_deref().unwrap_or(&selector),
+                                                            target,
+                                                            pause_after_load,
+                                                        );
+                                                        active_proxy = None;
+                                                        proxy_bypassed = true;
+                                                        recovery = super::network::Recovery::default();
+                                                        status.proxy_active = false;
+                                                        status.recovery = super::network::Phase::Direct;
+                                                        status.playback_error = None;
+                                                        status.file_loaded = false;
+                                                        requested_seek_target = Some(target);
+                                                        let _ = writer.write_all(format!("{command}\n").as_bytes()).await;
+                                                        let _ = writer.flush().await;
+                                                        log_ipc_event("Range transport load failed; Auto retried direct MPV once");
+                                                        let _ = tx_status.send(status.clone()).await;
+                                                        continue;
+                                                    }
+                                                }
+                                                if failed {
                                                     let error = val.get("file_error").and_then(Value::as_str).unwrap_or("stream resolution or media loading failed");
                                                     status.playback_error = Some(format!("MPV could not load media: {error}"));
                                                 }
@@ -474,4 +511,8 @@ impl Drop for MpvIpc {
 
 fn proxy_load(session: &super::proxy::Session, start: f64, paused: bool) -> serde_json::Value {
     json!({"command":["loadfile",session.manifest(),"replace",-1,{"start":start.to_string(),"ytdl":"no","demuxer":"edl","pause":if paused{"yes"}else{"no"}}],"request_id":1})
+}
+
+fn direct_load(url: &str, format: &str, start: f64, paused: bool) -> serde_json::Value {
+    json!({"command":["loadfile",url,"replace",-1,{"start":start.to_string(),"ytdl-format":format,"pause":if paused{"yes"}else{"no"}}],"request_id":1})
 }
