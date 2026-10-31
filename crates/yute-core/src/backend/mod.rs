@@ -52,6 +52,17 @@ pub trait Backend: Send + Sync {
         filters: &SearchFilters,
         token: Option<&str>,
     ) -> anyhow::Result<FeedPage>;
+    async fn search_options(
+        &self,
+        q: &str,
+        options: &crate::search::Options,
+        token: Option<&str>,
+    ) -> anyhow::Result<FeedPage> {
+        if options.params().is_some() {
+            anyhow::bail!("Server search filters require the InnerTube backend");
+        }
+        self.search(q, &SearchFilters::default(), token).await
+    }
     async fn suggest(&self, q: &str) -> anyhow::Result<Vec<String>>;
     async fn watch(&self, video_id: &str) -> anyhow::Result<WatchData>;
     /// Lightweight card metadata; never resolves playback or fetches comments/votes.
@@ -315,6 +326,22 @@ impl Backend for BackendChain {
             }
         }
         empty_res.map(Ok).unwrap_or(Err(last_err))
+    }
+
+    async fn search_options(
+        &self,
+        q: &str,
+        options: &crate::search::Options,
+        token: Option<&str>,
+    ) -> anyhow::Result<FeedPage> {
+        let mut error = anyhow::anyhow!("No search backend configured");
+        for backend in &self.backends {
+            match backend.search_options(q, options, token).await {
+                Ok(page) => return Ok(page),
+                Err(e) => error = e,
+            }
+        }
+        Err(error)
     }
 
     async fn suggest(&self, q: &str) -> anyhow::Result<Vec<String>> {

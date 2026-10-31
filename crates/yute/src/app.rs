@@ -223,6 +223,9 @@ pub struct App {
     pub selected_index: usize,
     pub continuation_token: Option<String>,
     pub search_query: String,
+    pub search_options: yute_core::search::Options,
+    pub search_modal: Option<crate::ui::search_filters::Modal>,
+    pub music_bias_disabled: bool,
     pub search_input: String,
     pub search_suggestions: Vec<String>,
     pub suggestion_index: Option<usize>,
@@ -397,6 +400,9 @@ impl App {
             selected_index: 0,
             continuation_token: None,
             search_query: String::new(),
+            search_options: Default::default(),
+            search_modal: None,
+            music_bias_disabled: false,
             search_input: String::new(),
             search_suggestions: Vec::new(),
             suggestion_index: None,
@@ -769,6 +775,15 @@ r retry · :account",
     }
 
     pub fn filtered_items(&self) -> Vec<&Card> {
+        let music = self.screen == Screen::Search
+            && self
+                .search_options
+                .biased(
+                    &self.search_query,
+                    &self.config.search,
+                    self.music_bias_disabled,
+                )
+                .1;
         let saved = matches!(
             self.screen,
             Screen::History
@@ -794,6 +809,14 @@ r retry · :account",
                     .filter(|_| self.filter_kind == FilterKind::Channels),
             )
             .filter(|c| {
+                if music && matches!(c,Card::Video(v) if !yute_core::search::music_duration_matches(v.duration.as_deref())){return false;}
+                if self.screen == Screen::Search
+                    && self.filter_kind != FilterKind::Playlists
+                    && !self.config.search.mixes
+                    && matches!(c,Card::Playlist(p) if p.is_mix)
+                {
+                    return false;
+                }
                 if !allow_shorts {
                     if let Card::Video(v) = c {
                         if v.badges.iter().any(|b| b == "SHORTS") {

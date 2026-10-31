@@ -376,10 +376,16 @@ fn trigger_home_fetch(app: &mut App, tx: Sender<AppEvent>, chip_token: Option<St
 fn trigger_search_fetch(app: &mut App, tx: Sender<AppEvent>, query: String) {
     let backend = Arc::clone(&app.backend);
     let generation = app.begin_feed_request();
+    let cancelled = app.metadata_cancelled.clone();
+    let (options, _) =
+        app.search_options
+            .biased(&query, &app.config.search, app.music_bias_disabled);
+    app.continuation_token = None;
+    app.items.clear();
+    app.selected_index = 0;
+    app.scroll_row = 0;
     tokio::spawn(async move {
-        let res = backend
-            .search(&query, &SearchFilters::default(), None)
-            .await;
+        let res = tokio::select! {_=cancelled.cancelled()=>return,result=backend.search_options(&query,&options,None)=>result};
         let _ = tx.send(AppEvent::FeedLoaded(generation, res)).await;
     });
 }
@@ -621,6 +627,59 @@ async fn handle_key_event(
     tx: Sender<AppEvent>,
 ) {
     let key = yute::keymap::normalize_key(key);
+    if let Some(modal) = &mut app.search_modal {
+        use yute::ui::search_filters::rows;
+        match key.code {
+            KeyCode::Esc => app.search_modal = None,
+            KeyCode::Char('h') | KeyCode::BackTab => modal.section = (modal.section + 4) % 5,
+            KeyCode::Char('l') | KeyCode::Tab => modal.section = (modal.section + 1) % 5,
+            KeyCode::Char('j') | KeyCode::Down => {
+                let c = &mut modal.cursor[modal.section];
+                *c = (*c + 1) % rows(modal.section).len();
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                let c = &mut modal.cursor[modal.section];
+                *c = (*c + rows(modal.section).len() - 1) % rows(modal.section).len();
+            }
+            KeyCode::Char(' ') | KeyCode::Enter => modal.choose(),
+            KeyCode::Char('x') => modal.draft = Default::default(),
+            KeyCode::Char('a') => {
+                let m = app.search_modal.take().unwrap();
+                app.search_options = m.draft;
+                app.filter_kind = yute::app::FilterKind::All;
+                app.music_bias_disabled = true;
+                trigger_search_fetch(app, tx, app.search_query.clone());
+            }
+            _ => {}
+        }
+        return;
+    }
+    if app.screen == Screen::Search && app.focus == Focus::Content && app.action_menu.is_none() {
+        if key.code == KeyCode::Char('f') {
+            app.search_modal = Some(yute::ui::search_filters::Modal {
+                draft: app.search_options.clone(),
+                ..Default::default()
+            });
+            return;
+        }
+        if key.code == KeyCode::Char('M') {
+            app.music_bias_disabled = true;
+            trigger_search_fetch(app, tx, app.search_query.clone());
+            return;
+        }
+        if key.code == KeyCode::Backspace {
+            if app.search_options.features.pop().is_none()
+                && app.search_options.date.take().is_none()
+                && app.search_options.duration.take().is_none()
+            {
+                app.search_options.kind = None;
+                app.search_options.popularity = false;
+                app.music_bias_disabled = true;
+            }
+            trigger_search_fetch(app, tx, app.search_query.clone());
+            return;
+        }
+    }
     if let Some(modal) = &app.login_modal {
         if key.code == KeyCode::Esc
             || (key.code == KeyCode::Char('c')
@@ -1459,6 +1518,22 @@ async fn handle_key_event(
 
 fn set_content_filter(app: &mut App, kind: yute::app::FilterKind, tx: Sender<AppEvent>) {
     use yute::app::{FilterKind, TabState};
+    if app.screen == Screen::Search {
+        use yute_core::search::{Feature, Kind};
+        app.filter_kind = kind;
+        app.search_options.kind = match kind {
+            FilterKind::Videos | FilterKind::Shorts | FilterKind::Live => Some(Kind::Video),
+            FilterKind::Channels => Some(Kind::Channel),
+            FilterKind::Playlists => Some(Kind::Playlist),
+            _ => None,
+        };
+        app.search_options.features.retain(|f| *f != Feature::Live);
+        if kind == FilterKind::Live {
+            app.search_options.features.push(Feature::Live);
+        }
+        trigger_search_fetch(app, tx, app.search_query.clone());
+        return;
+    }
     let source = if matches!(
         kind,
         FilterKind::Shorts | FilterKind::Live | FilterKind::Channels
@@ -3074,6 +3149,18 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                         .min(app.filtered_items().len().saturating_sub(1));
                     app.continuation_token = page.continuation.clone();
                     app.continuation_failed = false;
+                    if app.screen == Screen::Search
+                        && app.selected_index == 0
+                        && matches!(app.selected_card(),Some(Card::Playlist(p)) if p.is_mix)
+                    {
+                        if let Some(i) = app
+                            .filtered_items()
+                            .iter()
+                            .position(|c| matches!(c, Card::Video(_)))
+                        {
+                            app.selected_index = i;
+                        }
+                    }
                     app.status_text = format!("Loaded {} items", app.items.len());
 
                     let cache_key = match app.screen {
@@ -3116,36 +3203,12 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                     let before = app.items.len();
                     let mut ids: std::collections::HashSet<String> =
                         app.items.iter().map(|c| c.id().to_string()).collect();
-                    let mut relevant = 0usize;
-                    let search_query = (screen == Screen::Search).then(|| app.search_query.clone());
-                    let mut incoming = page.items;
-                    if let Some(query) = search_query.as_deref() {
-                        // Later YouTube search pages can contain a personalized shelf.
-                        // Drop cards without direct lexical evidence and rank the rest
-                        // by query evidence while preserving server order for ties.
-                        let mut scored = incoming
-                            .into_iter()
-                            .enumerate()
-                            .filter_map(|(order, card)| {
-                                let score = search_continuation_score(&card, query);
-                                (score > 0).then_some((score, order, card))
-                            })
-                            .collect::<Vec<_>>();
-                        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
-                        incoming = scored.into_iter().map(|(_, _, card)| card).collect();
-                    }
-                    for card in incoming {
-                        if !ids.insert(card.id().to_string()) {
-                            continue;
+                    for card in page.items {
+                        if ids.insert(card.id().to_string()) {
+                            app.items.push(card);
                         }
-                        relevant += 1;
-                        app.items.push(card);
                     }
-                    app.continuation_token = if screen == Screen::Search && relevant == 0 {
-                        None
-                    } else {
-                        page.continuation.filter(|next| next != &token)
-                    };
+                    app.continuation_token = page.continuation.filter(|next| next != &token);
                     if app.screen == Screen::Subscriptions {
                         if app.items.len() == before {
                             app.autofill_pages += 1;
@@ -3157,11 +3220,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                             app.autofill_pages = 0;
                         }
                     }
-                    app.status_text = if screen == Screen::Search && app.items.len() == before {
-                        "End of relevant search results".into()
-                    } else {
-                        format!("Loaded {} more items", app.items.len() - before)
-                    };
+                    app.status_text = format!("Loaded {} more items", app.items.len() - before);
                 }
                 Err(error) => {
                     app.continuation_failed = true;
@@ -4098,114 +4157,6 @@ fn maybe_load_channel_avatars(app: &mut App, tx: Sender<AppEvent>) {
     }
 }
 
-fn normalize_search_text(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if ch.is_alphanumeric() {
-            for lower in ch.to_lowercase() {
-                out.push(lower);
-            }
-        } else {
-            out.push(' ');
-        }
-    }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn search_continuation_score(card: &Card, query: &str) -> i32 {
-    let stop = [
-        "the", "a", "an", "to", "of", "and", "or", "for", "in", "on", "with", "how", "is",
-    ];
-    let normalized_query = normalize_search_text(query);
-    let terms = normalized_query
-        .split_whitespace()
-        .filter(|term| term.len() >= 2 && !stop.contains(term))
-        .collect::<Vec<_>>();
-    if terms.is_empty() {
-        return 1;
-    }
-
-    let title = normalize_search_text(card.title());
-    let mut secondary = String::new();
-    match card {
-        Card::Video(video) => {
-            secondary.push_str(&video.channel);
-            secondary.push(' ');
-            secondary.push_str(&video.badges.join(" "));
-        }
-        Card::Playlist(playlist) => secondary.push_str(&playlist.channel),
-        Card::Channel(channel) => {
-            if let Some(handle) = &channel.handle {
-                secondary.push_str(handle);
-            }
-        }
-    }
-    let secondary = normalize_search_text(&secondary);
-    let title_words = title.split_whitespace().collect::<Vec<_>>();
-    let secondary_words = secondary.split_whitespace().collect::<Vec<_>>();
-
-    let mut score = 0i32;
-    let mut matched = 0usize;
-    let mut title_matches = 0usize;
-    if title.contains(&normalized_query) {
-        score += 60;
-    }
-    if !secondary.is_empty() && secondary.contains(&normalized_query) {
-        score += 28;
-    }
-
-    for term in &terms {
-        let title_score = if title_words.iter().any(|word| word == term) {
-            40
-        } else if title_words.iter().any(|word| word.starts_with(term)) {
-            30
-        } else if term.len() >= 4 && title.contains(term) {
-            18
-        } else {
-            0
-        };
-        let secondary_score = if secondary_words.iter().any(|word| word == term) {
-            24
-        } else if secondary_words.iter().any(|word| word.starts_with(term)) {
-            18
-        } else if term.len() >= 5 && secondary.contains(term) {
-            10
-        } else {
-            0
-        };
-        let best = title_score.max(secondary_score);
-        if best > 0 {
-            matched += 1;
-            score += best;
-            if title_score > 0 {
-                title_matches += 1;
-            }
-        }
-    }
-
-    // A one-word continuation such as "reddit" must actually mention Reddit in
-    // its title/creator metadata. For longer searches require all important terms
-    // up to three terms, then a 75% majority. This intentionally prefers a shorter
-    // relevant result set over YouTube's unrelated personalized tail.
-    let required = if terms.len() <= 3 {
-        terms.len()
-    } else {
-        (terms.len() * 3).div_ceil(4)
-    };
-    if matched < required {
-        return 0;
-    }
-    if terms.len() > 1 && title_matches == 0 && score < 70 {
-        return 0;
-    }
-    score
-}
-
-#[cfg(test)]
-fn search_continuation_relevant(card: &Card, query: &str) -> bool {
-    search_continuation_score(card, query) > 0
-}
-
 fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
     if app.is_loading
         || app.is_loading_more
@@ -4234,7 +4185,10 @@ fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
     let Some(token) = app.continuation_token.clone() else {
         return;
     };
-    if app.screen != Screen::Subscriptions && count < app.rendered_columns * app.rendered_rows {
+    if app.screen != Screen::Subscriptions
+        && app.screen != Screen::Search
+        && count < app.rendered_columns * app.rendered_rows
+    {
         if app.autofill_pages >= 3 {
             return;
         }
@@ -4246,14 +4200,19 @@ fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
     let account = app.account_handle.clone();
     let generation = app.feed_generation;
     let query = app.search_query.clone();
+    let (options, _) =
+        app.search_options
+            .biased(&query, &app.config.search, app.music_bias_disabled);
+    let cancelled = app.metadata_cancelled.clone();
     tokio::spawn(async move {
-        let result = if screen == Screen::Search {
-            backend
-                .search(&query, &SearchFilters::default(), Some(&token))
-                .await
-        } else {
-            backend.continue_feed(&token).await
+        let fetch = async {
+            if screen == Screen::Search {
+                backend.search_options(&query, &options, Some(&token)).await
+            } else {
+                backend.continue_feed(&token).await
+            }
         };
+        let result = tokio::select! {_=cancelled.cancelled()=>return,result=fetch=>result};
         let _ = tx
             .send(AppEvent::FeedContinued(
                 generation, screen, account, token, result,
@@ -4263,6 +4222,10 @@ fn maybe_continue_feed(app: &mut App, tx: Sender<AppEvent>) {
 }
 
 fn refresh_current_feed(app: &mut App, tx: Sender<AppEvent>) {
+    if app.screen == Screen::Search {
+        trigger_search_fetch(app, tx, app.search_query.clone());
+        return;
+    }
     if app.is_loading || app.is_loading_more {
         return;
     }
@@ -4679,7 +4642,14 @@ fn dispatch_command(app: &mut App, command: yute::commands::Command, tx: Sender<
             }
         }
         Command::Navigate(screen) => navigate_to_screen(app, screen, tx),
+        Command::SearchFilters => {
+            app.search_modal = Some(yute::ui::search_filters::Modal {
+                draft: app.search_options.clone(),
+                ..Default::default()
+            });
+        }
         Command::Search(query) => {
+            app.music_bias_disabled = false;
             app.transition(Screen::Search, true);
             app.search_query = query.clone();
             app.focus = Focus::Content;
@@ -5552,45 +5522,51 @@ mod feed_ui_tests {
     }
 
     #[test]
-    fn search_continuations_reject_personalized_drift_and_rank_direct_matches() {
-        let video = |id: &str, title: &str, channel: &str| {
-            Card::Video(VideoCard {
-                id: id.into(),
-                title: title.into(),
-                channel: channel.into(),
-                channel_id: None,
-                verified: false,
-                duration: None,
-                views: None,
-                published: None,
-                thumb_url: String::new(),
-                progress_pct: None,
-                live: LiveState::None,
-                badges: Vec::new(),
-                resume_time_sec: None,
-            })
-        };
-        let reddit = video("reddit", "Reddit API changes explained", "Tech News");
-        let creator = video("creator", "Weekly discussion", "Reddit Recap");
-        let rdr2 = video(
-            "rdr2",
-            "Red Dead Redemption 2 movie review",
-            "Gaming Reviews",
-        );
-        let subscribed = video("sub", "My new desk setup", "Subscribed Creator");
-        assert!(search_continuation_relevant(&reddit, "reddit"));
-        assert!(search_continuation_relevant(&creator, "reddit"));
-        assert!(!search_continuation_relevant(&rdr2, "reddit"));
-        assert!(!search_continuation_relevant(&subscribed, "reddit"));
-        assert!(
-            search_continuation_score(&reddit, "reddit")
-                > search_continuation_score(&creator, "reddit")
-        );
-
-        let async_rust = video("rust", "Async programming in Rust", "Systems Lab");
-        let only_rust = video("rust-only", "Rust ownership guide", "Systems Lab");
-        assert!(search_continuation_relevant(&async_rust, "rust async"));
-        assert!(!search_continuation_relevant(&only_rust, "rust async"));
+    fn five_search_pages_preserve_spelling_variants_and_server_order() {
+        let (mut app, cards) = app_and_cards();
+        let (tx, _) = channel(64);
+        app.search_query = "koi mil gya song".into();
+        app.items = vec![];
+        app.feed_generation = 7;
+        for page in 0..5 {
+            let token = format!("page-{page}");
+            app.continuation_token = Some(token.clone());
+            let mut items = vec![];
+            for i in 0..24 {
+                let mut card = cards[0].clone();
+                if let Card::Video(v) = &mut card {
+                    v.id = format!("{page}-{i}");
+                    v.title = if i % 2 == 0 {
+                        "Koi Mil Gaya music video"
+                    } else {
+                        "Full Movie upload"
+                    }
+                    .into();
+                }
+                items.push(card);
+            }
+            let first = items[0].id().to_string();
+            let account = app.account_handle.clone();
+            handle_app_event(
+                &mut app,
+                AppEvent::FeedContinued(
+                    7,
+                    Screen::Search,
+                    account,
+                    token,
+                    Ok(yute::backend::models::FeedPage {
+                        items,
+                        chips: vec![],
+                        continuation: Some(format!("page-{}", page + 1)),
+                    }),
+                ),
+                tx.clone(),
+            );
+            assert_eq!(app.items[page * 24].id(), first);
+            assert!(app.continuation_token.is_some());
+        }
+        assert_eq!(app.items.len(), 120);
+        assert!(!app.continuation_failed);
     }
 
     fn app_and_cards() -> (App, Vec<Card>) {

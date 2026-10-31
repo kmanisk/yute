@@ -29,6 +29,8 @@ pub struct Config {
     #[serde(default)]
     pub text: TextConfig,
     #[serde(default)]
+    pub search: SearchConfig,
+    #[serde(default)]
     pub downloads: DownloadConfig,
     #[serde(default)]
     pub keys: KeyConfig,
@@ -397,6 +399,7 @@ impl Default for Config {
             local: LocalConfig::default(),
             ui: UiConfig::default(),
             text: TextConfig::default(),
+            search: SearchConfig::default(),
             downloads: DownloadConfig::default(),
             keys: KeyConfig::default(),
         }
@@ -670,6 +673,38 @@ impl Default for UiConfig {
             sidebar_channels: false,
             scrolloff: default_scrolloff(),
             quit_on_home_only: true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SearchConfig {
+    pub music_bias: String,
+    pub music_words: Vec<String>,
+    pub mixes: bool,
+}
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            music_bias: "auto".into(),
+            mixes: false,
+            music_words: [
+                "song",
+                "songs",
+                "music",
+                "lyrics",
+                "lyrical",
+                "audio",
+                "mp3",
+                "remix",
+                "jukebox",
+                "ost",
+                "video song",
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
         }
     }
 }

@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 pub enum Command {
     Navigate(Screen),
     Search(String),
+    SearchFilters,
     Details,
     View(String),
     WatchSection(String),
@@ -237,6 +238,7 @@ pub static REGISTRY: &[Spec] = &[
     Spec { name:"settings", aliases:&["config"], usage:"settings", description:"Open settings.", parse:|a| no_args(a,Command::Navigate(Screen::Settings)) },
     Spec { name:"account", aliases:&["accounts", "acc", "a"], usage:"account [name|index|add|remove <name>|anon|whoami]", description:"Switch accounts, add a TV login, remove a saved account, or inspect the active session.", parse:|a| Ok(Command::Account(a.into())) },
     Spec { name:"anonymous", aliases:&[], usage:"anonymous", description:"Switch to the built-in anonymous account.", parse:|a|no_args(a,Command::Account("anon".into())) },
+    Spec { name:"search-filters", aliases:&["sf"], usage:"search-filters", description:"Edit verified server-side search filters", parse:|_| Ok(Command::SearchFilters) },
     Spec { name:"search", aliases:&[], usage:"search <query>", description:"Search YouTube. Example: :search linux kernel", parse:|a| if a.is_empty(){Err("Usage: :search <query>".into())}else{Ok(Command::Search(a.into()))} },
     Spec { name:"details", aliases:&["now","watch","video-info"], usage:"details", description:"Open the dashboard for the currently playing video with description, comments and suggestions.", parse:|a| no_args(a,Command::Details) },
     Spec { name:"view", aliases:&[], usage:"view [toggle|grid|list]", description:"Switch the current feed between grid and list immediately.", parse:|a| match a {""|"toggle"|"grid"|"list"=>Ok(Command::View(if a.is_empty(){"toggle".into()}else{a.into()})),_=>Err("Usage: :view [toggle|grid|list]".into())} },

@@ -517,36 +517,32 @@ impl Backend for InnerTubeBackend {
     async fn search(
         &self,
         q: &str,
-        _filters: &SearchFilters,
+        filters: &SearchFilters,
         token: Option<&str>,
     ) -> Result<FeedPage> {
-        let body = if let Some(tok) = token {
-            self.make_body(json!({
-                "continuation": tok
-            }))
-        } else {
-            self.make_body(json!({
-                "query": q
-            }))
-        };
-
-        let val = self.post_endpoint("search", body).await?;
-        let mut page = parse_feed_page(&val);
-
-        if token.is_none() {
-            if let Some(ref cont_token) = page.continuation {
-                let cont_body = self.make_body(json!({
-                    "continuation": cont_token
-                }));
-                if let Ok(next_val) = self.post_endpoint("search", cont_body).await {
-                    let next_page = parse_feed_page(&next_val);
-                    page.items.extend(next_page.items);
-                    page.continuation = next_page.continuation;
+        self.search_options(q, &crate::search::Options::from_legacy(filters), token)
+            .await
+    }
+    async fn search_options(
+        &self,
+        q: &str,
+        options: &crate::search::Options,
+        token: Option<&str>,
+    ) -> Result<FeedPage> {
+        let payload = match token {
+            Some(t) => json!({"continuation":t}),
+            None => {
+                let mut body = json!({"query":q});
+                if let Some(params) = options.params() {
+                    body["params"] = json!(params);
                 }
+                body
             }
-        }
-
-        Ok(page)
+        };
+        let val = self
+            .post_endpoint("search", self.make_body(payload))
+            .await?;
+        Ok(crate::search::parse_page(&val))
     }
 
     async fn suggest(&self, q: &str) -> Result<Vec<String>> {

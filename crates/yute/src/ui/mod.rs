@@ -9,6 +9,8 @@ pub mod header;
 pub mod help;
 pub mod icons;
 pub mod list;
+pub mod pane;
+pub mod search_filters;
 pub mod settings;
 pub mod sidebar;
 pub mod signin;
@@ -36,6 +38,7 @@ pub struct ShellLayout {
     pub player: Rect,
     pub footer: Rect,
     pub actions: Rect,
+    pub filterbar: Rect,
 }
 impl ShellLayout {
     pub fn new(area: Rect, app: &App) -> Self {
@@ -65,11 +68,15 @@ impl ShellLayout {
             area.width,
             player_h,
         );
+        let filter_h =
+            u16::from(app.screen == Screen::Search && !search_filters::active(app).is_empty());
+        let filterbar = Rect::new(area.x, area.y + 1, area.width, filter_h);
         let body = Rect::new(
             area.x,
-            area.y + 1,
+            area.y + 1 + filter_h,
             area.width,
-            area.height.saturating_sub(2 + player_h + action_h),
+            area.height
+                .saturating_sub(2 + player_h + action_h + filter_h),
         );
         let sb = sidebar::width_for(app).min(area.width.saturating_sub(20));
         let sidebar = Rect::new(body.x, body.y, sb, body.height);
@@ -98,6 +105,7 @@ impl ShellLayout {
         let content = pane.inner(ratatui::layout::Margin::new(1, 1));
         let title = Rect::new(content.x, content.y, content.width, 0);
         Self {
+            filterbar,
             header: Rect::new(
                 area.x,
                 area.y,
@@ -196,6 +204,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if !shell.tabs.is_empty() {
         chips::render_chips(f, app, shell.tabs);
     }
+    if !shell.filterbar.is_empty() {
+        f.render_widget(
+            ratatui::widgets::Paragraph::new(text::truncate_str(
+                &search_filters::active(app),
+                shell.filterbar.width as usize,
+            ))
+            .style(app.theme.style("text_dim")),
+            shell.filterbar,
+        );
+    }
     let content_area = shell.content;
     let status_area = shell.footer;
     let mut inner_content = content_area;
@@ -262,6 +280,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         cmdline::render_cmdline(f, app);
     }
 
+    search_filters::render(f, app);
     crate::actions::render_menu(f, app);
     accounts::render_picker(f, app);
     signin::render(f, app);
@@ -368,6 +387,9 @@ fn render_quit_confirmation(f: &mut Frame, app: &App, area: ratatui::layout::Rec
 }
 
 pub fn overlay_rect(app: &App, size: Rect) -> Option<Rect> {
+    if app.search_modal.is_some() {
+        return Some(search_filters::rect(size));
+    }
     if app.confirming_quit || app.confirming_logout {
         return Some(Rect::new(
             size.x + (size.width - size.width.saturating_sub(4).min(44)) / 2,
