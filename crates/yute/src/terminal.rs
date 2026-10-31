@@ -138,6 +138,7 @@ pub fn query() {
     let _ = out.flush();
 }
 pub fn stop_notifications() {
+    crate::text_probe::restore();
     use std::io::Write;
     if !multiplexed() {
         let mut out = std::io::stdout();

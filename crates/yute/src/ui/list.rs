@@ -352,4 +352,17 @@ fn render_list_row(
         height: inner.height,
     };
     f.render_widget(Paragraph::new(details_lines), details_area);
+    if is_selected {
+        let a = Rect::new(
+            details_area.x,
+            details_area.y,
+            details_area.width,
+            details_area.height.min(2),
+        );
+        super::text::fill_title_rect(
+            f,
+            a,
+            app.theme.style("selection").add_modifier(Modifier::BOLD),
+        );
+    }
 }

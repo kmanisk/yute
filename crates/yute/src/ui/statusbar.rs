@@ -1,6 +1,6 @@
 use crate::app::{App, Focus};
+use crate::ui::text::DisplayWidth;
 use ratatui::{layout::Rect, widgets::Paragraph, Frame};
-use unicode_width::UnicodeWidthStr;
 
 pub fn render_statusbar(f: &mut Frame, app: &App, area: Rect) {
     if area.is_empty() {

@@ -15,3 +15,5 @@ pub mod terminal;
 
 pub mod live_config;
 pub mod terminal_input;
+
+pub mod text_probe;

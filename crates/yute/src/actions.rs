@@ -551,7 +551,7 @@ pub fn menu_rect(
     app: &crate::app::App,
     area: ratatui::layout::Rect,
 ) -> Option<ratatui::layout::Rect> {
-    use unicode_width::UnicodeWidthStr;
+    use crate::ui::text::DisplayWidth;
     let menu = app.action_menu.as_ref()?;
     let rows = if menu.stage == MenuStage::Actions {
         visible_entries(app, &menu.card)
@@ -723,7 +723,7 @@ pub fn render_menu(f: &mut ratatui::Frame, app: &crate::app::App) {
             style,
         )];
         if label.contains("Download") && inner.width > 50 {
-            use unicode_width::UnicodeWidthStr;
+            use crate::ui::text::DisplayWidth;
             let used = text.width();
             let hint = &app.config.downloads.directory;
             let pad = (inner.width as usize).saturating_sub(used + hint.width());

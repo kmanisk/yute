@@ -1,5 +1,6 @@
 use super::icons::Icon;
 use crate::app::{App, Focus, Screen};
+use crate::ui::text::DisplayWidth;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -7,7 +8,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use unicode_width::UnicodeWidthStr;
 
 pub const SIDEBAR_ITEMS: &[(&str, Screen, &str)] = &[
     ("Home", Screen::Home, "gh"),

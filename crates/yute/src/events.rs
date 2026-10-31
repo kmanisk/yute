@@ -6,6 +6,7 @@ pub enum AppEvent {
     SubscribedChannels(u64, anyhow::Result<FeedPage>),
     QueuePlaylist(u64, bool, anyhow::Result<FeedPage>),
     TerminalReport(crate::terminal_input::Report),
+    TextProbed(crate::text_probe::Probe),
     ConfigReloaded(Box<anyhow::Result<(crate::config::Config, crate::theme::Theme)>>),
     AccountResult(u64, Box<AppEvent>),
     Input(KeyEvent),

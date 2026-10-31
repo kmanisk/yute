@@ -623,10 +623,15 @@ fn light_theme() -> String {
 #[serde(default)]
 pub struct TextConfig {
     pub emoji: String,
+    #[serde(default = "auto_mode")]
+    pub scripts: String,
 }
 impl Default for TextConfig {
     fn default() -> Self {
-        Self { emoji: auto_mode() }
+        Self {
+            emoji: auto_mode(),
+            scripts: auto_mode(),
+        }
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

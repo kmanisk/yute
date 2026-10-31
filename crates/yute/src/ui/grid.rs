@@ -671,11 +671,7 @@ fn render_grid_card(
     let clean = crate::ui::text::title_for(raw_title, &app.config);
     let title_lines = wrap_and_truncate_title(&clean, title_area.width as usize, title_h as usize);
 
-    let mut line_spans = Vec::new();
-    for tl in title_lines {
-        line_spans.push(Line::from(Span::styled(tl, title_style)));
-    }
-    f.render_widget(Paragraph::new(line_spans).style(title_style), title_area);
+    crate::ui::text::title(f, title_lines, title_area, title_style);
 
     // Render Meta Line
     match card {

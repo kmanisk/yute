@@ -1,5 +1,6 @@
 use crate::app::{App, WatchPane};
 use crate::backend::models::{Card, CommentMediaKind};
+use crate::ui::text::DisplayWidth;
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -7,7 +8,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
-use unicode_width::UnicodeWidthStr;
 
 fn section(f: &mut Frame, app: &App, area: Rect, title: &str, active: bool) -> Rect {
     if area.is_empty() {

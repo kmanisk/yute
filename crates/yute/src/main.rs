@@ -53,6 +53,8 @@ struct Cli {
 enum Commands {
     /// Diagnose connectivity, session, tools and terminal without displaying secrets.
     Doctor,
+    /// Measure terminal text widths and font coverage without exposing input.
+    TextProbe,
     /// Interactive YouTube device-code login (enter code at google.com/device or youtube.com/activate)
     Login,
     /// Spike: Fetch and dump raw TVHTML5 JSON for browse/home, next, and search
@@ -83,6 +85,10 @@ async fn run() -> anyhow::Result<()> {
 
     if let Some(Commands::Doctor) = cli.command {
         return run_doctor().await;
+    }
+
+    if let Some(Commands::TextProbe) = cli.command {
+        return run_text_probe().await;
     }
 
     if let Some(Commands::SetupMpv) = cli.command {
@@ -239,7 +245,10 @@ async fn run() -> anyhow::Result<()> {
                     app.thumbs.invalidate_placements();
                     yute::terminal::reset_frame(&mut terminal)?;
                 }
-                terminal.draw(|f| ui::draw(f, &mut app))?;
+                terminal.draw(|f| {
+                    ui::draw(f, &mut app);
+                    yute::ui::text::position_risky(f.buffer_mut());
+                })?;
                 Ok(())
             })??;
             graphics_layout = next_layout;
@@ -254,6 +263,11 @@ async fn run() -> anyhow::Result<()> {
             if first_frame {
                 yute_core::trace::since_start("first_frame");
                 first_frame = false;
+                let text_tx = tx_event.clone();
+                tokio::spawn(async move {
+                    let report = yute::text_probe::run(true).await;
+                    let _ = text_tx.send(AppEvent::TextProbed(report)).await;
+                });
                 yute::terminal::query();
             }
             if first_home && app.screen == Screen::Home && !app.items.is_empty() {
@@ -833,6 +847,14 @@ async fn handle_key_event(
 
     if action == Action::ItemActions {
         open_item_menu(app);
+        return;
+    }
+    if key.code == KeyCode::Char('T') && app.focus == Focus::Content && app.screen != Screen::Watch
+    {
+        if let Some(card) = app.selected_card() {
+            yute::ui::text::toggle_selected(card.title());
+        }
+        app.status_text = "Selected title: original/transliterated toggle".into();
         return;
     }
     if action == Action::Quit {
@@ -2687,6 +2709,13 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             app.thumbs.set_picker(picker);
             if app.config.general.theme == "auto" && old.light != report.light {
                 yute::live_config::reload(tx, app.config.clone(), Some("auto".into()), false);
+            }
+        }
+        AppEvent::TextProbed(report) => {
+            report.install();
+            if !report.failed().is_empty() {
+                app.status_text =
+                    format!("Text fallback: {} · T original", report.failed().join(", "));
             }
         }
         AppEvent::ConfigReloaded(result) => match *result {
@@ -5177,43 +5206,35 @@ fn edit_input(app: &mut App, key: crossterm::event::KeyEvent) -> bool {
             *cursor = text.len()
         }
         KeyCode::Left => {
-            *cursor =
-                unicode_segmentation::UnicodeSegmentation::grapheme_indices(text.as_str(), true)
-                    .map(|(i, _)| i)
-                    .take_while(|i| *i < *cursor)
-                    .last()
-                    .unwrap_or(0)
-        }
-        KeyCode::Right => {
-            *cursor =
-                unicode_segmentation::UnicodeSegmentation::grapheme_indices(text.as_str(), true)
-                    .map(|(i, _)| i)
-                    .find(|i| *i > *cursor)
-                    .unwrap_or(text.len())
-        }
-        KeyCode::Backspace => {
-            if *cursor > 0 {
-                let start = unicode_segmentation::UnicodeSegmentation::grapheme_indices(
-                    text.as_str(),
-                    true,
-                )
+            *cursor = yute::ui::text::grapheme_indices(text.as_str())
                 .map(|(i, _)| i)
                 .take_while(|i| *i < *cursor)
                 .last()
-                .unwrap_or(0);
+                .unwrap_or(0)
+        }
+        KeyCode::Right => {
+            *cursor = yute::ui::text::grapheme_indices(text.as_str())
+                .map(|(i, _)| i)
+                .find(|i| *i > *cursor)
+                .unwrap_or(text.len())
+        }
+        KeyCode::Backspace => {
+            if *cursor > 0 {
+                let start = yute::ui::text::grapheme_indices(text.as_str())
+                    .map(|(i, _)| i)
+                    .take_while(|i| *i < *cursor)
+                    .last()
+                    .unwrap_or(0);
                 text.drain(start..*cursor);
                 *cursor = start;
             }
         }
         KeyCode::Delete => {
             if *cursor < text.len() {
-                let end = unicode_segmentation::UnicodeSegmentation::grapheme_indices(
-                    text.as_str(),
-                    true,
-                )
-                .map(|(i, _)| i)
-                .find(|i| *i > *cursor)
-                .unwrap_or(text.len());
+                let end = yute::ui::text::grapheme_indices(text.as_str())
+                    .map(|(i, _)| i)
+                    .find(|i| *i > *cursor)
+                    .unwrap_or(text.len());
                 text.drain(*cursor..end);
             }
         }
@@ -5272,10 +5293,32 @@ fn feed_cache_key(app: &App, key: &str) -> String {
     )
 }
 
+async fn run_text_probe() -> anyhow::Result<()> {
+    use std::io::IsTerminal;
+    let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    let (tx, _rx) = channel(32);
+    let _keys = if tty {
+        crossterm::terminal::enable_raw_mode()?;
+        Some(yute::terminal_input::start(tx)?)
+    } else {
+        None
+    };
+    let p = yute::text_probe::run(false).await;
+    yute::text_probe::restore();
+    if tty {
+        crossterm::terminal::disable_raw_mode()?;
+    }
+    println!("{}", serde_json::to_string_pretty(&p)?);
+    for coverage in yute::text_probe::font_coverage().await {
+        println!("{coverage}");
+    }
+    Ok(())
+}
 async fn run_doctor() -> anyhow::Result<()> {
     use yute_core::doctor::{display_text, Status};
     let config = Config::load_checked()?;
     use std::io::IsTerminal;
+    let mut text_probe = None;
     if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
         crossterm::terminal::enable_raw_mode()?;
         let (tx, mut rx) = channel(16);
@@ -5287,8 +5330,18 @@ async fn run_doctor() -> anyhow::Result<()> {
         {
             yute::terminal::remember_report(report);
         }
+        text_probe = Some(yute::text_probe::run(false).await);
         yute::terminal::stop_notifications();
         crossterm::terminal::disable_raw_mode()?;
+    }
+    println!(
+        "Text: {}",
+        text_probe
+            .map(|p| p.summary())
+            .unwrap_or_else(|| "CPR unavailable (not a terminal)".into())
+    );
+    for coverage in yute::text_probe::font_coverage().await {
+        println!("{coverage}");
     }
     let theme = yute::theme::Theme::resolve(&config, yute::terminal::background_light())?;
     println!(

@@ -1,6 +1,6 @@
 use crate::app::{App, Screen};
+use crate::ui::text::DisplayWidth;
 use ratatui::{layout::Rect, style::Modifier, widgets::Paragraph, Frame};
-use unicode_width::UnicodeWidthStr;
 
 pub fn route_name(app: &App) -> String {
     match app.screen {

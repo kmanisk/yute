@@ -18,10 +18,10 @@ pub mod thumbnail;
 pub mod watch;
 
 use crate::app::{App, Focus, Screen, ViewMode};
+use crate::ui::text::DisplayWidth;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
 
 pub mod miniplayer;
 
@@ -157,6 +157,7 @@ pub fn prepare_viewport(app: &mut App, size: Rect) {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    text::begin_frame();
     let size = f.area();
     f.render_widget(
         ratatui::widgets::Block::default().style(app.theme.style("text")),

@@ -154,6 +154,27 @@ impl Decoder {
                                 .unwrap_or(1)
                         })
                         .collect::<Vec<_>>();
+                    if final_byte == b'R' && nums.len() == 2 && !args.starts_with('?') {
+                        crate::text_probe::reply(crate::text_probe::Reply::Cursor(
+                            nums[0].min(u16::MAX as u32) as u16,
+                            nums[1].min(u16::MAX as u32) as u16,
+                        ));
+                    }
+                    if final_byte == b'y' && args.starts_with("?2027;") && args.ends_with('$') {
+                        if let Some(m) = args
+                            .trim_end_matches('$')
+                            .split(';')
+                            .nth(1)
+                            .and_then(|s| s.parse::<u8>().ok())
+                        {
+                            crate::text_probe::reply(crate::text_probe::Reply::Mode(m));
+                        }
+                    }
+                    if final_byte == b'c' && args.starts_with('>') {
+                        crate::text_probe::reply(crate::text_probe::Reply::Version(
+                            args.to_string(),
+                        ));
+                    }
                     let modifier = mods(*nums.get(1).unwrap_or(&1));
                     let mut code = match final_byte {
                         b'A' => Some(KeyCode::Up),

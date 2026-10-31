@@ -1,6 +1,6 @@
+use crate::ui::text::DisplayWidth;
 use crate::{app::App, backend::models::Card};
 use ratatui::{layout::Rect, widgets::Paragraph, Frame};
-use unicode_width::UnicodeWidthStr;
 pub fn render(f: &mut Frame, app: &App, area: Rect) {
     if area.is_empty() {
         return;

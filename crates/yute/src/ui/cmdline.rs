@@ -1,3 +1,4 @@
+use crate::ui::text::DisplayWidth;
 use crate::{
     app::{App, Focus},
     commands,
@@ -9,7 +10,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
-use unicode_width::UnicodeWidthStr;
 
 pub fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let (mode, prefix, text) = if app.focus == Focus::CommentInput {
@@ -40,7 +40,7 @@ pub fn render_input(f: &mut Frame, app: &App, area: Rect) {
         area.height,
     );
     let requested = app.input_cursor.unwrap_or(text.len()).min(text.len());
-    let boundary = unicode_segmentation::UnicodeSegmentation::grapheme_indices(text, true)
+    let boundary = super::text::grapheme_indices(text)
         .map(|(offset, _)| offset)
         .chain(std::iter::once(text.len()))
         .take_while(|offset| *offset <= requested)
