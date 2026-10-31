@@ -14,6 +14,7 @@ struct CoverKey {
     url: String,
     size: Size,
     generation: u64,
+    dimmed: bool,
 }
 use yute_core::media::cache::DiskCache;
 use yute_core::media::thumbs::ThumbnailLoader;
@@ -130,13 +131,14 @@ impl ThumbnailManager {
     fn encoded_path(&self, key: &CoverKey) -> std::path::PathBuf {
         let font = self.picker.font_size();
         let descriptor = format!(
-            "encoded-v2:{:?}:{}:{}:{}:{}:{}:{}",
+            "encoded-v3:{:?}:{}:{}:{}:{}:{}:{}:{}",
             self.picker.protocol_type(),
             font.width,
             font.height,
             key.size.width,
             key.size.height,
             self.picker.tmux_detected(),
+            key.dimmed,
             key.url
         );
         self.loader.cache().encoded_dir().join(format!(
@@ -226,6 +228,35 @@ impl ThumbnailManager {
     /// Decode cache is shared with other views. Exact-size cover preparation and
     /// graphics encoding run only on a cache miss, away from the UI thread.
     pub fn get_cover_protocol(&mut self, url: &str, size: Size) -> Option<&EncodedCover> {
+        self.get_toned_cover_protocol(url, size, false)
+    }
+    pub fn get_card_cover_protocol(
+        &mut self,
+        url: &str,
+        size: Size,
+        dimmed: bool,
+    ) -> Option<&EncodedCover> {
+        // Keep the already displayed image while the alternate tone is encoded.
+        let _ = self.get_toned_cover_protocol(url, size, dimmed);
+        let key = CoverKey {
+            url: url.into(),
+            size,
+            generation: self.generation,
+            dimmed,
+        };
+        self.covers.get(&key).or_else(|| {
+            self.covers.get(&CoverKey {
+                dimmed: !dimmed,
+                ..key
+            })
+        })
+    }
+    fn get_toned_cover_protocol(
+        &mut self,
+        url: &str,
+        size: Size,
+        dimmed: bool,
+    ) -> Option<&EncodedCover> {
         if size.width == 0 || size.height == 0 {
             return None;
         }
@@ -234,6 +265,7 @@ impl ThumbnailManager {
             url: url.to_string(),
             size,
             generation: self.generation,
+            dimmed,
         };
         let font = self.picker.font_size();
         let encoded_path = self.encoded_path(&key);
@@ -310,6 +342,7 @@ impl ThumbnailManager {
                 u32::from(size.width) * u32::from(font.width.max(1)),
                 u32::from(size.height) * u32::from(font.height.max(1)),
             );
+            let image = card_tone(image, key.dimmed);
             let protocol = picker
                 .new_protocol(image, size, ratatui_image::Resize::Crop(None))
                 .ok()
@@ -334,6 +367,7 @@ impl ThumbnailManager {
             url: url.to_string(),
             size,
             generation: self.generation,
+            dimmed: false,
         };
         self.animated_wanted.insert(key.clone());
         if let Some(animation) = self.animated.get_mut(&key) {
@@ -552,6 +586,19 @@ fn decode_animation(
 
 pub use yute_core::media::thumbs::cache_key_for_url;
 
+fn card_tone(image: image::DynamicImage, dimmed: bool) -> image::DynamicImage {
+    if !dimmed {
+        return image;
+    }
+    let mut rgba = image.into_rgba8();
+    for pixel in rgba.pixels_mut() {
+        for component in &mut pixel.0[..3] {
+            *component = (u16::from(*component) * 3 / 4) as u8;
+        }
+    }
+    image::DynamicImage::ImageRgba8(rgba)
+}
+
 /// Center crop while retaining aspect ratio; no blur, stretch or synthetic canvas.
 fn cover_image(image: &image::DynamicImage, width: u32, height: u32) -> image::DynamicImage {
     yute_core::media::thumbs::resize(
@@ -565,6 +612,21 @@ fn cover_image(image: &image::DynamicImage, width: u32, height: u32) -> image::D
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inactive_card_tone_dims_rgb_without_changing_alpha_or_dimensions() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            4,
+            3,
+            image::Rgba([120, 200, 240, 99]),
+        ));
+        assert_eq!(
+            card_tone(image.clone(), false).to_rgba8().get_pixel(0, 0).0,
+            [120, 200, 240, 99]
+        );
+        let dimmed = card_tone(image, true).to_rgba8();
+        assert_eq!(dimmed.dimensions(), (4, 3));
+        assert_eq!(dimmed.get_pixel(0, 0).0, [90, 150, 180, 99]);
+    }
     #[test]
     fn cover_fills_exact_pixels_and_crops_without_stretching() {
         let mut image = image::RgbImage::from_pixel(100, 200, image::Rgb([255, 0, 0]));

@@ -30,15 +30,28 @@ pub fn route_name(app: &App) -> String {
 pub fn label(app: &App, width: u16) -> String {
     crate::ui::text::truncate_str(&format!(" {}", route_name(app)), width.max(8) as usize)
 }
-pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
-    let size = f.area();
-    let account = if app.auth.lock().unwrap().needs_login {
-        "! Sign in".to_string()
+fn account_label(app: &App) -> String {
+    if app.auth.lock().unwrap().needs_login {
+        "! Sign in".into()
     } else if app.is_authenticated() {
         app.account_name.clone()
     } else {
         "Anonymous".into()
-    };
+    }
+}
+pub fn account_area(app: &App, size: Rect) -> Rect {
+    let width = (account_label(app)
+        .width()
+        .saturating_add(7)
+        .min(u16::MAX as usize) as u16)
+        .min(size.width / 3)
+        .max(1)
+        .min(size.width.saturating_sub(2));
+    Rect::new(size.right().saturating_sub(width + 1), size.y, width, 1)
+}
+pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
+    let size = f.area();
+    let account = account_label(app);
     let avatar_url = app
         .accounts
         .get(app.active_account_index)
@@ -51,10 +64,18 @@ pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
         } else {
             0
         };
-    let width = (size.width / 4)
-        .min((account.width().min(u16::MAX as usize) as u16).saturating_add(avatar_w + 3))
-        .max(2 + avatar_w);
-    let account_area = Rect::new(size.right() - width, size.y, width, 1);
+    let account_area = account_area(app, size).inner(ratatui::layout::Margin::new(1, 0));
+    let route_area = Rect::new(
+        area.x,
+        area.y,
+        area.width.min(account_area.x.saturating_sub(area.x + 1)),
+        area.height,
+    );
+    f.render_widget(
+        Paragraph::new(label(app, route_area.width))
+            .style(app.theme.style("accent").add_modifier(Modifier::BOLD)),
+        route_area,
+    );
     let mut text_area = account_area;
     if let Some(url) = avatar_url {
         if avatar_w > 0 {
@@ -80,10 +101,5 @@ pub fn render_header(f: &mut Frame, app: &mut App, area: Rect) {
         .alignment(ratatui::layout::Alignment::Right)
         .style(app.theme.style("status")),
         text_area,
-    );
-    f.render_widget(
-        Paragraph::new(label(app, area.width.min(size.width.saturating_sub(width))))
-            .style(app.theme.style("accent").add_modifier(Modifier::BOLD)),
-        area,
     );
 }

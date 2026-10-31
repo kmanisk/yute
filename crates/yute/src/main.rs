@@ -5,10 +5,10 @@ use crossterm::event::{
     Event, KeyCode, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
-use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use crossterm::{execute, SynchronizedUpdate};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::stdout;
@@ -134,6 +134,7 @@ async fn run() -> anyhow::Result<()> {
         let _ = execute!(
             stdout(),
             crossterm::event::DisableFocusChange,
+            crossterm::terminal::EndSynchronizedUpdate,
             PopKeyboardEnhancementFlags,
             LeaveAlternateScreen,
             crossterm::cursor::Show
@@ -194,6 +195,10 @@ async fn run() -> anyhow::Result<()> {
     while !app.should_quit {
         if dirty {
             app.refresh_channel_items();
+            ui::prepare_viewport(
+                &mut app,
+                ratatui::layout::Rect::new(0, 0, terminal.size()?.width, terminal.size()?.height),
+            );
             app.overlay_area = ui::overlay_rect(
                 &app,
                 ratatui::layout::Rect::new(0, 0, terminal.size()?.width, terminal.size()?.height),
@@ -204,11 +209,11 @@ async fn run() -> anyhow::Result<()> {
                     ratatui_image::picker::ProtocolType::Kitty
                 );
             let next_layout = format!(
-                "{:?}:{:?}:{:?}:{}:{}:{:?}:{}:{}:{}:{:?}:{:?}",
+                "{:?}:{:?}:{:?}:{:?}:{}:{:?}:{}:{}:{}:{:?}:{:?}",
                 terminal.size()?,
                 app.screen,
                 app.focus,
-                app.selected_index / app.rendered_columns.max(1),
+                (app.rendered_columns, app.rendered_rows, app.feed_generation),
                 app.sidebar_expanded,
                 app.overlay_area,
                 app.confirming_quit,
@@ -222,12 +227,9 @@ async fn run() -> anyhow::Result<()> {
                 ),
                 (&app.config.general.graphics, yute::terminal::report())
             );
-            if next_layout != graphics_layout {
-                // Nothing exists to erase before the initial frame. Structural
-                // changes after that frame invalidate image placements and draw
-                // one blank diff frame before repainting, avoiding the blocking
-                // Crossterm full-screen clear while preventing stale overlay cells.
-                if !first_frame {
+            let repaint = next_layout != graphics_layout && !first_frame;
+            stdout().sync_update(|_| -> anyhow::Result<()> {
+                if repaint {
                     use std::io::Write;
                     if kitty_placements || next_kitty {
                         terminal
@@ -235,12 +237,13 @@ async fn run() -> anyhow::Result<()> {
                             .write_all(b"\x1b_Ga=d,d=a,q=2;\x1b\\")?;
                     }
                     app.thumbs.invalidate_placements();
-                    terminal.draw(|f| f.render_widget(ratatui::widgets::Clear, f.area()))?;
+                    yute::terminal::reset_frame(&mut terminal)?;
                 }
-                graphics_layout = next_layout;
-                kitty_placements = next_kitty;
-            }
-            terminal.draw(|f| ui::draw(f, &mut app))?;
+                terminal.draw(|f| ui::draw(f, &mut app))?;
+                Ok(())
+            })??;
+            graphics_layout = next_layout;
+            kitty_placements = next_kitty;
             if let Some(start) = app.trace_account_frame.take() {
                 yute_core::trace::duration(
                     "account_switch_visible",

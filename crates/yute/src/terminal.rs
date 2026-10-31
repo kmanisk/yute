@@ -1,6 +1,14 @@
 //! Query decisions and cached capabilities. terminal_input is the sole reader.
 use ratatui_image::picker::{Picker, ProtocolType};
 use std::{path::PathBuf, time::Duration};
+pub fn reset_frame<B: ratatui::backend::Backend>(
+    terminal: &mut ratatui::Terminal<B>,
+) -> Result<(), B::Error> {
+    terminal.backend_mut().clear()?;
+    terminal.current_buffer_mut().reset();
+    terminal.swap_buffers();
+    Ok(())
+}
 fn cache_path() -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hash = std::collections::hash_map::DefaultHasher::new();

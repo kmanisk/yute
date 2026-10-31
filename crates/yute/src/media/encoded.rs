@@ -34,9 +34,15 @@ impl EncodedCover {
                 first.set_symbol(&symbol);
             }
         }
+        for cell in &mut buffer.content {
+            if cell.symbol().contains('\x1b') {
+                let scoped = image_cell(cell.symbol());
+                cell.set_symbol(&scoped);
+            }
+        }
         Self {
             cached: Cached {
-                version: 1,
+                version: 2,
                 buffer,
                 transmit,
             },
@@ -50,7 +56,7 @@ impl EncodedCover {
         }
         let cached: Cached = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
         if cached.buffer.area.as_size() != size
-            || cached.version != 1
+            || cached.version != 2
             || cached.buffer.area.x != 0
             || cached.buffer.area.y != 0
             || cached.buffer.content.len() != cached.buffer.area.area() as usize
@@ -95,14 +101,42 @@ impl Widget for &EncodedCover {
         }
         if !self.cached.transmit.is_empty() && !self.transmitted.swap(true, Ordering::SeqCst) {
             let cell = &mut buffer[(area.x, area.y)];
-            let symbol = format!("{}{}", self.cached.transmit, cell.symbol());
+            let symbol = image_cell(&format!("{}{}", self.cached.transmit, cell.symbol()));
             cell.set_symbol(&symbol);
         }
     }
 }
+fn image_cell(payload: &str) -> String {
+    // Raster protocols can move the cursor and alter rendition. Ratatui's
+    // backend assumes every forced-width anchor advances exactly one cell.
+    format!("\x1b7{payload}\x1b8\x1b[1C")
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn raster_anchor_restores_cursor_and_rendition_before_next_text_cell() {
+        for kind in [
+            ratatui_image::picker::ProtocolType::Sixel,
+            ratatui_image::picker::ProtocolType::Iterm2,
+        ] {
+            let mut picker = ratatui_image::picker::Picker::halfblocks();
+            picker.set_protocol_type(kind);
+            let size = Size::new(8, 4);
+            let protocol = picker
+                .new_protocol(
+                    image::DynamicImage::new_rgb8(80, 80),
+                    size,
+                    ratatui_image::Resize::Crop(None),
+                )
+                .unwrap();
+            let cover = EncodedCover::new(&protocol, size);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 30, 20));
+            (&cover).render(Rect::new(10, 7, 8, 4), &mut buffer);
+            assert!(buffer[(10, 7)].symbol().starts_with("\x1b7"));
+            assert!(buffer[(10, 7)].symbol().ends_with("\x1b8\x1b[1C"));
+        }
+    }
     #[test]
     fn cropped_cells_stay_inside_the_viewport() {
         for kitty in [false, true] {

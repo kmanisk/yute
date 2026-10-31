@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-/// Content width includes the outer margins and one-cell gutters.
+/// Content width includes the scrollbar column and two-cell gutters.
 pub fn column_count(width: u16, config: &crate::config::GridConfig) -> usize {
     if config.columns > 0 {
         return config
@@ -16,6 +16,7 @@ pub fn column_count(width: u16, config: &crate::config::GridConfig) -> usize {
             .max(1) as usize;
     }
     let min_width = config.min_card_width.clamp(28, 40);
+    let width = width.saturating_sub(1); // Dedicated scrollbar column.
     (width.saturating_add(2) / min_width.saturating_add(2)).clamp(1, 8) as usize
 }
 
@@ -48,15 +49,15 @@ impl GridGeometry {
         if config.columns == 0 && area.height >= 20 {
             loop {
                 let gutters = 2 * columns.saturating_sub(1) as u16;
-                let width = area.width.saturating_sub(gutters) / columns as u16;
+                let width = area.width.saturating_sub(1 + gutters) / columns as u16;
                 let height = aspect_height_for(width).max(1).saturating_add(6);
                 if area.height >= height.saturating_mul(2).saturating_add(1) || columns >= 8 {
                     break;
                 }
                 let next = columns + 1;
                 let next_gutters = 2 * next.saturating_sub(1) as u16;
-                let next_width = area.width.saturating_sub(next_gutters) / next as u16;
-                if next_width < 24 {
+                let next_width = area.width.saturating_sub(1 + next_gutters) / next as u16;
+                if next_width < 20 {
                     break;
                 }
                 columns = next;
@@ -64,7 +65,7 @@ impl GridGeometry {
         }
 
         let gutters = 2 * columns.saturating_sub(1) as u16;
-        let usable = area.width.saturating_sub(gutters);
+        let usable = area.width.saturating_sub(1 + gutters);
         let card_width = (usable / columns as u16).max(1);
         let column_stride = card_width.saturating_add(2);
         let first_column_offset = 0;
@@ -104,13 +105,49 @@ impl GridGeometry {
 
 fn distributed_column_widths(width: u16, columns: usize) -> Vec<u16> {
     let gutters = 2 * columns.saturating_sub(1) as u16;
-    let usable = width.saturating_sub(gutters);
+    let usable = width.saturating_sub(1 + gutters);
     let base = usable / columns.max(1) as u16;
     let extra = usable % columns.max(1) as u16;
     let extra_start = columns.saturating_sub(extra as usize);
     (0..columns)
         .map(|index| base + u16::from(index >= extra_start))
         .collect()
+}
+
+pub fn selection_scroll(
+    selected: usize,
+    total: usize,
+    visible: usize,
+    mut scroll: usize,
+    scrolloff: usize,
+) -> usize {
+    let margin = scrolloff.min(visible.saturating_sub(1) / 2);
+    if selected < scroll.saturating_add(margin) {
+        scroll = selected.saturating_sub(margin);
+    } else if selected.saturating_add(margin) >= scroll + visible {
+        scroll = selected.saturating_add(margin + 1).saturating_sub(visible);
+    }
+    scroll.min(total.saturating_sub(visible))
+}
+
+pub fn prepare_viewport(app: &mut App, area: Rect) -> GridGeometry {
+    let geometry = GridGeometry::new(area, &app.config.grid, app.cell_w_px, app.cell_h_px);
+    let total_items = app.filtered_items().len();
+    let num_cols = geometry.columns;
+    let visible_rows = geometry.visible_rows;
+    let total_rows = total_items.div_ceil(num_cols);
+    let selected = app.selected_index.min(total_items.saturating_sub(1));
+    let selected_row = selected / num_cols;
+    app.rendered_columns = num_cols;
+    app.rendered_rows = visible_rows;
+    app.scroll_row = selection_scroll(
+        selected_row,
+        total_rows,
+        visible_rows,
+        app.scroll_row,
+        usize::from(app.config.ui.scrolloff),
+    );
+    geometry
 }
 
 pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
@@ -150,7 +187,7 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    let geometry = GridGeometry::new(area, &app.config.grid, app.cell_w_px, app.cell_h_px);
+    let geometry = prepare_viewport(app, area);
     if geometry.card_height > area.height {
         super::list::render_list(f, app, area);
         return;
@@ -166,23 +203,6 @@ pub fn render_grid(f: &mut Frame, app: &mut App, area: Rect) {
     let total_rows = total_items.div_ceil(num_cols);
 
     let selected = app.selected_index.min(total_items.saturating_sub(1));
-    let selected_row = selected / num_cols;
-
-    // Vim-style scrolloff: preserve context above/below the selected row when
-    // the viewport is tall enough. `zz` can still center explicitly.
-    if visible_rows > 1 {
-        let margin = usize::from(app.config.ui.scrolloff).min(visible_rows.saturating_sub(1) / 2);
-        if selected_row < app.scroll_row.saturating_add(margin) {
-            app.scroll_row = selected_row.saturating_sub(margin);
-        } else if selected_row.saturating_add(margin) >= app.scroll_row + visible_rows {
-            app.scroll_row = selected_row
-                .saturating_add(margin + 1)
-                .saturating_sub(visible_rows);
-        }
-    } else {
-        app.scroll_row = selected_row;
-    }
-    app.scroll_row = app.scroll_row.min(total_rows.saturating_sub(visible_rows));
 
     let start_row = app.scroll_row;
     let start_idx = start_row * num_cols;
@@ -363,13 +383,13 @@ fn render_grid_card(
     let card_block = if is_selected {
         Block::default()
             .borders(Borders::ALL)
-            .border_type(ratatui::widgets::BorderType::Plain)
+            .border_type(ratatui::widgets::BorderType::Double)
             .border_style(app.theme.style("accent").add_modifier(Modifier::BOLD))
             .style(Style::default().bg(app.theme.bg))
     } else {
         Block::default()
             .borders(Borders::ALL)
-            .border_style(app.theme.style("border"))
+            .border_style(app.theme.style("border").add_modifier(Modifier::DIM))
             .style(Style::default().bg(app.theme.bg))
     };
     f.render_widget(card_block, area);
@@ -454,9 +474,9 @@ fn render_grid_card(
         render_monogram(f, app, card, thumb_area);
     } else if !thumb_url.is_empty() && crate::terminal::images_enabled(&app.config.general.graphics)
     {
-        if let Some(proto) = app
-            .thumbs
-            .get_cover_protocol(&thumb_url, thumb_area.as_size())
+        if let Some(proto) =
+            app.thumbs
+                .get_card_cover_protocol(&thumb_url, thumb_area.as_size(), !is_selected)
         {
             f.render_widget(proto, thumb_area);
         } else if matches!(card, Card::Channel(_)) {
@@ -488,18 +508,10 @@ fn render_grid_card(
 
     if let Card::Video(video) = card {
         if let Some(percent) = video.progress_pct.filter(|p| *p > 0) {
-            let filled = usize::from(thumb_area.width) * usize::from(percent.min(100)) / 100;
-            let line = Line::from(vec![
-                Span::styled("█".repeat(filled), app.theme.style("progress")),
-                Span::styled(
-                    "░".repeat(thumb_area.width as usize - filled),
-                    app.theme.style("skeleton"),
-                ),
-            ]);
-            super::thumbnail::badge(
-                f,
-                Paragraph::new(line),
-                Rect::new(thumb_area.x, thumb_area.bottom() - 1, thumb_area.width, 1),
+            let filled = (usize::from(inner.width) * usize::from(percent.min(100))).div_ceil(100);
+            f.render_widget(
+                Paragraph::new("━".repeat(filled)).style(app.theme.style("progress")),
+                Rect::new(inner.x, area.bottom() - 1, filled as u16, 1),
             );
         }
     }
@@ -642,6 +654,16 @@ fn render_grid_card(
         }
     }
 
+    let text_style = if is_selected {
+        app.theme.style("text")
+    } else {
+        app.theme.style("text_dim").add_modifier(Modifier::DIM)
+    };
+    let title_style = if is_selected {
+        app.theme.style("selection").add_modifier(Modifier::BOLD)
+    } else {
+        text_style
+    };
     let sec_style = app.theme.style("text_dim");
 
     // Render Title (max 2 lines, word-boundary wrapped with ellipsis)
@@ -651,15 +673,9 @@ fn render_grid_card(
 
     let mut line_spans = Vec::new();
     for tl in title_lines {
-        line_spans.push(Line::from(Span::styled(
-            tl,
-            app.theme.style("text").add_modifier(Modifier::BOLD),
-        )));
+        line_spans.push(Line::from(Span::styled(tl, title_style)));
     }
-    f.render_widget(
-        Paragraph::new(line_spans).style(app.theme.style("text")),
-        title_area,
-    );
+    f.render_widget(Paragraph::new(line_spans).style(title_style), title_area);
 
     // Render Meta Line
     match card {
@@ -671,7 +687,7 @@ fn render_grid_card(
             };
             f.render_widget(
                 Paragraph::new(truncate_str(&channel, channel_area.width as usize))
-                    .style(app.theme.style("text")),
+                    .style(text_style),
                 channel_area,
             );
             let meta = format_meta_line(

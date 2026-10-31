@@ -7,6 +7,22 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
+pub fn prepare_viewport(app: &mut App, area: Rect) {
+    let thumb_h = (24.0 * app.cell_w_px / app.cell_h_px.max(1.0) * 9.0 / 16.0).round() as u16;
+    let rows = ((area.height + 1) / (thumb_h.clamp(3, 6) + 3)).max(1) as usize;
+    let count = app.filtered_items().len();
+    let selected = app.selected_index.min(count.saturating_sub(1));
+    app.rendered_columns = 1;
+    app.rendered_rows = rows;
+    app.scroll_row = super::grid::selection_scroll(
+        selected,
+        count,
+        rows,
+        app.scroll_row,
+        usize::from(app.config.ui.scrolloff),
+    );
+}
+
 pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
     if area.height == 0 || area.width == 0 {
         return;
@@ -33,20 +49,8 @@ pub fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
     let gutter_y = 1u16;
 
     let visible_rows = ((area.height + gutter_y) / (row_h + gutter_y)).max(1) as usize;
-    app.rendered_columns = 1;
-    app.rendered_rows = visible_rows;
+    prepare_viewport(app, area);
     let selected = app.selected_index.min(total_items.saturating_sub(1));
-
-    let margin = usize::from(app.config.ui.scrolloff).min(visible_rows.saturating_sub(1) / 2);
-    if selected < app.scroll_row.saturating_add(margin) {
-        app.scroll_row = selected.saturating_sub(margin);
-    }
-    if selected.saturating_add(margin) >= app.scroll_row + visible_rows {
-        app.scroll_row = selected
-            .saturating_add(margin + 1)
-            .saturating_sub(visible_rows);
-    }
-    app.scroll_row = app.scroll_row.min(total_items.saturating_sub(visible_rows));
 
     let start_idx = app.scroll_row;
     let cards_to_render: Vec<Card> = app
@@ -183,9 +187,9 @@ fn render_list_row(
             .overlay_area
             .is_some_and(|area| area.intersects(thumb_area))
     {
-        if let Some(proto) = app
-            .thumbs
-            .get_cover_protocol(&thumb_url, thumb_area.as_size())
+        if let Some(proto) =
+            app.thumbs
+                .get_card_cover_protocol(&thumb_url, thumb_area.as_size(), !is_selected)
         {
             f.render_widget(proto, thumb_area);
         } else {
@@ -299,7 +303,11 @@ fn render_list_row(
     for tl in title_lines {
         details_lines.push(Line::from(Span::styled(
             tl,
-            app.theme.style("text").add_modifier(Modifier::BOLD),
+            if is_selected {
+                app.theme.style("selection").add_modifier(Modifier::BOLD)
+            } else {
+                app.theme.style("text_dim").add_modifier(Modifier::DIM)
+            },
         )));
     }
 

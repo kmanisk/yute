@@ -18,9 +18,7 @@ pub fn badge(f: &mut Frame, widget: Paragraph<'_>, area: Rect) {
         let symbol = cell.symbol();
         // A tiny badge can cover the image's first cell, which owns the protocol
         // payload. Retain its escape sequences instead of deleting the image.
-        symbol
-            .rfind("\x1b\\")
-            .map(|end| symbol[..end + 2].to_string())
+        symbol.contains('\x1b').then(|| symbol.to_string())
     });
     f.render_widget(widget, area);
     for y in area.top()..area.bottom() {

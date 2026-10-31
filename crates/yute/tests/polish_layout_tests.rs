@@ -90,9 +90,11 @@ fn shell_geometry_and_rendering_matrix() {
             assert_eq!(shell.sidebar.y, 1, "{screen:?} {w}x{h}");
             assert_eq!(shell.tabs.y, shell.header.y);
             assert_eq!(shell.pane.y, 1);
-            assert_eq!(shell.content.x, shell.pane.x);
+            assert_eq!(shell.content.x, shell.pane.x + 1);
             assert_eq!(shell.title.x, shell.content.x);
-            assert!(shell.tabs.x >= shell.sidebar.right());
+            if !shell.tabs.is_empty() {
+                assert!(shell.tabs.x >= shell.header.right());
+            }
             assert!(shell.player.is_empty());
             let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
             terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
@@ -134,7 +136,7 @@ fn shell_geometry_and_rendering_matrix() {
     }
 }
 #[test]
-fn selected_grid_card_uses_border_only_without_fill_tint() {
+fn selected_grid_card_highlights_title_without_tinting_artwork() {
     let mut app = app();
     app.theme = yute::theme::Theme::youtube_dark();
     let shell = ShellLayout::new(Rect::new(0, 0, 135, 31), &app);
@@ -151,17 +153,14 @@ fn selected_grid_card_uses_border_only_without_fill_tint() {
     let selected_y = shell.content.y;
     assert_eq!(buffer[(selected_x, selected_y)].fg, app.theme.accent);
     assert_eq!(buffer[(selected_x + 1, selected_y + 1)].bg, app.theme.bg);
-    if app.theme.surface_hover != app.theme.bg {
-        for y in shell.content.y..shell.content.bottom() {
-            for x in shell.content.x..shell.content.right() {
-                assert_ne!(
-                    buffer[(x, y)].bg,
-                    app.theme.surface_hover,
-                    "selection fill leaked into grid at {x},{y}"
-                );
-            }
-        }
-    }
+    let title_y = selected_y + 1 + g.thumbnail_height;
+    assert!(buffer[(selected_x + 1, title_y)]
+        .modifier
+        .contains(ratatui::style::Modifier::REVERSED));
+    let next_x = selected_x + g.column_stride;
+    assert!(buffer[(next_x + 1, title_y)]
+        .modifier
+        .contains(ratatui::style::Modifier::DIM));
 }
 #[test]
 fn resize_preserves_selected_entity_and_complete_rows() {
@@ -295,6 +294,100 @@ fn thumbnails_keep_physical_sixteen_by_nine_dimensions() {
         }
     }
 }
+#[test]
+fn sidebar_density_and_selection_match_recorded_window_sizes() {
+    let mut app = app();
+    app.config.grid.min_card_width = 34;
+    app.config.general.icons = "nerd".into();
+    app.cell_w_px = 14.;
+    app.cell_h_px = 35.;
+    app.selected_index = 27;
+    for (w, h) in [(123, 31), (137, 34), (113, 28)] {
+        for sidebar in [true, false] {
+            app.sidebar_expanded = sidebar;
+            let size = Rect::new(0, 0, w, h);
+            ui::prepare_viewport(&mut app, size);
+            let scroll = app.scroll_row;
+            let columns = app.rendered_columns;
+            assert!(app.rendered_rows >= 2, "{w}x{h}, sidebar={sidebar}");
+            let selected_id = app.selected_card().unwrap().id().to_owned();
+            let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
+            terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+            assert_eq!(app.scroll_row, scroll);
+            assert_eq!(app.rendered_columns, columns);
+            assert_eq!(app.selected_card().unwrap().id(), selected_id);
+            let shell = ShellLayout::new(size, &app);
+            let g = GridGeometry::new(shell.content, &app.config.grid, 14., 35.);
+            let column = app.selected_index % g.columns;
+            let usable = shell
+                .content
+                .width
+                .saturating_sub(1 + 2 * (g.columns - 1) as u16);
+            let extra_start = g.columns - usize::from(usable % g.columns as u16);
+            let x = shell.content.x
+                + column as u16 * g.column_stride
+                + column.saturating_sub(extra_start) as u16;
+            let y =
+                shell.content.y + (app.selected_index / g.columns - scroll) as u16 * g.row_stride;
+            assert_eq!(terminal.backend().buffer()[(x, y)].symbol(), "╔");
+            assert!(!(0..w)
+                .map(|x| terminal.backend().buffer()[(x, shell.pane.y)].symbol())
+                .collect::<String>()
+                .contains("Content"));
+        }
+    }
+}
+#[test]
+fn watch_progress_uses_thin_border_without_covering_thumbnail_cells() {
+    let mut app = app();
+    let size = Rect::new(0, 0, 123, 31);
+    let shell = ShellLayout::new(size, &app);
+    let g = GridGeometry::new(
+        shell.content,
+        &app.config.grid,
+        app.cell_w_px,
+        app.cell_h_px,
+    );
+    let mut before = Terminal::new(TestBackend::new(123, 31)).unwrap();
+    before.draw(|f| ui::draw(f, &mut app)).unwrap();
+    if let Card::Video(video) = &mut app.items[0] {
+        video.progress_pct = Some(65);
+    }
+    let mut after = Terminal::new(TestBackend::new(123, 31)).unwrap();
+    after.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let x = shell.content.x + 1;
+    let y = shell.content.y + 1;
+    for row in y..y + g.thumbnail_height {
+        for col in x..x + g.thumbnail_width {
+            assert_eq!(
+                before.backend().buffer()[(col, row)],
+                after.backend().buffer()[(col, row)]
+            );
+        }
+    }
+    let border = (x..x + g.thumbnail_width)
+        .map(|col| after.backend().buffer()[(col, shell.content.y + g.card_height - 1)].symbol())
+        .collect::<String>();
+    assert!(border.contains('━'));
+    assert!(!border.contains('█') && !border.contains('░'));
+}
+#[test]
+fn account_header_has_padding_and_reset_does_not_submit_a_blank_frame() {
+    let mut app = app();
+    app.account_name = "Fixture account".into();
+    app.auth.lock().unwrap().access_token = Some("fixture".into());
+    let size = Rect::new(0, 0, 123, 31);
+    let account = ui::header::account_area(&app, size);
+    assert!(account.right() < size.right());
+    let mut terminal = Terminal::new(TestBackend::new(123, 31)).unwrap();
+    let first = terminal.draw(|f| ui::draw(f, &mut app)).unwrap().count;
+    let original = terminal.backend().buffer().clone();
+    yute::terminal::reset_frame(&mut terminal).unwrap();
+    let next = terminal.draw(|f| ui::draw(f, &mut app)).unwrap().count;
+    assert_eq!(next, first + 1);
+    assert_eq!(terminal.backend().buffer(), &original);
+    assert_eq!(terminal.backend().buffer()[(122, 0)].symbol(), " ");
+}
 
 #[test]
 fn home_and_search_share_framed_two_row_layout_at_screenshot_geometry() {
@@ -314,12 +407,12 @@ fn home_and_search_share_framed_two_row_layout_at_screenshot_geometry() {
         let buffer = terminal.backend().buffer();
         let x = shell.content.x + g.first_column_offset;
         let y = shell.content.y;
-        assert_eq!(buffer[(x, y)].symbol(), "┌");
-        assert_eq!(buffer[(x + g.card_width - 1, y)].symbol(), "┐");
-        assert_eq!(buffer[(x, y + g.card_height - 1)].symbol(), "└");
+        assert_eq!(buffer[(x, y)].symbol(), "╔");
+        assert_eq!(buffer[(x + g.card_width - 1, y)].symbol(), "╗");
+        assert_eq!(buffer[(x, y + g.card_height - 1)].symbol(), "╚");
         assert_eq!(
             buffer[(x + g.card_width - 1, y + g.card_height - 1)].symbol(),
-            "┘"
+            "╝"
         );
         assert!(
             g.complete_rows >= 2,

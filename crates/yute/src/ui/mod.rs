@@ -83,21 +83,19 @@ impl ShellLayout {
                 | Screen::Help
                 | Screen::ChannelView
         );
-        let account_w = (app.account_name.width() as u16 + 3)
-            .min(area.width / 4)
-            .max(2);
+        let account_x = header::account_area(app, area).x.saturating_sub(1);
         let label_width = header::label(app, area.width / 3).width() as u16;
-        let tabs_x = area.x + sb.max(label_width + 2).min(area.width);
+        let tabs_x = area.x + (label_width + 2).min(area.width);
         let tabs = Rect::new(
             tabs_x,
             area.y,
-            area.right().saturating_sub(tabs_x + account_w),
+            account_x.saturating_sub(tabs_x),
             u16::from(has_tabs),
         );
         let pane = Rect::new(content_x, body.y, width, body.height);
-        // Vertical breathing room only. Horizontal centering already belongs to
-        // individual views; a shell margin caused visible dead bands at both sides.
-        let content = pane.inner(ratatui::layout::Margin::new(0, 1));
+        // Keep card borders inside the content frame; the grid reserves its own
+        // scrollbar column so neither can overwrite a card edge.
+        let content = pane.inner(ratatui::layout::Margin::new(1, 1));
         let title = Rect::new(content.x, content.y, content.width, 0);
         Self {
             header: Rect::new(
@@ -122,6 +120,42 @@ impl ShellLayout {
     }
 }
 
+/// Set the visible window before deciding which graphics placements to erase.
+pub fn prepare_viewport(app: &mut App, size: Rect) {
+    if matches!(
+        app.screen,
+        Screen::Watch | Screen::Settings | Screen::Accounts | Screen::Help
+    ) {
+        return;
+    }
+    let mut area = ShellLayout::new(size, app).content;
+    let header = match app.screen {
+        Screen::PlaylistView => 1,
+        Screen::ChannelView => match &app.detail_route {
+            Some(crate::app::DetailRoute::Channel(route)) => {
+                if route.tabs.is_empty() {
+                    1
+                } else {
+                    2
+                }
+            }
+            _ => 0,
+        },
+        _ => 0,
+    };
+    area.y += header.min(area.height);
+    area.height = area.height.saturating_sub(header);
+    let geometry = grid::GridGeometry::new(area, &app.config.grid, app.cell_w_px, app.cell_h_px);
+    if app.current_view_mode() == ViewMode::List
+        || area.width < 72
+        || geometry.card_height > area.height
+    {
+        list::prepare_viewport(app, area);
+    } else {
+        grid::prepare_viewport(app, area);
+    }
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     let size = f.area();
     f.render_widget(
@@ -129,6 +163,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         size,
     );
     app.terminal_height = size.height;
+    prepare_viewport(app, size);
     app.thumbs.begin_frame();
     app.overlay_area = overlay_rect(app, size);
     if size.width < 30 || size.height < 10 {
@@ -149,7 +184,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .title(if matches!(app.screen, Screen::Watch) {
             " Video details "
         } else {
-            " Content "
+            ""
         })
         .title_style(Style::default().fg(if focused {
             app.theme.accent
@@ -179,11 +214,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             inner_content.height = inner_content.height.saturating_sub(1);
         }
     }
-    app.rendered_columns = if app.current_view_mode() == ViewMode::List || content_area.width < 72 {
-        1
-    } else {
-        grid::column_count(inner_content.width, &app.config.grid)
-    };
     // Render specific screen content inside Concord pane
     match app.screen {
         Screen::Home
