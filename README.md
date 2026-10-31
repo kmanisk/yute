@@ -258,14 +258,15 @@ For large seek/scrub jumps, Yute uses keyframe-oriented IPC seeks and watches MP
 stock OSC can create a seek storm when its draggable seekbar is scrubbed, and direct
 MPV transport can still wedge on an isolated DASH seek even with the safe seekbar.
 With **MPV seekbar** off (the default), Yute uses MPV's upstream `slimbottombar`.
-The playback network engine defaults to `auto`: it starts direct, then after a
-persistent network stall performs one fresh anonymous resolution and switches once
-to Yute's loopback finite-range transport at the requested seek target. Forced
-`mpv` stays direct; forced `proxy` starts on the finite-range transport. On the
-problem video with a 20-second cache, direct MPV stalled at the 20% seek, while
-forced proxy and the final Auto policy completed all ten measured seeks. See
-[`docs/playback-network.md`](docs/playback-network.md) for the sanitized measurements,
-state machine and `yute doctor --seek-test` harness.
+The playback network engine defaults to `auto`: normal finite YouTube VODs start
+on Yute's loopback finite-range transport immediately, while live/upcoming and
+Local media stay on direct MPV. This follows the same useful separation seen in
+SmartTube between buffer policy and network data source instead of trying to fix
+a slow source with more RAM. Forced `mpv` stays direct and forced `proxy` stays on
+finite ranges. On `g1qNCcxFWRo` with a 60-second target, direct MPV again stalled
+at 20%; its median reported cache speed was about 0.12 MB/s versus about 2.3 MB/s
+through the finite-range path. See [`docs/playback-network.md`](docs/playback-network.md)
+for the sanitized measurements, state machine and `yute doctor --seek-test` harness.
 
 ## Accounts
 
@@ -341,7 +342,7 @@ sidebar_expanded = false
 max_resolution = "1080p" # 480p | 720p | 1080p | 1440p | 2160p | best
 hwdec = "auto-safe"
 network_engine = "auto"  # auto | mpv | proxy
-stream_cache_seconds = 20
+stream_cache_seconds = 60  # choices include 90/120 for larger read-ahead
 use_user_mpv_config = false
 osd_bar = false
 autoplay = true

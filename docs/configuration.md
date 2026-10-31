@@ -22,7 +22,7 @@ quit = "" # normal q is intentionally unbound by default
 [playback]
 max_resolution = "1080p"
 network_engine = "auto" # auto, mpv, proxy
-stream_cache_seconds = 20
+stream_cache_seconds = 60 # 90/120 are available for more read-ahead
 ```
 
 Supported saved limits are 480p, 720p, 1080p, 1440p, 2160p and best. Automatic
@@ -39,12 +39,12 @@ fallback. `audio_language` and `subtitle_language` accept MPV language lists or
 `:play-select` and `:audio` select actual streams for one playback; an explicit
 format selection does not permanently enable audio-only mode.
 
-`network_engine = "auto"` starts with direct MPV and switches once to Yute's
-loopback finite-range transport after a persistent network stall. `mpv` forces
-direct transport and `proxy` starts on finite ranges. The proxy binds only to
-loopback, resolves anonymously with yt-dlp, never receives Yute OAuth/cookies and
-terminates with the playback session. See [playback-network.md](playback-network.md)
-for the state machine, seek harness and measured results.
+`network_engine = "auto"` starts ordinary finite YouTube VODs on Yute's
+loopback finite-range transport immediately. Live/upcoming and Local media stay
+on direct MPV. `mpv` forces direct transport and `proxy` forces finite ranges.
+The proxy binds only to loopback, resolves anonymously with yt-dlp, never receives
+Yute OAuth/cookies and terminates with the playback session. See
+[playback-network.md](playback-network.md) for the seek harness and measurements.
 
 ```toml
 [downloads]

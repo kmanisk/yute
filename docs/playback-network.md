@@ -1,6 +1,6 @@
 # Playback network and seek recovery
 
-Yute keeps playback in external MPV. The network policy exists to work around seek/buffering failures in fragmented YouTube streams without increasing the default cache to 60 seconds or introducing a permanent background service.
+Yute keeps playback in external MPV. The network policy works around seek/buffering failures in fragmented YouTube streams without a permanent background service. Fresh installs now use a 60-second target; 90/120-second tiers are available for users who want more read-ahead, but transport throughput is treated separately from cache size.
 
 ## What was measured
 
@@ -15,7 +15,7 @@ The later network audit also reproduced a direct-transport stall at 20% with the
 ```toml
 [playback]
 network_engine = "auto" # auto | mpv | proxy
-stream_cache_seconds = 20
+stream_cache_seconds = 60
 ```
 
 The same setting is available through:
@@ -52,7 +52,7 @@ The proxy uses the project's existing Tokio, reqwest/rustls, futures, getrandom,
 
 ### `auto`
 
-Auto starts on direct MPV. If a network stream remains in a seek/cache stall for about four seconds, Yute performs one fresh anonymous media resolution as part of switching the session to the finite-range proxy at the requested seek target. It does not loop between engines. Healthy playback for two seconds resets the bounded recovery guard for a later independent stall.
+Auto prefers the finite-range transport immediately for ordinary YouTube VODs. Live/upcoming videos and local files stay on direct MPV because the proxy requires finite byte ranges. Direct MPV remains available with `network_engine = "mpv"`; forced `proxy` remains available for debugging. The existing recovery guard is still bounded and does not loop between engines.
 
 This mirrors SmartTube's idea of selectable/fallback player network stacks, not its implementation. The inspected SmartTube reference exposes Default, Cronet and OkHttp sources and can rotate sources after network failures. Yute independently implements only the behavior needed for its MPV architecture.
 
@@ -95,9 +95,11 @@ With direct MPV and a 20-second cache, the first round's 20% seek exceeded the d
 
 With forced proxy and the same 20-second cache, all ten seeks completed. First healthy samples were about 0.25-1.76 seconds in round one and about 0.25 seconds in round two.
 
-With the final Auto policy, all ten seeks completed. The seek that triggered the first engine escalation resumed after about 18.1 seconds and was confirmed advancing after about 20.1 seconds; after the switch, later seeks were typically about 0.25-2.8 seconds to first healthy playback.
+A later 60-second-cache comparison reproduced the same direct failure: the 20% seek exceeded the 20-second threshold. Across the sampled direct run, median reported `cache-speed` was about **0.12 MB/s**. The existing 1 MiB finite-range proxy completed start/60%/20%/90%/10% with median `cache-speed` around **2.3 MB/s**.
 
-The first Auto escalation is still slower than an already-running proxy because it includes fresh yt-dlp resolution and proxy startup. It is intentionally bounded and is preferable to the previous indefinite stall. Future optimization should target that first escalation latency rather than increasing global cache size.
+Auto now starts ordinary finite VODs on that proxy immediately instead of spending four seconds on the known-slower direct path first. In the final one-round Auto test at a 60-second target, all five positions completed; first healthy progress was roughly 0.5–0.75 seconds after seeks and confirmation of +2 seconds of playback was roughly 2.5–2.8 seconds. Live/upcoming and Local media remain direct.
+
+An experimental 2 MiB range size and wider prefetch window did not improve measured throughput and slightly worsened first-progress latency, so Yute keeps the simpler 1 MiB finite-range implementation.
 
 ## Local test server
 

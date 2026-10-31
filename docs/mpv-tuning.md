@@ -61,7 +61,7 @@ ytdl-raw-options-append=buffer-size=16k
 
 The Settings slider now drives dedicated MPV launch arguments and active IPC
 properties: cache-secs, demuxer-readahead-secs and demuxer-max-bytes. Presets are
-5/10/20/40/60 seconds with 32/64/128/192/256 MiB packet budgets; back-cache is bounded
+10/20/30/45/60/90/120 seconds with 64/128/192/192/256/384/512 MiB packet budgets; back-cache is bounded
 at 32 MiB. These replace the fixed startup values in the older tuning example
 above for dedicated-profile launches. cache-pause-wait is one second; the full
 readahead horizon is not an initial startup delay. User-profile mode preserves
