@@ -49,7 +49,7 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Mixes in search", "Hide Mix/radio results in normal Search; Playlists still shows them."),
     ("Music search bias", "auto requests Videos and a metadata-based 3–20 minute range; M removes this for the query."),
     ("Network engine", "auto: finite-range transport for normal YouTube videos, direct MPV for live/local. mpv: direct only. proxy: force finite ranges."),
-    ("Sidebar at launch", "show always opens it; hide keeps it closed; remember restores the last explicit runtime state."),
+    ("Sidebar at startup", "show always opens it; hide keeps it closed; remember restores the last explicit runtime state."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
 const CACHE_SECONDS: &[u16] = &[10, 20, 30, 45, 60, 90, 120];
@@ -173,7 +173,7 @@ pub fn group(index: usize) -> usize {
 pub fn indices(app: &App) -> Vec<usize> {
     let g = group(app.settings_index);
     let q = app.settings_query.to_lowercase();
-    SETTINGS_ITEMS
+    let mut indices = SETTINGS_ITEMS
         .iter()
         .enumerate()
         .filter(|(i, (name, help))| {
@@ -184,7 +184,18 @@ pub fn indices(app: &App) -> Vec<usize> {
             }
         })
         .map(|(i, _)| i)
-        .collect()
+        .collect::<Vec<_>>();
+    if q.is_empty() && g == 2 {
+        // Put the settings people use to control layout together at the top.
+        const APPEARANCE_ORDER: &[usize] = &[14, 42, 15, 16, 1, 11, 12, 13, 17, 9, 10, 32, 38];
+        indices.sort_by_key(|i| {
+            APPEARANCE_ORDER
+                .iter()
+                .position(|candidate| candidate == i)
+                .unwrap_or(APPEARANCE_ORDER.len())
+        });
+    }
+    indices
 }
 pub fn move_selection(app: &mut App, down: bool) {
     if app.settings_group_focus {

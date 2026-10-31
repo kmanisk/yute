@@ -270,27 +270,46 @@ fn render_heading(f: &mut Frame, app: &mut App, area: Rect) {
             let like = watch.and_then(|w| w.is_liked) == Some(true);
             let dislike = watch.and_then(|w| w.is_disliked) == Some(true);
             let controls = [
-                format!(
-                    "{} {}",
-                    super::icons::Icon::Like.glyph(app.config.icons()),
-                    if like { "Unlike" } else { "Like" }
+                (
+                    format!(
+                        "{}{} {}",
+                        if like { "● " } else { "" },
+                        super::icons::Icon::Like.glyph(app.config.icons()),
+                        if like { "Unlike" } else { "Like" }
+                    ),
+                    like,
+                    "accent",
                 ),
-                format!(
-                    "{} {}",
-                    super::icons::Icon::Dislike.glyph(app.config.icons()),
-                    if dislike { "Remove dislike" } else { "Dislike" }
+                (
+                    format!(
+                        "{}{} {}",
+                        if dislike { "● " } else { "" },
+                        super::icons::Icon::Dislike.glyph(app.config.icons()),
+                        if dislike { "Remove dislike" } else { "Dislike" }
+                    ),
+                    dislike,
+                    "error",
                 ),
             ];
             let mut spans = vec![];
-            for (i, c) in controls.into_iter().enumerate() {
-                spans.push(Span::styled(
-                    format!(" {c} "),
-                    if app.watch_pane == WatchPane::Video && app.watch_control == i + 1 {
-                        app.theme.style("selection")
+            for (i, (control, active, role)) in controls.into_iter().enumerate() {
+                let focused = app.watch_pane == WatchPane::Video && app.watch_control == i + 1;
+                let style = if active {
+                    let style = app
+                        .theme
+                        .style(role)
+                        .add_modifier(Modifier::BOLD | Modifier::REVERSED);
+                    if focused {
+                        style.add_modifier(Modifier::UNDERLINED)
                     } else {
-                        app.theme.style("text")
-                    },
-                ));
+                        style
+                    }
+                } else if focused {
+                    app.theme.style("selection")
+                } else {
+                    app.theme.style("text")
+                };
+                spans.push(Span::styled(format!(" {control} "), style));
             }
             if let Some(v) = video.as_ref() {
                 spans.push(Span::styled(
@@ -533,6 +552,78 @@ fn render_comments(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
+    if inner.height < 4 {
+        let index = app.comments_cursor.min(comments.len().saturating_sub(1));
+        let comment = &comments[index];
+        let author = if comment.author.starts_with('@') {
+            comment.author.clone()
+        } else {
+            format!("@{}", comment.author)
+        };
+        let mut lines = vec![Line::from(vec![
+            Span::styled(author, app.theme.style("text").add_modifier(Modifier::BOLD)),
+            Span::styled(
+                comment
+                    .published
+                    .as_deref()
+                    .filter(|text| !text.is_empty())
+                    .map(|text| format!("  {text}"))
+                    .unwrap_or_default(),
+                app.theme.style("text_dim"),
+            ),
+        ])];
+        if inner.height >= 2 {
+            lines.push(Line::from(Span::styled(
+                super::text::truncate_str(&comment.text, inner.width as usize),
+                app.theme.style("text"),
+            )));
+        }
+        if inner.height >= 3 {
+            let like_style = if comment.is_liked {
+                app.theme
+                    .style("accent")
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+            } else {
+                app.theme.style("text_dim")
+            };
+            let dislike_style = if comment.is_disliked {
+                app.theme
+                    .style("error")
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+            } else {
+                app.theme.style("text_dim")
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!(
+                        "{}{}",
+                        if comment.is_liked { "● " } else { "" },
+                        super::icons::Icon::Like.label(
+                            app.config.icons(),
+                            comment
+                                .likes
+                                .as_deref()
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or("Like"),
+                        )
+                    ),
+                    like_style,
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!(
+                        "{}{}",
+                        if comment.is_disliked { "● " } else { "" },
+                        super::icons::Icon::Dislike.label(app.config.icons(), "Dislike")
+                    ),
+                    dislike_style,
+                ),
+            ]));
+        }
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
     let first = app.comments_cursor.saturating_sub(1);
     let mut y = inner.y;
     for (i, comment) in comments.iter().enumerate().skip(first) {
@@ -640,12 +731,16 @@ fn render_comments(f: &mut Frame, app: &mut App, area: Rect) {
 
         if next_y < inner.bottom() {
             let like_style = if comment.is_liked {
-                app.theme.style("accent").add_modifier(Modifier::BOLD)
+                app.theme
+                    .style("accent")
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
             } else {
                 app.theme.style("text_dim")
             };
             let dislike_style = if comment.is_disliked {
-                app.theme.style("accent").add_modifier(Modifier::BOLD)
+                app.theme
+                    .style("error")
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
             } else {
                 app.theme.style("text_dim")
             };
@@ -653,15 +748,23 @@ fn render_comments(f: &mut Frame, app: &mut App, area: Rect) {
             let replies = comment.reply_count.unwrap_or(0);
             let mut spans = vec![
                 Span::styled(
-                    super::icons::Icon::Like.label(
-                        app.config.icons(),
-                        if likes.is_empty() { "Like" } else { likes },
+                    format!(
+                        "{}{}",
+                        if comment.is_liked { "● " } else { "" },
+                        super::icons::Icon::Like.label(
+                            app.config.icons(),
+                            if likes.is_empty() { "Like" } else { likes },
+                        )
                     ),
                     like_style,
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    super::icons::Icon::Dislike.label(app.config.icons(), "Dislike"),
+                    format!(
+                        "{}{}",
+                        if comment.is_disliked { "● " } else { "" },
+                        super::icons::Icon::Dislike.label(app.config.icons(), "Dislike")
+                    ),
                     dislike_style,
                 ),
             ];

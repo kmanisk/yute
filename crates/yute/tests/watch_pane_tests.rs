@@ -102,3 +102,38 @@ fn pane_padding_and_border_geometry_are_shared() {
         assert!(!text.contains("0/0"));
     }
 }
+
+#[test]
+fn compact_watch_comments_render_in_shallow_dashboard_panel() {
+    let mut app = app();
+    app.watch_data.as_mut().unwrap().comments = vec![serde_json::from_value(serde_json::json!({
+        "id":"comment-fixture",
+        "author":"Fixture author",
+        "text":"Visible compact comment body",
+        "published":"1 hour ago",
+        "likes":"7",
+        "is_liked":true
+    }))
+    .unwrap()];
+    let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+    terminal.draw(|f| ui::draw(f, &mut app)).unwrap();
+    let text = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect::<String>();
+    assert!(text.contains("Fixture author"));
+    assert!(text.contains("Visible compact comment body"));
+}
+
+#[test]
+fn appearance_settings_put_sidebar_startup_next_to_sidebar_control() {
+    let mut app = app();
+    app.screen = Screen::Settings;
+    app.settings_index = 14;
+    let indices = yute::ui::settings::indices(&app);
+    assert!(indices.len() >= 2);
+    assert_eq!(&indices[..2], &[14, 42]);
+}

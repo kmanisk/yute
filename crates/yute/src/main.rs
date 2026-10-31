@@ -111,7 +111,7 @@ async fn run() -> anyhow::Result<()> {
                 cfg.playback.network_engine = e;
             }
             if let Some(c) = seek_cache {
-                cfg.playback.stream_cache_seconds = c.clamp(5, 60);
+                cfg.playback.stream_cache_seconds = c.clamp(5, 120);
             }
             if let Some(c) = seek_codec {
                 cfg.playback.preferred_codec = c;
@@ -1294,11 +1294,11 @@ async fn handle_key_event(
                         }
                     }
                 }
-                Action::Back | Action::Quit => {
+                Action::Back => {
                     app.nav_back();
                     ensure_screen_loaded(app, tx.clone());
                 }
-                Action::ForceQuit => request_quit(app),
+                Action::Quit | Action::ForceQuit => request_quit(app),
                 Action::FocusSearch => {
                     app.settings_filtering = true;
                     app.settings_query.clear();
@@ -1321,11 +1321,11 @@ async fn handle_key_event(
                 Action::PlayDefault | Action::Right => {
                     activate_account(app, app.accounts_cursor, tx.clone());
                 }
-                Action::Back | Action::Quit => {
+                Action::Back => {
                     app.nav_back();
                     ensure_screen_loaded(app, tx.clone());
                 }
-                Action::ForceQuit => request_quit(app),
+                Action::Quit | Action::ForceQuit => request_quit(app),
                 Action::FocusSearch => {
                     app.search_input.clear();
                     app.suggestion_index = None;
@@ -2428,6 +2428,12 @@ fn react_comment(app: &mut App, like: bool, tx: Sender<AppEvent>) {
     } else {
         comment.dislike_action.clone()
     };
+    let (next_liked, next_disliked) = if like {
+        (!comment.is_liked, false)
+    } else {
+        (false, !comment.is_disliked)
+    };
+    let comment_id = comment.id.clone();
     let detail_token = comment.detail_token.clone();
     app.status_text = if like {
         if comment.is_liked {
@@ -2453,7 +2459,14 @@ fn react_comment(app: &mut App, like: bool, tx: Sender<AppEvent>) {
             Err(anyhow::anyhow!("Comment reaction unavailable"))
         };
         let _ = tx
-            .send(AppEvent::CommentUpdated(generation, id, result))
+            .send(AppEvent::CommentUpdated(
+                generation,
+                id,
+                comment_id,
+                next_liked,
+                next_disliked,
+                result,
+            ))
             .await;
     });
 }
@@ -3515,7 +3528,7 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
                 Err(_) => app.status_text = "Replies could not load — press Enter to retry".into(),
             }
         }
-        AppEvent::CommentUpdated(generation, id, result) => {
+        AppEvent::CommentUpdated(generation, id, comment_id, liked, disliked, result) => {
             if generation != app.feed_generation
                 || app.player.current_video_id() != Some(id.as_str())
             {
@@ -3523,8 +3536,31 @@ fn handle_app_event(app: &mut App, event: AppEvent, tx: Sender<AppEvent>) {
             }
             match result {
                 Ok(()) => {
-                    app.status_text = "Comment reaction saved".into();
-                    trigger_watch_fetch(app, tx, id);
+                    let mut update = |comment: &mut yute::backend::models::CommentItem| {
+                        if comment.id == comment_id {
+                            comment.is_liked = liked;
+                            comment.is_disliked = disliked;
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    let mut changed = app
+                        .comment_thread
+                        .as_mut()
+                        .is_some_and(|thread| thread.comments.iter_mut().any(&mut update));
+                    if !changed {
+                        changed = app
+                            .watch_data
+                            .as_mut()
+                            .is_some_and(|watch| watch.comments.iter_mut().any(&mut update));
+                    }
+                    app.status_text = if changed {
+                        "Comment reaction saved"
+                    } else {
+                        "Comment reaction saved · refresh comments to verify"
+                    }
+                    .into();
                 }
                 Err(error) => app.status_text = mutation_error_message(&error),
             }
@@ -6341,6 +6377,24 @@ mod feed_ui_tests {
         .await;
         assert!(app.should_quit);
         assert!(!app.confirming_quit);
+
+        let (mut app, _) = app_and_cards();
+        app.config.keys.quit = "z".into();
+        app.screen = Screen::Settings;
+        let mut keys = KeymapState::new();
+        let (settings_tx, _) = channel(4);
+        handle_key_event(
+            &mut app,
+            &mut keys,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+            settings_tx,
+        )
+        .await;
+        assert!(
+            app.should_quit,
+            "configured Quit must remain Quit on Settings"
+        );
+        assert_eq!(app.screen, Screen::Settings, "Quit must not navigate back");
 
         let (mut app, _) = app_and_cards();
         app.download_active = true;
