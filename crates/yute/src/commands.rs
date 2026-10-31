@@ -164,8 +164,8 @@ fn set_command(args: &str) -> Result<Command, String> {
             _ => return Err("scrolloff must be 0..12".into()),
         },
         "cache-seconds" => match value {
-            "5" | "10" | "20" | "40" | "60" => {}
-            _ => return Err("cache-seconds must be 5|10|20|40|60".into()),
+            "5" | "10" | "20" | "30" | "40" | "45" | "60" | "90" | "120" => {}
+            _ => return Err("cache-seconds must be 5|10|20|30|40|45|60|90|120".into()),
         },
         "thumbnail-cache" => match value.parse::<u64>() {
             Ok(mb) if (32..=2048).contains(&mb) => {}
@@ -392,7 +392,10 @@ pub fn completions_with_accounts(input: &str, accounts: &[String]) -> Vec<String
             "set hwdec",
             &["auto-safe", "auto", "no", "nvdec", "vaapi", "vulkan"],
         ),
-        ("set cache-seconds", &["5", "10", "20", "40", "60"]),
+        (
+            "set cache-seconds",
+            &["5", "10", "20", "30", "40", "45", "60", "90", "120"],
+        ),
         ("set network-engine", &["auto", "mpv", "proxy"]),
         ("set emoji", &["auto", "keep", "strip"]),
         ("set sidebar-channels", &["on", "off"]),

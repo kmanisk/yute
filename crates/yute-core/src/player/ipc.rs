@@ -123,6 +123,7 @@ impl MpvIpc {
             running_flag,
             timeout,
             super::network::Engine::Auto,
+            false,
         )
     }
     pub fn start_with_engine(
@@ -130,6 +131,7 @@ impl MpvIpc {
         tx_status: Sender<PlaybackStatus>,
         running_flag: Arc<AtomicBool>,
         engine: super::network::Engine,
+        prefer_proxy_initial: bool,
     ) -> Result<Self> {
         Self::start_configured_timeout(
             sock_path,
@@ -137,6 +139,7 @@ impl MpvIpc {
             running_flag,
             Duration::from_secs(10),
             engine,
+            prefer_proxy_initial,
         )
     }
     fn start_configured_timeout(
@@ -145,6 +148,7 @@ impl MpvIpc {
         running_flag: Arc<AtomicBool>,
         timeout: Duration,
         engine: super::network::Engine,
+        prefer_proxy_initial: bool,
     ) -> Result<Self> {
         let (tx_cmd, mut rx_cmd) = channel::<IpcCommand>(64);
         let path_clone = sock_path.clone();
@@ -240,7 +244,11 @@ impl MpvIpc {
                                 requested_seek_target=None;
                             }
                         }
-                        if recovery.observe(recovery_clock.elapsed(),&status,network,if active_proxy.is_some(){super::network::Engine::Proxy}else{engine}) {
+                        let recovery_engine = engine.recovery_mode(
+                            prefer_proxy_initial,
+                            active_proxy.is_some(),
+                        );
+                        if recovery.observe(recovery_clock.elapsed(),&status,network,recovery_engine) {
                           if let Some((url,format))=&current_media {
                             if let Ok(id)=super::diagnostics::video_id(url) {
                               match super::proxy::Session::youtube(id,format.clone().unwrap_or_else(||selector.clone())) {
@@ -337,11 +345,18 @@ impl MpvIpc {
                         };
                         if is_load {
                           active_proxy=None;status.proxy_active=false;
-                          if engine==super::network::Engine::Proxy {
+                          if engine==super::network::Engine::Proxy
+                            || (engine==super::network::Engine::Auto && prefer_proxy_initial) {
                             if let Some((url,format))=&current_media {
                               if let Ok(id)=super::diagnostics::video_id(url) {
                                 match super::proxy::Session::youtube(id,format.clone().unwrap_or_else(||selector.clone())) {
-                                  Ok(session)=>{cmd_json=proxy_load(&session,status.time_pos,status.paused);active_proxy=Some(session);status.proxy_active=true;},
+                                  Ok(session)=>{
+                                    cmd_json=proxy_load(&session,status.time_pos,status.paused);
+                                    active_proxy=Some(session);
+                                    recovery.proxy_started();
+                                    status.proxy_active=true;
+                                    status.recovery=super::network::Phase::Proxy;
+                                  },
                                   Err(_)=>{status.playback_error=Some("Cannot start playback range transport".into());let _=tx_status.send(status.clone()).await;continue;}
                                 }
                               }

@@ -19,6 +19,18 @@ impl Engine {
             _ => anyhow::bail!("Network engine must be auto, mpv or proxy"),
         }
     }
+
+    pub(crate) fn recovery_mode(self, prefer_proxy_initial: bool, proxy_active: bool) -> Self {
+        if proxy_active {
+            Self::Proxy
+        } else if self == Self::Auto && !prefer_proxy_initial {
+            // Auto deliberately keeps live/upcoming streams direct because the
+            // finite-range transport requires a bounded byte-addressable VOD.
+            Self::Mpv
+        } else {
+            self
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Phase {
@@ -194,6 +206,13 @@ mod tests {
         r.proxy_started();
         assert_eq!(r.phase, Phase::Proxy);
     }
+    #[test]
+    fn auto_live_policy_never_escalates_direct_stream_to_proxy() {
+        assert_eq!(Engine::Auto.recovery_mode(false, false), Engine::Mpv);
+        assert_eq!(Engine::Auto.recovery_mode(true, false), Engine::Auto);
+        assert_eq!(Engine::Auto.recovery_mode(false, true), Engine::Proxy);
+    }
+
     #[test]
     fn local_and_forced_direct_do_not_reload() {
         for (network, engine) in [(false, Engine::Auto), (true, Engine::Mpv)] {

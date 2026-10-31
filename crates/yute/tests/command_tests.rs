@@ -64,6 +64,7 @@ fn set_command_exposes_validated_ui_and_playback_settings() {
         ":set columns auto",
         ":set columns 8",
         ":set cache-seconds 40",
+        ":set cache-seconds 120",
         ":set codec av1",
         ":set hwdec nvdec",
         ":set autoplay off",

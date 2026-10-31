@@ -48,11 +48,11 @@ pub const SETTINGS_ITEMS: &[(&str, &str)] = &[
     ("Scripts", "auto uses native text for passing probes; T toggles the selected title. Transliteration is approximate."),
     ("Mixes in search", "Hide Mix/radio results in normal Search; Playlists still shows them."),
     ("Music search bias", "auto requests Videos and a metadata-based 3–20 minute range; M removes this for the query."),
-    ("Network engine", "auto: direct, then one finite-range transport switch after a persistent stall. mpv: direct only. proxy: finite ranges for timed streams."),
+    ("Network engine", "auto: finite-range transport for normal YouTube videos, direct MPV for live/local. mpv: direct only. proxy: force finite ranges."),
     ("Sidebar at launch", "show always opens it; hide keeps it closed; remember restores the last explicit runtime state."),
 ];
 const RESOLUTIONS: &[&str] = &["480p", "720p", "1080p", "1440p", "2160p", "best"];
-const CACHE_SECONDS: &[u16] = &[5, 10, 20, 40, 60];
+const CACHE_SECONDS: &[u16] = &[10, 20, 30, 45, 60, 90, 120];
 
 fn slider(index: usize, max: usize) -> String {
     let filled = (index * 12 / max.max(1)).min(12);
@@ -75,8 +75,8 @@ fn value(app: &App, index: usize) -> String {
                 CACHE_SECONDS
                     .iter()
                     .position(|s| *s >= app.config.playback.stream_cache_seconds)
-                    .unwrap_or(4),
-                4
+                    .unwrap_or(CACHE_SECONDS.len() - 1),
+                CACHE_SECONDS.len() - 1
             ),
             app.config.playback.stream_cache_seconds,
             app.config.playback.stream_cache_mb()

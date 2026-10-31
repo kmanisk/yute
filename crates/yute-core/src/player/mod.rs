@@ -19,6 +19,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
+fn prefer_proxy_for_video(engine: network::Engine, video: &VideoCard, local: bool) -> bool {
+    engine == network::Engine::Auto
+        && !local
+        && video.live == crate::backend::models::LiveState::None
+}
+
 pub struct Player {
     pub profile: MpvProfile,
     pub queue: PlayQueue,
@@ -32,6 +38,7 @@ pub struct Player {
     rx_status: Receiver<PlaybackStatus>,
     diagnostic: bool,
     network_engine: network::Engine,
+    prefer_proxy_initial: bool,
 }
 
 impl Player {
@@ -52,6 +59,7 @@ impl Player {
             rx_status,
             diagnostic: false,
             network_engine: network::Engine::Auto,
+            prefer_proxy_initial: false,
         }
     }
 
@@ -77,12 +85,15 @@ impl Player {
 
     pub fn play_video(&mut self, video: VideoCard, cfg: &Config) -> Result<()> {
         let engine = network::Engine::parse(&cfg.playback.network_engine)?;
-        if self.network_engine != engine {
+        let local = video.id.starts_with('/') || video.id.starts_with('.');
+        let prefer_proxy_initial = prefer_proxy_for_video(engine, &video, local);
+        if self.network_engine != engine || self.prefer_proxy_initial != prefer_proxy_initial {
             self.stop();
             self.network_engine = engine;
+            self.prefer_proxy_initial = prefer_proxy_initial;
         }
         self.poll_updates();
-        let target_url = if video.id.starts_with('/') || video.id.starts_with('.') {
+        let target_url = if local {
             video.id.clone()
         } else {
             format!("https://www.youtube.com/watch?v={}", video.id)
@@ -182,11 +193,11 @@ impl Player {
                 .arg("--demuxer-max-back-bytes=96MiB")
                 .arg(format!(
                     "--cache-secs={}",
-                    cfg.playback.stream_cache_seconds.clamp(20, 60)
+                    cfg.playback.stream_cache_seconds.clamp(20, 120)
                 ))
                 .arg(format!(
                     "--demuxer-readahead-secs={}",
-                    cfg.playback.stream_cache_seconds.clamp(20, 60)
+                    cfg.playback.stream_cache_seconds.clamp(20, 120)
                 ))
                 .arg("--cache-pause=yes")
                 .arg("--cache-pause-wait=0.5")
@@ -266,6 +277,7 @@ impl Player {
             self.tx_status.clone(),
             Arc::clone(&self.is_playing),
             self.network_engine,
+            self.prefer_proxy_initial,
         )?;
         ipc.send(IpcCommand::SetProperty(
             "ytdl-format",

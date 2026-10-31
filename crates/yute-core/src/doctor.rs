@@ -145,7 +145,7 @@ pub async fn run(config: &Config) -> Vec<Check> {
             Status::Failure
         },
         format!(
-            "{}; auto starts direct MPV, re-resolves once after a stall, then can switch once to the loopback finite-range proxy",
+            "{}; auto starts finite YouTube VODs on the loopback range transport and keeps live/upcoming/local media on direct MPV",
             display_text(&config.playback.network_engine)
         ),
     ));

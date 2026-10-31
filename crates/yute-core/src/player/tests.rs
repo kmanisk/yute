@@ -213,6 +213,7 @@ impl NativePlayer {
             rx_status,
             diagnostic: true,
             network_engine: super::network::Engine::Auto,
+            prefer_proxy_initial: false,
         };
         // Use exactly the production child-to-IPC handoff, with null outputs
         // and a generated local WAV rather than user config or credentials.
@@ -529,4 +530,41 @@ async fn native_quality_reload_and_cache_properties() {
             }
         }
     }
+}
+
+#[test]
+fn auto_prefers_proxy_only_for_finite_youtube_vod() {
+    use crate::backend::models::LiveState;
+    let mut video: VideoCard = serde_json::from_value(json!({
+        "id":"abcdefghijk","title":"vod","channel":"test","verified":false,
+        "thumb_url":"","live":"None","badges":[]
+    }))
+    .unwrap();
+    assert!(super::prefer_proxy_for_video(
+        super::network::Engine::Auto,
+        &video,
+        false
+    ));
+    assert!(!super::prefer_proxy_for_video(
+        super::network::Engine::Mpv,
+        &video,
+        false
+    ));
+    assert!(!super::prefer_proxy_for_video(
+        super::network::Engine::Auto,
+        &video,
+        true
+    ));
+    video.live = LiveState::Live;
+    assert!(!super::prefer_proxy_for_video(
+        super::network::Engine::Auto,
+        &video,
+        false
+    ));
+    video.live = LiveState::Upcoming;
+    assert!(!super::prefer_proxy_for_video(
+        super::network::Engine::Auto,
+        &video,
+        false
+    ));
 }

@@ -245,7 +245,7 @@ pub struct PlaybackConfig {
 }
 
 fn default_stream_cache() -> u16 {
-    20
+    60
 }
 
 fn default_max_resolution() -> String {
@@ -285,11 +285,12 @@ impl PlaybackConfig {
     /// Bounded memory budget paired with the selected readahead horizon.
     pub fn stream_cache_mb(&self) -> u16 {
         match self.stream_cache_seconds {
-            0..=5 => 32,
-            6..=10 => 64,
+            0..=10 => 64,
             11..=20 => 128,
-            21..=40 => 192,
-            _ => 256,
+            21..=45 => 192,
+            46..=60 => 256,
+            61..=90 => 384,
+            _ => 512,
         }
     }
 

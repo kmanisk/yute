@@ -495,13 +495,14 @@ fn compact_grid_and_settings_remain_bounded_at_requested_sizes() {
         assert!(g.card_width <= 44);
     }
     app.settings_index = 3;
-    yute::ui::settings::cycle_setting(&mut app, true);
-    assert_eq!(app.config.playback.stream_cache_seconds, 40);
-    assert_eq!(app.config.playback.stream_cache_mb(), 192);
-    for _ in 0..20 {
-        yute::ui::settings::cycle_setting(&mut app, true);
-    }
     assert_eq!(app.config.playback.stream_cache_seconds, 60);
+    assert_eq!(app.config.playback.stream_cache_mb(), 256);
+    yute::ui::settings::cycle_setting(&mut app, true);
+    assert_eq!(app.config.playback.stream_cache_seconds, 90);
+    assert_eq!(app.config.playback.stream_cache_mb(), 384);
+    yute::ui::settings::cycle_setting(&mut app, true);
+    assert_eq!(app.config.playback.stream_cache_seconds, 120);
+    assert_eq!(app.config.playback.stream_cache_mb(), 512);
 }
 
 #[test]
